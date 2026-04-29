@@ -7,12 +7,10 @@ written by the Syngex orchestrator (`main.py`).
 Data file : data/gex_state.json  (written by orchestrator every ~1 s)
 Refresh   : every 2 s via Streamlit rerun
 
-Widgets
--------
-    st.empty() containers for smooth, flicker-free updates
-    st.metric   — Symbol price & Net Gamma (color-coded)
-    st.line_chart — Gamma Profile (Strike → Net Gamma)
-    st.dataframe — Top Strikes ranked by absolute Net Gamma
+Layout
+------
+    Single-page "Command Center" — no tabs, no st.empty() placeholders.
+    Header → Metrics → 3-col grid (Profile / Flip / Walls) → Bottom table → Footer
 """
 
 from __future__ import annotations
@@ -79,26 +77,16 @@ def is_data_stale(state: dict, max_age_seconds: int = 30) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# UI — all mutable sections live inside st.empty() containers
-# ---------------------------------------------------------------------------
-
-# Placeholder containers (created once, replaced on every rerun)
-header_container = st.empty()
-metric_container = st.empty()
-status_container = st.empty()
-
-
-# ---------------------------------------------------------------------------
 # Render functions
 # ---------------------------------------------------------------------------
+
 
 def render_header(state: dict) -> None:
     """Header row: symbol + underlying price."""
     symbol = state.get("symbol", "???")
     price = state.get("underlying_price", 0.0)
-    header_container.markdown(
-        f"### 🐙 **Syngex Gamma Dashboard**  —  **{symbol}**  "
-        f"  |  Price: ${price:,.2f}"
+    st.markdown(
+        f"### 🐙 **Syngex Gamma Dashboard** — **{symbol}**  |  Price: ${price:,.2f}"
     )
 
 
@@ -119,7 +107,7 @@ def render_metrics(state: dict) -> None:
         delta_color = None
         delta_prefix = ""
 
-    col1, col2, col3, col4 = metric_container.columns(4)
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
         st.metric(
@@ -142,16 +130,16 @@ def render_metrics(state: dict) -> None:
         st.metric(label="📨 Messages", value=f"{total_messages:,}")
 
 
-def render_tab_gamma_profile(state: dict) -> None:
-    """Tab for Gamma Profile — line chart of Strike vs. Net Gamma."""
+def render_gamma_profile(state: dict) -> None:
+    """Column 1 — Gamma Profile: line chart of Strike vs. Net Gamma."""
     strikes = state.get("strikes", {})
-    st.subheader("Gamma Profile")
+    st.subheader("📊 Gamma Profile")
 
     if not strikes:
         st.warning("No gamma data available yet.")
         return
 
-    # Build DataFrame: index = strike (float), column = net_gamma
+    # Build DataFrame: strike (float), net_gamma
     profile_df = pd.DataFrame(
         [
             {"strike": float(s), "net_gamma": b.get("net_gamma", 0.0)}
@@ -166,51 +154,17 @@ def render_tab_gamma_profile(state: dict) -> None:
     )
 
 
-def render_tab_top_strikes(state: dict) -> None:
-    """Table of the top strikes ranked by absolute Net Gamma."""
+def render_gamma_flip(state: dict) -> None:
+    """Column 2 — Gamma Flip: flip strike metric + compact cumulative scan."""
     strikes = state.get("strikes", {})
-    st.subheader("Top Strikes by Absolute Net Gamma")
-
-    if not strikes:
-        st.warning("No strike data available yet.")
-        return
-
-    sorted_strikes = sorted(
-        strikes.items(),
-        key=lambda x: float(x[0]),  # sort by strike price
-        reverse=True,                # descending (highest first)
-    )
-
-    top_df = pd.DataFrame(
-        [
-            {
-                "Strike": f"${float(s):.1f}",
-                "Net Gamma": f"{b.get('net_gamma', 0.0):,.2f}",
-                "Call GEX": f"{b.get('call_gamma_oi', 0.0):,.2f}",
-                "Put GEX": f"{b.get('put_gamma_oi', 0.0):,.2f}",
-                "Contracts": b.get("total_contracts", 0),
-            }
-            for s, b in sorted_strikes
-        ]
-    )
-
-    row_height = 36
-    height = min(len(top_df) * row_height, 1200)  # cap at 1200px
-    st.dataframe(top_df, width="stretch", height=height)
-
-
-def render_tab_gamma_flip(state: dict) -> None:
-    """Tab for Gamma Flip analysis."""
-    strikes = state.get("strikes", {})
-    symbol = state.get("symbol", "???")
     current_price = state.get("underlying_price", 0.0)
 
     if not strikes:
-        st.warning("No strike data available yet.")
+        st.warning("No gamma data available yet.")
         return
 
-    # Calculate cumulative gamma from high to low strikes
-    sorted_strikes = sorted(strikes.keys(), reverse=True)
+    # Calculate cumulative gamma from high → low strikes
+    sorted_strikes = sorted(strikes.keys(), key=lambda x: float(x), reverse=True)
     cumulative = 0.0
     flip_strike = None
     cumulative_rows = []
@@ -220,61 +174,51 @@ def render_tab_gamma_flip(state: dict) -> None:
         net_gamma = bucket.get("net_gamma", 0.0)
         cumulative += net_gamma
         cumulative_rows.append({
-            "Strike": strike,
+            "Strike": float(strike),
             "Net Gamma": net_gamma,
             "Cumulative": cumulative,
-            "Flip": False,
         })
         if flip_strike is None and cumulative < 0:
-            flip_strike = strike
-            cumulative_rows[-1]["Flip"] = True
+            flip_strike = float(strike)
 
     # Main flip metric
-    flip_col1, flip_col2, flip_col3 = st.columns([1, 2, 1])
-    with flip_col2:
-        if flip_strike is not None:
-            st.metric(
-                label="🔄 Gamma Flip Strike",
-                value=f"${float(flip_strike):.1f}",
-            )
-            # Show distance from current price
-            if current_price > 0:
-                dist = float(flip_strike) - current_price
-                pct = (dist / current_price * 100)
-                st.caption(f"Distance from ${current_price:.2f}: {dist:+.2f} ({pct:+.1f}%)")
-        else:
-            st.info("No gamma flip detected — cumulative gamma stays positive at all strikes.")
+    if flip_strike is not None:
+        st.metric(
+            label="🔄 Gamma Flip Strike",
+            value=f"${flip_strike:.1f}",
+        )
+        if current_price > 0:
+            dist = flip_strike - current_price
+            pct = (dist / current_price * 100)
+            st.caption(f"Distance from ${current_price:.2f}: {dist:+.2f} ({pct:+.1f}%)")
+    else:
+        st.info("No gamma flip detected — cumulative gamma stays positive at all strikes.")
 
-    # Explanation
     st.caption(
         "The Gamma Flip is the highest strike where cumulative net gamma turns negative. "
         "Below this level, the market tends to self-stabilize (negative gamma). "
         "Above it, the market tends to accelerate (positive gamma)."
     )
 
-    # Cumulative gamma table
-    st.subheader("Cumulative Gamma Scan (High → Low Strikes)")
+    # Compact cumulative gamma scan table (~8 rows max)
+    st.subheader("Cumulative Gamma Scan")
     cum_df = pd.DataFrame(cumulative_rows)
-    cum_df["Strike"] = cum_df["Strike"].astype(float).apply(lambda x: f"${x:.1f}")
-    cum_df["Net Gamma"] = cum_df["Net Gamma"].astype(float).apply(lambda x: f"{x:,.2f}")
-    cum_df["Cumulative"] = cum_df["Cumulative"].astype(float).apply(lambda x: f"{x:,.2f}")
+    cum_df["Strike"] = cum_df["Strike"].apply(lambda x: f"${x:.1f}")
+    cum_df["Net Gamma"] = cum_df["Net Gamma"].apply(lambda x: f"{x:,.2f}")
+    cum_df["Cumulative"] = cum_df["Cumulative"].apply(lambda x: f"{x:,.2f}")
 
-    # Highlight the flip row
-    styled = cum_df.style.highlight_max(
-        subset=["Cumulative"], color="lightgreen"
-    ).highlight_min(
-        subset=["Cumulative"], color="lightcoral"
-    )
-    st.dataframe(styled, width="stretch", use_container_width=True)
+    # Show up to 8 rows
+    display_df = cum_df.head(8)
+    st.dataframe(display_df, width="stretch", height=200)
 
 
-def render_tab_gamma_walls(state: dict) -> None:
-    """Tab for Gamma Walls analysis."""
+def render_gamma_walls(state: dict) -> None:
+    """Column 3 — Gamma Walls: dominant wall metric + compact walls table."""
     strikes = state.get("strikes", {})
     current_price = state.get("underlying_price", 0.0)
 
     if not strikes:
-        st.warning("No strike data available yet.")
+        st.warning("No gamma data available yet.")
         return
 
     # Calculate GEX per strike
@@ -290,7 +234,7 @@ def render_tab_gamma_walls(state: dict) -> None:
         color = "🟢" if net_gamma > 0 else "🔴"
 
         walls.append({
-            "Strike": strike,
+            "Strike": float(strike),
             "Side": side,
             "Color": color,
             "Net Gamma": net_gamma,
@@ -304,25 +248,22 @@ def render_tab_gamma_walls(state: dict) -> None:
     # Filter to significant walls
     significant_walls = [w for w in walls if abs(w["GEX"]) >= THRESHOLD]
 
-    # Main metric
+    # Main metric — dominant wall
     if significant_walls:
         top_wall = significant_walls[0]
-        wall_col1, wall_col2, wall_col3 = st.columns([1, 2, 1])
-        with wall_col2:
-            st.metric(
-                label="🧱 Dominant Gamma Wall",
-                value=f"{top_wall['Color']} Strike ${float(top_wall['Strike']):.1f} ({top_wall['Side']})",
-                delta=f"GEX: ${top_wall['GEX']:,.0f}",
-                delta_color="green" if top_wall["GEX"] > 0 else "red",
-            )
-            if current_price > 0:
-                dist = float(top_wall["Strike"]) - current_price
-                pct = (dist / current_price * 100)
-                st.caption(f"Distance from ${current_price:.2f}: {dist:+.2f} ({pct:+.1f}%)")
+        st.metric(
+            label="🧱 Dominant Gamma Wall",
+            value=f"{top_wall['Color']} Strike ${top_wall['Strike']:.1f} ({top_wall['Side']})",
+            delta=f"GEX: ${top_wall['GEX']:,.0f}",
+            delta_color="green" if top_wall["GEX"] > 0 else "red",
+        )
+        if current_price > 0:
+            dist = top_wall["Strike"] - current_price
+            pct = (dist / current_price * 100)
+            st.caption(f"Distance from ${current_price:.2f}: {dist:+.2f} ({pct:+.1f}%)")
     else:
         st.info("No significant gamma walls detected above $500K threshold.")
 
-    # Explanation
     st.caption(
         "Gamma Walls are strikes with massive GEX concentration. "
         "Call walls (green) act as magnetic attractors. "
@@ -330,26 +271,55 @@ def render_tab_gamma_walls(state: dict) -> None:
         "Threshold: $500K GEX."
     )
 
-    # Show ALL walls table (not just significant)
-    st.subheader("All Gamma Walls (Sorted by GEX Magnitude)")
+    # Compact walls table (~8 rows max)
+    st.subheader("Gamma Walls")
     wall_df = pd.DataFrame(walls)
-    wall_df["Strike"] = wall_df["Strike"].astype(float).apply(lambda x: f"${x:.1f}")
-    wall_df["Net Gamma"] = wall_df["Net Gamma"].astype(float).apply(lambda x: f"{x:,.2f}")
-    wall_df["GEX"] = wall_df["GEX"].astype(float).apply(lambda x: f"${x:,.0f}")
+    wall_df["Strike"] = wall_df["Strike"].apply(lambda x: f"${x:.1f}")
+    wall_df["Net Gamma"] = wall_df["Net Gamma"].apply(lambda x: f"{x:,.2f}")
+    wall_df["GEX"] = wall_df["GEX"].apply(lambda x: f"${x:,.0f}")
     wall_df = wall_df[["Color", "Strike", "Side", "Net Gamma", "GEX", "Contracts"]]
 
-    styled = wall_df.style.highlight_max(
-        subset=["GEX"], color="lightgreen"
-    ).highlight_min(
-        subset=["GEX"], color="lightcoral"
+    # Show up to 8 rows
+    display_df = wall_df.head(8)
+    st.dataframe(display_df, width="stretch", height=200)
+
+
+def render_top_strikes(state: dict) -> None:
+    """Bottom full-width table — Top Strikes by |Net Gamma|."""
+    strikes = state.get("strikes", {})
+    st.subheader("⚡ Top Strikes")
+
+    if not strikes:
+        st.warning("No strike data available yet.")
+        return
+
+    # Sort by absolute net gamma descending
+    sorted_strikes = sorted(
+        strikes.items(),
+        key=lambda x: abs(x[1].get("net_gamma", 0.0)),
+        reverse=True,
     )
-    st.dataframe(styled, width="stretch", use_container_width=True)
+
+    top_df = pd.DataFrame(
+        [
+            {
+                "Strike": f"${float(s):.1f}",
+                "Net Gamma": f"{b.get('net_gamma', 0.0):,.2f}",
+                "Call GEX": f"{b.get('call_gamma_oi', 0.0):,.2f}",
+                "Put GEX": f"{b.get('put_gamma_oi', 0.0):,.2f}",
+                "Contracts": b.get("total_contracts", 0),
+            }
+            for s, b in sorted_strikes
+        ]
+    )
+
+    st.dataframe(top_df, width="stretch", height=600)
 
 
 def render_status(state: dict | None) -> None:
     """Footer / status message."""
     if state is None:
-        status_container.info(
+        st.info(
             "⏳ **Waiting for data…**  "
             "Start the Syngex orchestrator (`python3 main.py TSLA`) and the "
             "dashboard will update automatically."
@@ -359,25 +329,22 @@ def render_status(state: dict | None) -> None:
         symbol = state.get("symbol", "???")
         stale = is_data_stale(state)
         if stale:
-            status_container.warning(
+            st.warning(
                 f"⚠️ Data may be stale (last update: {last_updated}). "
                 f"Check that the orchestrator is running for **{symbol}**."
             )
         else:
-            status_container.caption(
-                f"Last updated: {last_updated}  |  Symbol: {symbol}"
-            )
+            st.caption(f"Last updated: {last_updated}  |  Symbol: {symbol}")
 
 
 # ---------------------------------------------------------------------------
 # Main loop — auto-refresh
 # ---------------------------------------------------------------------------
 
-spinner = st.empty()
 state = load_gex_state()
 
 if state is None:
-    spinner.info(
+    st.info(
         "⏳ **Waiting for data…**  "
         "Start the Syngex orchestrator (`python3 main.py TSLA`) and the "
         "dashboard will update automatically."
@@ -386,24 +353,27 @@ if state is None:
     while state is None:
         time.sleep(1)
         state = load_gex_state()
-    spinner.empty()  # Remove spinner once data arrives
 
-# All data loaded — render into tabs
+# All data loaded — render single-page Command Center layout
 render_header(state)
 render_metrics(state)
 
-tab1, tab2, tab3 = st.tabs(["📊 Gamma Profile", "🔄 Gamma Flip", "🧱 Gamma Walls"])
+# 3-column grid
+col1, col2, col3 = st.columns(3)
 
-with tab1:
-    render_tab_gamma_profile(state)
-    render_tab_top_strikes(state)
+with col1:
+    render_gamma_profile(state)
 
-with tab2:
-    render_tab_gamma_flip(state)
+with col2:
+    render_gamma_flip(state)
 
-with tab3:
-    render_tab_gamma_walls(state)
+with col3:
+    render_gamma_walls(state)
 
+# Bottom full-width table
+render_top_strikes(state)
+
+# Status footer
 render_status(state)
 
 # Auto-refresh loop
