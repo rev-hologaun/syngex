@@ -1,223 +1,398 @@
 #!/usr/bin/env python3
 """
-SYNGEX - TradeStation Option Chain Streamer
-────────────────────────────────────────────
-Main application that subscribes ONLY to the option chain stream endpoint.
+main.py — Syngex Orchestrator
 
-NO REST quote lookups. NO backup polling. Just the SSE stream.
+Clean, robust entry point for Project Syngex.
+
+Structured lifecycle:
+    1. Initialize  → create components
+    2. Connect     → establish data streams
+    3. Run Loop    → process data, report Gamma Profile
+    4. Cleanup     → graceful shutdown
+
+Zero-noise logging: only high-level status and evolving Gamma Profile.
 
 Usage:
-    python3 main.py [SYMBOL]
+    python3 main.py TSLA              # stream mode (terminal logging)
+    python3 main.py TSLA dashboard    # dashboard mode (starts Streamlit)
 """
 
+from __future__ import annotations
+
+import argparse
 import asyncio
 import json
-import os
+import logging
+import signal
+import subprocess
 import sys
 import time
+from pathlib import Path
+from typing import Any, Dict
 
 # ---------------------------------------------------------------------------
-# Paths
+# Logging — strict, zero-noise
 # ---------------------------------------------------------------------------
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-TFRESH_DIR = os.path.expanduser("~/projects/tfresh2")
-TOKEN_PATH = os.path.join(TFRESH_DIR, "token.json")
+# Suppress all noisy loggers; only our orchestrator speaks
+_noisy_loggers = {
+    "ingestor.tradestation_client": logging.WARNING,
+    "GEXCalculator": logging.WARNING,
+    "aiohttp": logging.WARNING,
+    "httpx": logging.WARNING,
+    "asyncio": logging.WARNING,
+}
+for _name, _level in _noisy_loggers.items():
+    logging.getLogger(_name).setLevel(_level)
+    logging.getLogger(_name).handlers.clear()
+
+logger = logging.getLogger("Syngex")
+logger.setLevel(logging.INFO)
+
+_handler = logging.StreamHandler(sys.stdout)
+_handler.setFormatter(
+    logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
+)
+logger.addHandler(_handler)
 
 # ---------------------------------------------------------------------------
-# TokenManager — reads from tfresh2's token.json
+# Components
 # ---------------------------------------------------------------------------
 
-class TokenManager:
-    """Loads tokens from tfresh2's token.json and provides a valid access token."""
-
-    def __init__(self, token_path: str = TOKEN_PATH):
-        self.token_path = token_path
-        self._access_token: str | None = None
-        self._load()
-
-    def _load(self):
-        if not os.path.exists(self.token_path):
-            print(f"ERROR: Token file not found: {self.token_path}")
-            return
-        try:
-            with open(self.token_path, "r") as f:
-                data = json.load(f)
-            self._access_token = data.get("access_token")
-            self._scope = data.get("scope", "")
-            self._expires_at = data.get("expires_at", 0)
-            self._refresh_token = data.get("refresh_token")
-            print(f"[TokenManager] Loaded token from {self.token_path}")
-            print(f"[TokenManager] Expires at: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(self._expires_at))}")
-        except Exception as e:
-            print(f"ERROR: Failed to load token: {e}")
-
-    def is_valid(self) -> bool:
-        if not self._access_token:
-            return False
-        return time.time() < (self._expires_at - 120)
-
-    def get_access_token(self) -> str:
-        if not self.is_valid():
-            print("WARNING: Access token may be expired or invalid.")
-        if not self._access_token:
-            raise RuntimeError("No access token available.")
-        return self._access_token
+from ingestor.tradestation_client import TradeStationClient
+from engine.gex_calculator import GEXCalculator
+from engine.dashboard import SyngexDashboard
 
 
 # ---------------------------------------------------------------------------
-# TradeStationClient — minimal, stream-only
+# Orchestrator
 # ---------------------------------------------------------------------------
 
-import httpx
+class SyngexOrchestrator:
+    """
+    Manages the full lifecycle of the Syngex pipeline.
 
-BASE_URL = "https://sim-api.tradestation.com"
-
-
-class TradeStationClient:
-    """HTTP client for TradeStation API with streaming support.
-
-    NOTE: This client does NOT perform REST quote lookups.
-    It only supports streaming via SSE.
+    Lifecycle:
+        initialize() → connect() → run() → shutdown()
     """
 
-    def __init__(self, token_manager: TokenManager):
-        self._token_manager = token_manager
-        self._http: httpx.AsyncClient | None = None
+    # How often (seconds) to log the Gamma Profile
+    PROFILE_INTERVAL: float = 5.0
 
-    async def _ensure_client(self) -> httpx.AsyncClient:
-        if self._http is None or self._http.is_closed:
-            self._http = httpx.AsyncClient(
-                base_url=BASE_URL,
-                timeout=httpx.Timeout(30.0, connect=10.0),
-            )
-        return self._http
+    def __init__(
+        self, symbol: str, mode: str = "stream"
+    ) -> None:
+        self.symbol = symbol.upper()
+        self.mode = mode.lower()
+        self._client: TradeStationClient | None = None
+        self._calculator: GEXCalculator | None = None
+        self._dashboard: SyngexDashboard | None = None
+        self._running = False
+        self._profile_timer: float = 0.0
+        self._dashboard_process: subprocess.Popen | None = None
+        self._state_export_timer: float = 0.0
 
-    def _get_headers(self) -> dict:
-        token = self._token_manager.get_access_token()
-        return {
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json",
-        }
+        # Shared data file for Streamlit dashboard
+        self._data_dir = Path(__file__).parent / "data"
+        self._data_file = self._data_dir / "gex_state.json"
 
-    async def stream_option_chain(
-        self,
-        symbol: str,
-        duration_seconds: int = 30,
-        max_items: int = 100,
-    ) -> list[dict]:
-        """Stream real-time option chain updates for a symbol.
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
 
-        Connects to /v3/marketdata/stream/options/chains/{symbol} and
-        reads SSE events until duration expires or max_items reached.
+    async def initialize(self) -> None:
+        """Create and wire all components."""
+        logger.info("Initializing components…")
+
+        self._calculator = GEXCalculator(symbol=self.symbol)
+        self._dashboard = SyngexDashboard(orchestrator=self)
+        self._client = TradeStationClient()
+
+        # Wire callback: ingestor → calculator
+        self._client.set_on_message_callback(self._on_message)
+
+        # Register subscriptions — quotes feed underlying price, option chain feeds contracts
+        self._client.subscribe_to_quotes(self.symbol)
+        self._client.subscribe_to_option_chain(self.symbol)
+
+        logger.info("Components initialized. Symbol: %s", self.symbol)
+
+    async def connect(self) -> None:
+        """Establish streaming connections."""
+        assert self._client is not None
+        logger.info("Connecting to TradeStation streams…")
+        await self._client.connect()
+
+    async def run(self) -> None:
         """
-        results: list[dict] = []
-        client = await self._ensure_client()
-        headers = self._get_headers()
-        path = f"/v3/marketdata/stream/options/chains/{symbol}"
+        Main run loop.
+
+        Monitors the Gamma Profile and reports at regular intervals.
+        Also watches for fail-fast conditions.
+        Spawns the Streamlit dashboard as a background subprocess (dashboard mode only).
+        """
+        assert self._client is not None
+        assert self._calculator is not None
+
+        self._running = True
+        self._profile_timer = time.monotonic()
+        self._state_export_timer = time.monotonic()
+
+        logger.info("Pipeline running. Ctrl+C to stop.  Mode: %s", self.mode)
+
+        # Start the Streamlit dashboard as a background subprocess (dashboard mode only)
+        if self.mode == "dashboard":
+            self._start_dashboard()
 
         try:
-            async with client.stream(
-                "GET", path, headers=headers,
-                timeout=httpx.Timeout(duration_seconds + 10, connect=10.0),
-            ) as resp:
-                if resp.status_code != 200:
-                    body = b""
-                    async for chunk in resp.aiter_bytes():
-                        body += chunk
-                        if len(body) > 4096:
-                            break
-                    print(f"\n[STREAM] Non-200 status: {resp.status_code}")
-                    print(f"[STREAM] Body: {body.decode(errors='replace')[:500]}")
-                    return results
+            while self._running:
+                now = time.monotonic()
 
-                deadline = asyncio.get_event_loop().time() + duration_seconds
-                buffer = ""
+                # Report Gamma Profile at intervals
+                if now - self._profile_timer >= self.PROFILE_INTERVAL:
+                    self._report_profile()
+                    self._profile_timer = now
 
-                async for chunk in resp.aiter_text():
-                    buffer += chunk
-                    while "\n" in buffer:
-                        line, buffer = buffer.split("\n", 1)
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            obj = json.loads(line)
-                            results.append(obj)
-                            print(f"[CHAIN] {json.dumps(obj, default=str)[:400]}")
-                        except json.JSONDecodeError:
-                            pass
+                # Export GEX state to shared file for Streamlit dashboard
+                if now - self._state_export_timer >= 1.0:
+                    self._export_gex_state()
+                    self._state_export_timer = now
 
-                        if len(results) >= max_items:
-                            return results
+                # Fail-fast: option chain critical error
+                if self._client._option_chain_failed:
+                    logger.error("Option chain stream failed (critical error). Shutting down.")
+                    break
 
-                    if asyncio.get_event_loop().time() >= deadline:
-                        break
+                await asyncio.sleep(0.25)
+        finally:
+            self._stop_dashboard()
 
-        except httpx.ReadTimeout:
-            pass
-        except httpx.HTTPError as e:
-            print(f"[STREAM] Error: {e}")
+    async def shutdown(self) -> None:
+        """Graceful shutdown."""
+        logger.info("Shutting down…")
+        self._running = False
 
-        return results
+        # Stop dashboard subprocess
+        self._stop_dashboard()
+
+        if self._client:
+            await self._client.stop()
+
+        summary = self._calculator.get_summary() if self._calculator else {}
+        logger.info("Final state: %s", summary)
+        logger.info("System shutdown complete.")
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
+
+    def _on_message(self, data: Dict[str, Any]) -> None:
+        """Callback from TradeStationClient — feed to GEXCalculator."""
+        assert self._calculator is not None
+        try:
+            self._calculator.process_message(data)
+        except Exception as exc:
+            logger.error("Error processing message: %s", exc, exc_info=True)
+
+    def _report_profile(self) -> None:
+        """Log the current Gamma Profile — the evolving state."""
+        assert self._calculator is not None
+
+        summary = self._calculator.get_summary()
+        profile = self._calculator.get_gamma_profile()
+
+        net = summary["net_gamma"]
+        price = summary["underlying_price"]
+        strikes = summary["active_strikes"]
+
+        # Format: one line per top-level metric
+        logger.info(
+            "GAMMA_PROFILE  |  %s  |  Underlying: $%.2f  |  "
+            "Net Gamma: %+.2f  |  Strikes: %d  |  Msgs: %d",
+            self.symbol,
+            price,
+            net,
+            strikes,
+            summary["total_messages"],
+        )
+
+        # Gamma Flip point
+        flip = self._calculator.get_gamma_flip()
+        if flip is not None:
+            logger.info("  GAMMA_FLIP:  Strike $%.1f (cumulative gamma turns negative below this)", flip)
+
+        # Gamma Walls
+        walls = self._calculator.get_gamma_walls(threshold=500000)
+        if walls:
+            wall_parts = []
+            for w in walls[:3]:
+                sign = "+" if w["gex"] > 0 else "-"
+                wall_parts.append(f"${w['strike']:.0f} ({w['side']}) {sign}${abs(w['gex']):,.0f}")
+            logger.info("  GAMMA_WALLS:  %s", "  |  ".join(wall_parts))
+
+        # Top 5 strikes by absolute Net Gamma
+        top = sorted(
+            profile["strikes"].items(),
+            key=lambda x: abs(x[1]["net_gamma"]),
+            reverse=True,
+        )[:5]
+
+        if top:
+            parts = []
+            for strike, bucket in top:
+                ng = bucket["net_gamma"]
+                sign = "+" if ng >= 0 else "-"
+                parts.append(f"  K{strike:.1f}: {sign}{abs(ng):,.2f}")
+            logger.info("  TOP_STRIKES:  %s", "  |  ".join(parts))
+
+    # ------------------------------------------------------------------
+    # Dashboard (Streamlit)
+    # ------------------------------------------------------------------
+
+    def _start_dashboard(self) -> None:
+        """Spawn the Streamlit dashboard as a background subprocess."""
+        if self._dashboard_process is not None:
+            return  # already running
+
+        # Ensure data directory exists
+        self._data_dir.mkdir(parents=True, exist_ok=True)
+
+        script_path = Path(__file__).parent / "app_dashboard.py"
+        venv_streamlit = Path(__file__).parent / "venv" / "bin" / "streamlit"
+
+        logger.info("Starting Streamlit dashboard…")
+
+        try:
+            self._dashboard_process = subprocess.Popen(
+                [
+                    str(venv_streamlit),
+                    "run",
+                    str(script_path),
+                    "--server.headless",
+                    "true",
+                    "--browser.gatherUsageStats",
+                    "false",
+                ],
+                cwd=str(Path(__file__).parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            logger.info(
+                "Dashboard started (PID %d).  "
+                "Open http://localhost:8501 in a browser.",
+                self._dashboard_process.pid,
+            )
+        except FileNotFoundError:
+            logger.warning(
+                "Streamlit not found at %s — dashboard will not start.  "
+                "Install with: pip install streamlit",
+                venv_streamlit,
+            )
+        except Exception as exc:
+            logger.warning("Failed to start dashboard: %s", exc)
+
+    def _stop_dashboard(self) -> None:
+        """Terminate the Streamlit dashboard subprocess."""
+        if self._dashboard_process is None:
+            return
+
+        logger.info("Stopping dashboard (PID %d)…", self._dashboard_process.pid)
+        try:
+            self._dashboard_process.terminate()
+            self._dashboard_process.wait(timeout=5)
+        except Exception:
+            try:
+                self._dashboard_process.kill()
+            except Exception:
+                pass
+        finally:
+            self._dashboard_process = None
+
+    # ------------------------------------------------------------------
+    # GEX State Export (shared file for Streamlit)
+    # ------------------------------------------------------------------
+
+    def _export_gex_state(self) -> None:
+        """Write the current GEX state to a shared JSON file."""
+        assert self._calculator is not None
+
+        state = self._calculator.get_summary()
+        profile = self._calculator.get_gamma_profile()
+
+        export = {
+            "symbol": state["symbol"],
+            "underlying_price": state["underlying_price"],
+            "net_gamma": state["net_gamma"],
+            "active_strikes": state["active_strikes"],
+            "total_messages": state["total_messages"],
+            "strikes": profile["strikes"],
+            "last_updated": time.strftime("%Y-%m-%d %H:%M:%S %Z"),
+        }
+
+        try:
+            self._data_dir.mkdir(parents=True, exist_ok=True)
+            with open(self._data_file, "w") as f:
+                json.dump(export, f, indent=2)
+        except Exception as exc:
+            logger.warning("Failed to export GEX state: %s", exc)
 
 
 # ---------------------------------------------------------------------------
-# Main — subscribe to option chain stream ONLY
+# Entry point
 # ---------------------------------------------------------------------------
 
-async def main(symbol: str):
-    print("=" * 60)
-    print("  --- SYNGEX OPTION CHAIN STREAMER ---")
-    print(f"  Symbol: {symbol}")
-    print("=" * 60)
-    print()
+async def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Syngex Pipeline Orchestrator"
+    )
+    parser.add_argument("symbol", help="The ticker symbol to trade (e.g., TSLA)")
+    parser.add_argument(
+        "mode",
+        nargs="?",
+        default="stream",
+        choices=["stream", "dashboard"],
+        help="Run mode: 'stream' (terminal logging, default) or 'dashboard' (starts Streamlit)",
+    )
+    # --quotes kept as no-op for backwards compatibility
+    parser.add_argument(
+        "--quotes",
+        action="store_true",
+        help="(deprecated — quotes are always subscribed)",
+    )
+    args = parser.parse_args()
 
-    # 1. Initialize token manager
-    tm = TokenManager()
-    if not tm.is_valid():
-        print("\n⚠ WARNING: Token may be expired. Streaming may fail.")
-    print()
+    orchestrator = SyngexOrchestrator(
+        symbol=args.symbol, mode=args.mode
+    )
 
-    # 2. Initialize client
-    client = TradeStationClient(tm)
+    # Graceful shutdown on signals
+    loop = asyncio.get_running_loop()
 
-    # 3. Subscribe to option chain stream ONLY
-    #    NO REST quote lookups. NO backup polling.
-    print("-" * 60)
-    print("SUBSCRIBING TO OPTION CHAIN STREAM")
-    print("-" * 60)
-    print(f"  Endpoint: /v3/marketdata/stream/options/chains/{symbol}")
-    print(f"  Duration: 30 seconds")
-    print(f"  Max items: 100")
-    print()
+    def _signal_handler() -> None:
+        logger.info("Shutdown signal received.")
+        asyncio.ensure_future(orchestrator.shutdown())
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, _signal_handler)
 
     try:
-        results = await client.stream_option_chain(
-            symbol=symbol,
-            duration_seconds=30,
-            max_items=100,
-        )
-        print()
-        print(f"  Total option chain updates received: {len(results)}")
-        if results:
-            print(f"  Last update: {json.dumps(results[-1], default=str)[:400]}")
-        else:
-            print("  No option chain updates received in 30 seconds.")
-    except Exception as e:
-        print(f"  ✗ Exception during stream: {e}")
+        # 1. Initialize
+        await orchestrator.initialize()
 
-    print()
-    print("=" * 60)
-    print("  STREAM COMPLETE")
-    print("=" * 60)
+        # 2. Connect
+        await orchestrator.connect()
+
+        # 3. Run
+        await orchestrator.run()
+
+    except Exception as exc:
+        logger.critical("Pipeline failure: %s", exc, exc_info=True)
+    finally:
+        await orchestrator.shutdown()
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} [SYMBOL]")
-        print(f"Example: {sys.argv[0]} SYNX")
-        sys.exit(1)
-
-    symbol = sys.argv[1].upper()
-    asyncio.run(main(symbol))
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        sys.exit(0)

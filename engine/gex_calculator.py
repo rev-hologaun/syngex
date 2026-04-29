@@ -1,212 +1,358 @@
 """
-GEX (Gamma Exposure) Calculator
-─────────────────────────────────
-Calculates gamma exposure from TradeStation option chain data.
+engine/gex_calculator.py — The Brain
 
-GEX = Σ (Gamma × Open Interest × 100) per strike
-    = Σ Gamma × Open Interest × 100 for calls − Σ Gamma × Open Interest × 100 for puts
+Real-time Gamma Exposure (GEX) calculation engine.
 
-Positive GEX → market makers buy dips / sell rips (stabilizing)
-Negative GEX → market makers sell dips / buy rips (destabilizing)
+Maintains an in-memory "Gamma Ladder" mapping strikes to their aggregate
+Net Gamma. As JSON packets arrive from the stream, the engine instantly
+updates the specific strike in the ladder.
+
+Formula:
+    Net Gamma at Strike K = Σ (Gamma_i × OpenInterest_i × Side_i)
+
+Where Side_i is +1 for calls and -1 for puts.
 """
 
 from __future__ import annotations
 
-import re
-from collections import defaultdict
+import logging
+import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Dict, List, Optional
 
+logger = logging.getLogger("Syngex.Engine.GEXCalculator")
 
-# ---------------------------------------------------------------------------
-# Data classes
-# ---------------------------------------------------------------------------
 
 @dataclass
-class OptionExposure:
-    """Gamma exposure for a single option."""
-    symbol: str
+class _StrikeBucket:
+    """Aggregate state for a single strike price."""
+
     strike: float
-    option_type: str  # "Call" or "Put"
-    expiration: str
-    gamma: float
-    open_interest: int
-    gex: float  # Gamma × OI × 100
-    ask_size: int = 0
-    bid_size: int = 0
+    call_gamma_oi: float = 0.0        # Σ(gamma × OI) for calls
+    put_gamma_oi: float = 0.0          # Σ(gamma × OI) for puts
+    call_count: int = 0
+    put_count: int = 0
+    last_update: float = field(default_factory=time.perf_counter)
+
+    @property
+    def net_gamma(self) -> float:
+        """Net Gamma at this strike: calls positive, puts negative."""
+        return self.call_gamma_oi - self.put_gamma_oi
+
+    @property
+    def total_gamma_oi(self) -> float:
+        return self.call_gamma_oi + self.put_gamma_oi
 
 
-@dataclass
-class GEXResult:
-    """Aggregated GEX analysis."""
-    symbol: str
-    total_gex: float
-    call_gex: float
-    put_gex: float
-    net_gex: float  # call_gex + put_gex (put_gex is negative)
-    options: list[OptionExposure] = field(default_factory=list)
-    by_strike: dict[float, float] = field(default_factory=lambda: defaultdict(float))
-    by_expiration: dict[str, float] = field(default_factory=lambda: defaultdict(float))
-    top_strikes: list[tuple[float, float]] = field(default_factory=list)
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-CONTRACT_MULTIPLIER = 100
-
-
-def _parse_strike_from_symbol(symbol: str) -> float | None:
-    """Extract strike price from TradeStation option symbol.
-
-    Formats:
-        TSLA 260501C00360000  → 360.000
-        TSLA  260501C00360000 → 360.000
-        TSLA260501C00360000   → 360.000
+class GEXCalculator:
     """
-    # Strip the underlying ticker, then look for 7-digit strike at end
-    # Pattern: 6-digit date + C/P + 7-digit strike
-    m = re.search(r'[CP](\d{7})$', symbol)
-    if m:
-        return float(m.group(1)) / 1000.0
-    return None
+    High-performance GEX calculation engine.
 
+    State Management:
+        - Maintains an in-memory Gamma Ladder: Dict[float, _StrikeBucket]
+        - Each bucket aggregates all contracts at that strike
+        - Updates are O(1) per incoming message
 
-def _parse_type_from_symbol(symbol: str) -> str | None:
-    """Extract option type from TradeStation option symbol."""
-    if 'C' in symbol[-8:] and 'C' == symbol[-8]:
-        return "Call"
-    if 'P' in symbol[-8:] and 'P' == symbol[-8]:
-        return "Put"
-    # Fallback: check last char
-    last = symbol[-1]
-    if last == 'C':
-        return "Call"
-    if last == 'P':
-        return "Put"
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Core calculations
-# ---------------------------------------------------------------------------
-
-def calculate_option_gex(gamma: float, open_interest: int) -> float:
-    """Calculate gamma exposure for a single option."""
-    return gamma * open_interest * CONTRACT_MULTIPLIER
-
-
-def calculate_gex(options: list[dict[str, Any]]) -> GEXResult:
-    """Calculate GEX from a list of option chain events.
-
-    Each event is a dict with fields like:
-        Symbol, StrikePrice, OptionType, ExpirationDate,
-        Gamma, DailyOpenInterest, AskSize, BidSize
-
-    Returns a GEXResult with aggregated data.
+    The Math:
+        Net Gamma at Strike K = Σ (Gamma_i × OpenInterest_i × Side_i)
+        where Side_i = +1 for calls, -1 for puts
     """
-    exposures: list[OptionExposure] = []
-    by_strike: dict[float, float] = defaultdict(float)
-    by_expiration: dict[str, float] = defaultdict(float)
 
-    for event in options:
-        # Get fields — prefer explicit fields, fall back to symbol parsing
-        strike = event.get("StrikePrice")
-        option_type = event.get("OptionType")
-        expiration = event.get("ExpirationDate", "")
-        gamma = float(event.get("Gamma", 0))
-        open_interest = int(event.get("DailyOpenInterest", 0))
-        ask_size = int(event.get("AskSize", 0))
-        bid_size = int(event.get("BidSize", 0))
-        symbol = event.get("Symbol", "")
+    def __init__(self, symbol: str) -> None:
+        self.symbol: str = symbol.upper()
+        self.underlying_price: float = 0.0
+        self._ladder: Dict[float, _StrikeBucket] = {}
+        self._msg_count: int = 0
+        self._option_count: int = 0
+        self._quote_count: int = 0
+        self._net_gamma: float = 0.0
+        self._net_gamma_dirty: bool = True
 
-        # Fallback: parse from symbol if explicit fields missing
-        if strike is None:
-            strike = _parse_strike_from_symbol(symbol)
-        if option_type is None:
-            option_type = _parse_type_from_symbol(symbol)
+        logger.info("GEXCalculator initialized for %s", self.symbol)
 
-        if strike is None or option_type is None:
-            continue
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
-        # Skip zero-gamma options (no meaningful GEX)
-        if gamma == 0:
-            continue
+    def process_message(self, message: Dict[str, Any]) -> None:
+        """
+        Process an incoming JSON message from the TradeStation stream.
 
-        gex = calculate_option_gex(gamma, open_interest)
+        Handles:
+            - option_update  → updates a specific strike in the ladder
+            - underlying_update  → updates the underlying price
+            - raw TradeStation quotes  → extracts underlying price
+            - raw TradeStation option-chain  → extracts contracts
+        """
+        self._msg_count += 1
 
-        # Puts contribute negative GEX (market makers short puts = buy rips)
-        if option_type == "Put":
-            gex = -abs(gex)
+        try:
+            msg_type = message.get("type")
 
-        exposure = OptionExposure(
-            symbol=symbol,
-            strike=strike,
-            option_type=option_type,
-            expiration=expiration,
-            gamma=gamma,
-            open_interest=open_interest,
-            gex=gex,
-            ask_size=ask_size,
-            bid_size=bid_size,
-        )
-        exposures.append(exposure)
-        by_strike[strike] += gex
-        if expiration:
-            by_expiration[expiration] += gex
+            if msg_type == "underlying_update" and "price" in message:
+                self._quote_count += 1
+                self._update_underlying_price(message["price"])
+                return
 
-    # Sort strikes by absolute GEX (top movers first)
-    sorted_strikes = sorted(by_strike.items(), key=lambda x: abs(x[1]), reverse=True)
+            if msg_type == "option_update":
+                self._option_count += 1
+                self._update_strike(message)
+                return
 
-    total_gex = sum(e.gex for e in exposures)
-    call_gex = sum(e.gex for e in exposures if e.option_type == "Call")
-    put_gex = sum(e.gex for e in exposures if e.option_type == "Put")
+            # Raw TradeStation quote objects (no "type" field)
+            if "Last" in message and "Symbol" in message:
+                self._quote_count += 1
+                if message["Symbol"] == self.symbol:
+                    self._update_underlying_price(float(message["Last"]))
+                return
 
-    return GEXResult(
-        symbol="",  # Set by caller
-        total_gex=total_gex,
-        call_gex=call_gex,
-        put_gex=put_gex,
-        net_gex=total_gex,
-        options=exposures,
-        by_strike=by_strike,
-        by_expiration=by_expiration,
-        top_strikes=sorted_strikes,
-    )
+            # Raw TradeStation option-chain individual contract
+            # Structure: {"Gamma": "0.02", "DailyOpenInterest": 500,
+            #             "Side": "Call", "Strikes": ["400"],
+            #             "Legs": [{"StrikePrice": "400", "OptionType": "Call"}]}
+            if self._is_option_contract(message):
+                self._option_count += 1
+                self._update_strike_from_contract(message)
+                return
 
+            # Raw TradeStation option-chain response (fallback)
+            # Structure: {"optionChain": {"underlying": {...}, "calls": [...], "puts": [...]}}
+            chain = message.get("optionChain") or message.get("option_chain")
+            if chain and isinstance(chain, dict):
+                self._process_raw_option_chain(chain)
+                return
 
-# ---------------------------------------------------------------------------
-# Analysis helpers
-# ---------------------------------------------------------------------------
+        except Exception as exc:
+            logger.error("Error processing message: %s", exc, exc_info=True)
 
-def analyze_gex(result: GEXResult) -> dict[str, Any]:
-    """Produce a human-readable analysis of the GEX result."""
-    total = result.total_gex
-    call = result.call_gex
-    put = result.put_gex
+    def update_underlying_price(self, price: float) -> None:
+        """Direct setter for underlying price (used for initial setup)."""
+        self._update_underlying_price(price)
 
-    if total > 1e6:
-        regime = "POSITIVE GAMMA"
-        behavior = "Market makers buy dips, sell rips → stabilizing (range-bound)"
-    elif total < -1e6:
-        regime = "NEGATIVE GAMMA"
-        behavior = "Market makers sell dips, buy rips → destabilizing (trending/volatile)"
-    else:
-        regime = "NEUTRAL GAMMA"
-        behavior = "Balanced market maker positioning"
+    def get_net_gamma(self) -> float:
+        """Return the total Net Gamma across all strikes."""
+        if self._net_gamma_dirty:
+            self._net_gamma = sum(b.net_gamma for b in self._ladder.values())
+            self._net_gamma_dirty = False
+        return self._net_gamma
 
-    top_n = 5
-    top_strikes = result.top_strikes[:top_n]
+    def get_strike_net_gamma(self, strike: float) -> float:
+        """Return the Net Gamma for a specific strike."""
+        bucket = self._ladder.get(strike)
+        return bucket.net_gamma if bucket else 0.0
 
-    return {
-        "regime": regime,
-        "behavior": behavior,
-        "total_gex": total,
-        "call_gex": call,
-        "put_gex": put,
-        "top_strikes": top_strikes,
-        "num_options": len(result.options),
-        "num_strikes": len(result.by_strike),
-        "num_expirations": len(result.by_expiration),
-    }
+    def get_strike_gex(self, strike: float) -> float:
+        """
+        Return GEX for a specific strike.
+
+        GEX = Net Gamma × 100 × Underlying Price
+        """
+        if self.underlying_price <= 0:
+            return 0.0
+        return self.get_strike_net_gamma(strike) * 100 * self.underlying_price
+
+    def get_summary(self) -> Dict[str, Any]:
+        """Return a summary of the current state."""
+        return {
+            "symbol": self.symbol,
+            "underlying_price": self.underlying_price,
+            "net_gamma": self.get_net_gamma(),
+            "active_strikes": len(self._ladder),
+            "total_messages": self._msg_count,
+            "option_updates": self._option_count,
+            "quote_updates": self._quote_count,
+        }
+
+    def get_gamma_walls(self, threshold: float = 1e6) -> List[Dict[str, Any]]:
+        """
+        Identify Gamma Walls — strikes with massive GEX.
+
+        A Gamma Wall is a strike where the Net GEX (in dollar terms)
+        exceeds the given threshold.
+
+        Returns sorted list of wall dicts sorted by absolute GEX.
+        """
+        walls: List[Dict[str, Any]] = []
+        price = self.underlying_price
+        if price <= 0:
+            return walls
+
+        for strike, bucket in self._ladder.items():
+            gex = bucket.net_gamma * 100 * price
+            if abs(gex) >= threshold:
+                walls.append({
+                    "strike": strike,
+                    "net_gamma": bucket.net_gamma,
+                    "gex": gex,
+                    "side": "call" if bucket.net_gamma > 0 else "put",
+                    "total_contracts": bucket.call_count + bucket.put_count,
+                })
+
+        walls.sort(key=lambda w: abs(w["gex"]), reverse=True)
+        return walls
+
+    def get_gamma_flip(self) -> Optional[float]:
+        """
+        Identify the Gamma Flip point.
+
+        The Gamma Flip is the strike where net gamma shifts from
+        positive (above) to negative (below) — i.e. the highest
+        strike where cumulative net gamma goes negative when
+        scanning from high to low.
+
+        Returns the flip strike price, or None if no flip detected.
+        """
+        if not self._ladder:
+            return None
+
+        sorted_strikes = sorted(self._ladder.keys(), reverse=True)
+        cumulative = 0.0
+
+        for strike in sorted_strikes:
+            cumulative += self._ladder[strike].net_gamma
+            if cumulative < 0:
+                return strike
+
+        return None
+
+    def get_gamma_profile(self) -> Dict[str, Any]:
+        """
+        Return the full Gamma Ladder profile — the evolving state.
+
+        Used by the orchestrator for logging/reports.
+        """
+        profile: Dict[str, Any] = {
+            "symbol": self.symbol,
+            "underlying_price": self.underlying_price,
+            "net_gamma": self.get_net_gamma(),
+            "strikes": {},
+        }
+
+        for strike, bucket in sorted(self._ladder.items()):
+            profile["strikes"][strike] = {
+                "call_gamma_oi": bucket.call_gamma_oi,
+                "put_gamma_oi": bucket.put_gamma_oi,
+                "net_gamma": bucket.net_gamma,
+                "total_contracts": bucket.call_count + bucket.put_count,
+            }
+
+        return profile
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
+
+    def _update_underlying_price(self, price: float) -> None:
+        if price <= 0:
+            return
+        if price != self.underlying_price:
+            self.underlying_price = price
+            self._net_gamma_dirty = True
+            logger.debug("Underlying price updated: %.2f", price)
+
+    def _is_option_contract(self, msg: Dict[str, Any]) -> bool:
+        """Check if this message is a raw TradeStation option contract."""
+        return "Gamma" in msg and "DailyOpenInterest" in msg
+
+    def _update_strike_from_contract(self, msg: Dict[str, Any]) -> None:
+        """Extract strike, gamma, OI, and side from a raw option contract message."""
+        # Gamma can be string or float
+        gamma_raw = msg.get("Gamma", 0)
+        gamma = float(gamma_raw) if gamma_raw else 0.0
+
+        # DailyOpenInterest
+        oi_raw = msg.get("DailyOpenInterest", 0)
+        oi = float(oi_raw) if oi_raw else 0.0
+
+        # Side: "Call" or "Put"
+        side_raw = msg.get("Side", "")
+        side = "call" if side_raw.lower() == "call" else "put"
+
+        # Strike: try Strikes[] first, then Legs[].StrikePrice
+        strike = 0.0
+        strikes_arr = msg.get("Strikes", [])
+        if isinstance(strikes_arr, list) and strikes_arr:
+            try:
+                strike = float(strikes_arr[0])
+            except (ValueError, TypeError):
+                pass
+        if strike == 0:
+            legs = msg.get("Legs", [])
+            if isinstance(legs, list) and legs:
+                leg = legs[0]
+                if isinstance(leg, dict):
+                    try:
+                        strike = float(leg.get("StrikePrice", 0))
+                    except (ValueError, TypeError):
+                        pass
+
+        if strike <= 0:
+            return
+
+        self._update_strike({
+            "strike": strike,
+            "gamma": gamma,
+            "open_interest": oi,
+            "side": side,
+        })
+
+    def _process_raw_option_chain(self, chain: Dict[str, Any]) -> None:
+        """
+        Process a raw TradeStation option-chain response.
+
+        Extracts underlying price and all call/put contracts.
+        Dispatches each contract as an option_update internally.
+        """
+        # Extract underlying price
+        underlying = chain.get("underlying", {})
+        price = underlying.get("lastPrice") or underlying.get("last") or 0.0
+        if price and price > 0:
+            self._update_underlying_price(price)
+
+        for side_key in ("calls", "puts"):
+            leg_list = chain.get(side_key, [])
+            if not isinstance(leg_list, list):
+                continue
+            side_label = "call" if side_key == "calls" else "put"
+            for leg in leg_list:
+                if not isinstance(leg, dict):
+                    continue
+                strike = leg.get("strike", 0)
+                gamma = leg.get("gamma", 0)
+                oi = leg.get("openInterest", leg.get("open_interest", 0))
+                symbol = leg.get("symbol", "")
+                if not symbol:
+                    continue
+                self._option_count += 1
+                self._update_strike({
+                    "strike": strike,
+                    "gamma": gamma,
+                    "open_interest": oi,
+                    "side": side_label,
+                })
+
+    def _update_strike(self, data: Dict[str, Any]) -> None:
+        strike = data["strike"]
+        gamma = data["gamma"]
+        oi = data["open_interest"]
+        side = data.get("side", "")
+
+        # Determine sign: call = +1, put = -1
+        is_call = side == "call"
+        contribution = gamma * oi
+
+        # Get or create the strike bucket
+        if strike not in self._ladder:
+            self._ladder[strike] = _StrikeBucket(strike=strike)
+
+        bucket = self._ladder[strike]
+
+        if is_call:
+            bucket.call_gamma_oi += contribution
+            bucket.call_count += 1
+        else:
+            bucket.put_gamma_oi += contribution
+            bucket.put_count += 1
+
+        bucket.last_update = time.perf_counter()
+        self._net_gamma_dirty = True
