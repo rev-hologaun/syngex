@@ -179,8 +179,8 @@ def render_top_strikes(state: dict) -> None:
 
     sorted_strikes = sorted(
         strikes.items(),
-        key=lambda x: abs(x[1].get("net_gamma", 0.0)),
-        reverse=True,
+        key=lambda x: float(x[0]),  # sort by strike price
+        reverse=True,                # descending (highest first)
     )
 
     top_df = pd.DataFrame(
@@ -196,7 +196,9 @@ def render_top_strikes(state: dict) -> None:
         ]
     )
 
-    table_container.dataframe(top_df, width="stretch")
+    row_height = 36
+    height = min(len(top_df) * row_height, 1200)  # cap at 1200px
+    table_container.dataframe(top_df, width="stretch", height=height)
 
 
 def render_status(state: dict | None) -> None:
