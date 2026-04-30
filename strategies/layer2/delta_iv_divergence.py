@@ -87,7 +87,7 @@ class DeltaIVDivergence(BaseStrategy):
         regime = data.get("regime", "")
 
         # Scan all strikes for divergence
-        call_divergences, put_divergences = self._scan_divergence(gex_calc)
+        call_divergences, put_divergences = self._scan_divergence(gex_calc, rolling_data)
 
         if not call_divergences and not put_divergences:
             return []
@@ -117,12 +117,13 @@ class DeltaIVDivergence(BaseStrategy):
     def _scan_divergence(
         self,
         gex_calc: Any,
+        rolling_data: Dict[str, Any],
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
         Scan all strikes for delta-IV divergence pattern.
 
-        Uses greeks summary to detect delta shifts and IV changes
-        across strikes.
+        Compares current IV (from greeks_cache) against rolling average IV
+        (from rolling_data windows) to detect IV drops.
 
         Returns (call_divergences, put_divergences) — lists of strike
         dicts with delta_change, iv_change, and current values.
@@ -131,39 +132,65 @@ class DeltaIVDivergence(BaseStrategy):
         if not greeks_cache:
             return [], []
 
+        iv_by_strike = gex_calc.get_iv_by_strike_avg()
+
         call_divergences: List[Dict[str, Any]] = []
         put_divergences: List[Dict[str, Any]] = []
 
         for strike, data in greeks_cache.items():
-            # Check call-side divergence
             call_delta = data.get("call_delta", 0)
             call_oi = data.get("call_oi", 0)
             call_count = data.get("call_count", 0)
             if call_count >= MIN_STRIKE_POINTS and call_oi > 0:
+                # Get current IV for this strike
+                current_iv = iv_by_strike.get(strike, 0)
+                # Get rolling average IV from window
+                iv_window = rolling_data.get(f"iv_{strike}_5m")
+                rolling_avg_iv = iv_window.mean if iv_window else 0.0
+
+                # Calculate IV change: current vs rolling avg
+                if rolling_avg_iv > 0 and current_iv > 0:
+                    iv_change_pct = (current_iv - rolling_avg_iv) / rolling_avg_iv
+                else:
+                    iv_change_pct = 0.0
+
                 call_div = {
                     "strike": strike,
                     "side": "call",
                     "delta_change": call_delta,
                     "delta_change_pct": call_delta / abs(call_delta) if call_delta != 0 else 0,
                     "recent_delta": call_delta,
-                    "recent_iv": 0.0,  # IV not tracked per-bucket; strategies use fallback
-                    "iv_change_pct": 0.0,  # placeholder — real IV divergence needs historical IV tracking
+                    "recent_iv": current_iv,
+                    "rolling_avg_iv": rolling_avg_iv,
+                    "iv_change_pct": iv_change_pct,
                 }
                 call_divergences.append(call_div)
 
-            # Check put-side divergence
             put_delta = data.get("put_delta", 0)
             put_oi = data.get("put_oi", 0)
             put_count = data.get("put_count", 0)
             if put_count >= MIN_STRIKE_POINTS and put_oi > 0:
+                # Get current IV for this strike
+                current_iv = iv_by_strike.get(strike, 0)
+                # Get rolling average IV from window
+                iv_window = rolling_data.get(f"iv_{strike}_5m")
+                rolling_avg_iv = iv_window.mean if iv_window else 0.0
+
+                # Calculate IV change: current vs rolling avg
+                if rolling_avg_iv > 0 and current_iv > 0:
+                    iv_change_pct = (current_iv - rolling_avg_iv) / rolling_avg_iv
+                else:
+                    iv_change_pct = 0.0
+
                 put_div = {
                     "strike": strike,
                     "side": "put",
                     "delta_change": put_delta,
                     "delta_change_pct": put_delta / abs(put_delta) if put_delta != 0 else 0,
                     "recent_delta": put_delta,
-                    "recent_iv": 0.0,
-                    "iv_change_pct": 0.0,  # placeholder — real IV divergence needs historical IV tracking
+                    "recent_iv": current_iv,
+                    "rolling_avg_iv": rolling_avg_iv,
+                    "iv_change_pct": iv_change_pct,
                 }
                 put_divergences.append(put_div)
 

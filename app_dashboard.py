@@ -384,8 +384,8 @@ def render_status(state: dict | None, signals: list[dict]) -> None:
         # Show strategy engine status
         engine_status = state.get("strategy_engine", {})
         if engine_status:
-            signal_count = engine_status.get("signal_count", 0)
-            registered = engine_status.get("registered_strategies", 0)
+            signal_count = engine_status.get("total_signals", 0)
+            registered = engine_status.get("strategies", 0)
             st.caption(f"Strategy engine: {registered} strategies registered, {signal_count} signals produced")
 
 
