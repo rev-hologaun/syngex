@@ -82,6 +82,12 @@ from strategies.layer2 import (
     DeltaIVDivergence,
     IVGEXDivergence,
 )
+from strategies.layer3 import (
+    GammaVolumeConvergence,
+    IVBandBreakout,
+    StrikeConcentration,
+    ThetaBurn,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +176,19 @@ class SyngexOrchestrator:
             for strat_cls in layer2_strategies:
                 self._strategy_engine.register(strat_cls(self._calculator))
             logger.info("Registered %d layer2 strategies", len(layer2_strategies))
+
+        # Register Layer 3 strategies (Micro-Signal / 1Hz)
+        ENABLE_LAYER3 = True
+        if ENABLE_LAYER3:
+            layer3_strategies = (
+                GammaVolumeConvergence,
+                IVBandBreakout,
+                StrikeConcentration,
+                ThetaBurn,
+            )
+            for strat_cls in layer3_strategies:
+                self._strategy_engine.register(strat_cls(self._calculator))
+            logger.info("Registered %d layer3 strategies", len(layer3_strategies))
 
         # Rolling windows for key metrics
         self._rolling_data = {
