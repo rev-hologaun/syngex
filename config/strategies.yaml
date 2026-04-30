@@ -1,0 +1,223 @@
+# Syngex Strategy Configuration
+# Edit this file to enable/disable strategies or tune parameters.
+# Changes take effect on restart.
+
+# Global settings
+global:
+  min_confidence: 0.35
+  max_signals_per_tick: 10
+  dedup_window_seconds: 60
+  signal_log_path: "log/signals.jsonl"
+
+# Layer 1: Structural (GEX + OHLC) — 8 strategies
+layer1:
+  gamma_wall_bounce:
+    enabled: true
+    params:
+      wall_proximity_pct: 0.005
+      stop_past_wall_pct: 0.004
+      target_risk_mult: 1.5
+      min_wall_gex: 500000
+      min_confidence: 0.35
+      max_confidence: 0.85
+
+  magnet_accelerate:
+    enabled: true
+    params:
+      magnet_proximity_pct: 0.01
+      ema_fast: 9
+      ema_slow: 21
+      min_confidence: 0.35
+
+  gamma_flip_breakout:
+    enabled: true
+    params:
+      flip_buffer_pct: 0.5
+      atr_mult: 1.5
+      min_confidence: 0.35
+
+  gamma_squeeze:
+    enabled: true
+    params:
+      atr_threshold: 0.003
+      volume_spike_ratio: 1.5
+      min_confidence: 0.35
+
+  gex_imbalance:
+    enabled: true
+    params:
+      put_heavy_threshold: 0.4
+      call_heavy_threshold: 0.6
+      min_confidence: 0.35
+
+  confluence_reversal:
+    enabled: true
+    params:
+      min_confluence_score: 2
+      max_confidence: 0.80
+      min_confidence: 0.35
+
+  vol_compression_range:
+    enabled: true
+    params:
+      compression_threshold_pct: 0.5
+      wall_proximity_pct: 0.005
+      min_confidence: 0.35
+
+  gex_divergence:
+    enabled: true
+    params:
+      min_confidence: 0.35
+
+# Layer 2: Alpha Greeks — 5 strategies
+layer2:
+  delta_gamma_squeeze:
+    enabled: true
+    params:
+      call_wall_proximity_pct: 0.02
+      delta_accel_ratio: 1.15
+      volume_spike_ratio: 1.2
+      min_data_points: 3
+      min_confidence: 0.35
+
+  delta_volume_exhaustion:
+    enabled: true
+    params:
+      delta_decline_ratio: 0.90
+      volume_decline_ratio: 0.85
+      trend_duration: 3
+      min_confidence: 0.35
+
+  call_put_flow_asymmetry:
+    enabled: true
+    params:
+      flow_threshold: 1.5
+      iv_skew_threshold: 0.03
+      stop_pct: 0.006
+      target_risk_mult: 2.0
+      min_confidence: 0.35
+
+  delta_iv_divergence:
+    enabled: true
+    params:
+      delta_accel_ratio: 1.10
+      iv_decline_pct: 0.05
+      min_confidence: 0.35
+
+  iv_gex_divergence:
+    enabled: true
+    params:
+      iv_decline_pct: 0.05
+      min_confidence: 0.35
+
+# Layer 3: Micro-Signal (1Hz) — 4 strategies
+layer3:
+  gamma_volume_convergence:
+    enabled: true
+    params:
+      delta_accel_ratio: 1.15
+      gamma_spike_ratio: 1.20
+      volume_spike_ratio: 1.20
+      stop_pct: 0.005
+      target_pct: 0.010
+      min_confidence: 0.35
+      max_confidence: 0.90
+      min_data_points: 3
+
+  iv_band_breakout:
+    enabled: true
+    params:
+      price_compression_ratio: 0.30
+      volume_spike_ratio: 1.20
+      stop_pct: 0.005
+      target_pct: 0.010
+      min_confidence: 0.35
+      max_confidence: 0.85
+      min_data_points: 3
+
+  strike_concentration:
+    enabled: true
+    params:
+      top_oi_strikes_count: 3
+      bounce_proximity_pct: 0.003
+      slice_body_ratio: 0.5
+      slice_volume_ratio: 1.20
+      stop_pct: 0.003
+      min_confidence: 0.35
+      max_confidence: 0.85
+      min_data_points: 3
+
+  theta_burn:
+    enabled: true
+    params:
+      min_net_gamma: 10000.0
+      wall_proximity_pct: 0.005
+      stop_past_wall_pct: 0.003
+      min_target_pct: 0.002
+      max_target_pct: 0.004
+      range_narrowness_ratio: 0.30
+      min_confidence: 0.35
+      max_confidence: 0.80
+      min_data_points: 3
+
+# Layer 4: Full-Data (v2) — 4 strategies
+full_data:
+  iv_skew_squeeze:
+    enabled: true
+    params:
+      skew_extreme_positive: 0.30
+      skew_extreme_negative: -0.10
+      price_stable_threshold: 0.005
+      min_net_gamma: 5000.0
+      stop_pct: 0.005
+      target_pct: 0.008
+      min_confidence: 0.35
+      max_confidence: 0.80
+      min_data_points: 5
+      min_skew_data_points: 10
+
+  prob_weighted_magnet:
+    enabled: true
+    params:
+      min_oi_concentration: 5.0
+      consolidation_ratio: 0.40
+      delta_accel_ratio: 1.10
+      min_net_gamma: 5000.0
+      stop_pct: 0.005
+      target_risk_mult: 1.5
+      min_confidence: 0.35
+      max_confidence: 0.80
+      min_data_points: 3
+
+  prob_distribution_shift:
+    enabled: true
+    params:
+      z_score_threshold: 2.0
+      min_consecutive_signals: 3
+      min_net_gamma: 5000.0
+      stop_pct: 0.005
+      target_pct: 0.008
+      min_confidence: 0.35
+      max_confidence: 0.80
+      min_strikes_with_data: 5
+      min_data_points: 10
+
+  extrinsic_intrinsic_flow:
+    enabled: true
+    params:
+      extrinsic_expansion_threshold: 0.05
+      extrinsic_collapse_threshold: 0.10
+      volume_spike_ratio: 1.50
+      min_net_gamma: 5000.0
+      stop_pct: 0.005
+      target_pct: 0.008
+      min_confidence: 0.35
+      max_confidence: 0.80
+      min_data_points: 10
+
+# Layer 0: Master Filter
+filter:
+  net_gamma:
+    enabled: true
+    params:
+      flip_buffer: 0.5

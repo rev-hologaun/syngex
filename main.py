@@ -24,11 +24,12 @@ import asyncio
 import json
 import logging
 import signal
+import yaml
 import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Type
 
 # ---------------------------------------------------------------------------
 # Logging — strict, zero-noise
@@ -131,6 +132,9 @@ class SyngexOrchestrator:
         self._data_dir = Path(__file__).parent / "data"
         self._data_file = self._data_dir / "gex_state.json"
 
+        # Strategy configuration (loaded from YAML in initialize())
+        self._strategy_config: Dict[str, Any] = {}
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -145,69 +149,46 @@ class SyngexOrchestrator:
 
         # Phase 0: Strategy Engine + Filter
         self._gamma_filter = NetGammaFilter(flip_buffer=0.5)
+
+        # Load strategy configuration from YAML
+        config_path = Path(__file__).parent / "config" / "strategies.yaml"
+        self._strategy_config: Dict[str, Any] = {}
+        if config_path.exists():
+            try:
+                with open(config_path, "r") as f:
+                    self._strategy_config = yaml.safe_load(f) or {}
+                logger.info("Loaded strategy config from %s", config_path)
+            except Exception as exc:
+                logger.warning("Failed to load strategy config (%s), using defaults", exc)
+                self._strategy_config = {}
+        else:
+            logger.warning("Strategy config not found at %s, using defaults", config_path)
+
+        # Apply global config to EngineConfig
+        global_config = self._strategy_config.get("global", {})
         self._strategy_engine = StrategyEngine(
             config=EngineConfig(
-                min_confidence=0.35,
-                max_signals_per_tick=10,
-                signal_log_path=str(self._data_dir.parent / "log" / "signals.jsonl"),
-                dedup_window_seconds=30.0,
+                min_confidence=global_config.get("min_confidence", 0.35),
+                max_signals_per_tick=global_config.get("max_signals_per_tick", 10),
+                signal_log_path=global_config.get(
+                    "signal_log_path", str(self._data_dir.parent / "log" / "signals.jsonl")
+                ),
+                dedup_window_seconds=global_config.get("dedup_window_seconds", 60.0),
             )
         )
         self._strategy_engine.register_filter(self._gamma_filter.evaluate_signal)
 
-        # Register all layer1 strategies
-        for strat_cls in (
-            GammaWallBounce,
-            MagnetAccelerate,
-            GammaFlipBreakout,
-            GammaSqueeze,
-            GEXImbalance,
-            ConfluenceReversal,
-            VolCompressionRange,
-            GEXDivergence,
-        ):
-            self._strategy_engine.register(strat_cls(self._calculator))
-        logger.info("Registered %d layer1 strategies", self._strategy_engine.strategy_count)
+        # Register strategies from config (config-driven, not hardcoded)
+        self._register_strategies_from_config()
 
-        # Register Layer 2 strategies (Alpha Greeks)
-        ENABLE_LAYER2 = True
-        if ENABLE_LAYER2:
-            layer2_strategies = (
-                DeltaGammaSqueeze,
-                DeltaVolumeExhaustion,
-                CallPutFlowAsymmetry,
-                DeltaIVDivergence,
-                IVGEXDivergence,
-            )
-            for strat_cls in layer2_strategies:
-                self._strategy_engine.register(strat_cls(self._calculator))
-            logger.info("Registered %d layer2 strategies", len(layer2_strategies))
-
-        # Register Layer 3 strategies (Micro-Signal / 1Hz)
-        ENABLE_LAYER3 = True
-        if ENABLE_LAYER3:
-            layer3_strategies = (
-                GammaVolumeConvergence,
-                IVBandBreakout,
-                StrikeConcentration,
-                ThetaBurn,
-            )
-            for strat_cls in layer3_strategies:
-                self._strategy_engine.register(strat_cls(self._calculator))
-            logger.info("Registered %d layer3 strategies", len(layer3_strategies))
-
-        # Register Layer 4 strategies (Full-Data / v2)
-        ENABLE_FULL_DATA = True
-        if ENABLE_FULL_DATA:
-            full_data_strategies = (
-                IVSkewSqueeze,
-                ProbWeightedMagnet,
-                ProbDistributionShift,
-                ExtrinsicIntrinsicFlow,
-            )
-            for strat_cls in full_data_strategies:
-                self._strategy_engine.register(strat_cls(self._calculator))
-            logger.info("Registered %d full-data strategies", len(full_data_strategies))
+        # Register Layer 0 (master filter) — controlled by config
+        filter_config = self._strategy_config.get("filter", {})
+        net_gamma_cfg = filter_config.get("net_gamma", {})
+        if net_gamma_cfg.get("enabled", True):
+            flip_buffer = net_gamma_cfg.get("params", {}).get("flip_buffer", 0.5)
+            self._gamma_filter = NetGammaFilter(flip_buffer=flip_buffer)
+            self._strategy_engine.register_filter(self._gamma_filter.evaluate_signal)
+            logger.info("Registered net_gamma filter (flip_buffer=%.2f)", flip_buffer)
 
         # Rolling windows for key metrics
         self._rolling_data = {
@@ -314,6 +295,98 @@ class SyngexOrchestrator:
         logger.info("System shutdown complete.")
 
     # ------------------------------------------------------------------
+    # Config-driven strategy registration
+    # ------------------------------------------------------------------
+
+    def _register_strategies_from_config(self) -> None:
+        """Register strategies from config file instead of hardcoded lists."""
+        layers = ["layer1", "layer2", "layer3", "full_data"]
+        total_registered = 0
+        total_enabled = 0
+        total_disabled = 0
+
+        for layer in layers:
+            layer_config = self._strategy_config.get(layer, {})
+            if not layer_config:
+                logger.info("No config for layer %s, skipping", layer)
+                continue
+
+            layer_enabled = 0
+            layer_disabled = 0
+
+            for strat_name, strat_cfg in layer_config.items():
+                strat_cls = self._get_strategy_class(layer, strat_name)
+                if strat_cls is None:
+                    logger.warning(
+                        "Unknown strategy '%s' in layer '%s' — skipping",
+                        strat_name, layer,
+                    )
+                    continue
+
+                enabled = strat_cfg.get("enabled", True)
+                if enabled:
+                    strat = strat_cls(self._calculator)
+                    self._strategy_engine.register(strat)
+                    layer_enabled += 1
+                    total_enabled += 1
+                else:
+                    layer_disabled += 1
+                    total_disabled += 1
+                    logger.info(
+                        "Strategy '%s' (%s) disabled via config",
+                        strat_name, layer,
+                    )
+
+            total_registered += layer_enabled
+            logger.info(
+                "Layer %s: %d enabled, %d disabled",
+                layer, layer_enabled, layer_disabled,
+            )
+
+        logger.info(
+            "Strategy registration complete: %d registered, %d disabled out of %d configured",
+            total_enabled, total_disabled, total_enabled + total_disabled,
+        )
+
+    def _get_strategy_class(
+        self, layer: str, name: str
+    ) -> Optional[Type]:
+        """Map a strategy name string (from YAML) to its class."""
+        strategy_map = {
+            "layer1": {
+                "gamma_wall_bounce": GammaWallBounce,
+                "magnet_accelerate": MagnetAccelerate,
+                "gamma_flip_breakout": GammaFlipBreakout,
+                "gamma_squeeze": GammaSqueeze,
+                "gex_imbalance": GEXImbalance,
+                "confluence_reversal": ConfluenceReversal,
+                "vol_compression_range": VolCompressionRange,
+                "gex_divergence": GEXDivergence,
+            },
+            "layer2": {
+                "delta_gamma_squeeze": DeltaGammaSqueeze,
+                "delta_volume_exhaustion": DeltaVolumeExhaustion,
+                "call_put_flow_asymmetry": CallPutFlowAsymmetry,
+                "delta_iv_divergence": DeltaIVDivergence,
+                "iv_gex_divergence": IVGEXDivergence,
+            },
+            "layer3": {
+                "gamma_volume_convergence": GammaVolumeConvergence,
+                "iv_band_breakout": IVBandBreakout,
+                "strike_concentration": StrikeConcentration,
+                "theta_burn": ThetaBurn,
+            },
+            "full_data": {
+                "iv_skew_squeeze": IVSkewSqueeze,
+                "prob_weighted_magnet": ProbWeightedMagnet,
+                "prob_distribution_shift": ProbDistributionShift,
+                "extrinsic_intrinsic_flow": ExtrinsicIntrinsicFlow,
+            },
+        }
+        layer_map = strategy_map.get(layer, {})
+        return layer_map.get(name)
+
+    # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
 
@@ -390,6 +463,17 @@ class SyngexOrchestrator:
             "gamma_flip": flip,
             "greeks_summary": self._calculator.get_greeks_summary(),
         }
+
+        # Inject per-strategy config params into data dict
+        # Strategies can read params from data["params"][strategy_id] in evaluate()
+        strategy_params: Dict[str, Dict[str, Any]] = {}
+        for layer in ["layer1", "layer2", "layer3", "full_data"]:
+            layer_config = self._strategy_config.get(layer, {})
+            for strat_name, strat_cfg in layer_config.items():
+                if strat_cfg.get("enabled", True):
+                    params = strat_cfg.get("params", {})
+                    strategy_params[strat_name] = params
+        data["params"] = strategy_params
 
         # Run evaluation
         signals = self._strategy_engine.process(data)
