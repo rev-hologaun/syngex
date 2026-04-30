@@ -17,6 +17,7 @@ Layout
 from __future__ import annotations
 
 import json
+import os
 import time
 from datetime import datetime
 from pathlib import Path
@@ -32,12 +33,8 @@ import streamlit as st
 DATA_DIR = Path(__file__).parent / "data"
 LOG_DIR = Path(__file__).parent / "log"
 
-# Read the current symbol from the orchestrator's sidecar file
-_symbol_file = DATA_DIR / "current_symbol.txt"
-if _symbol_file.exists():
-    _current_symbol = _symbol_file.read_text().strip()
-else:
-    _current_symbol = "UNKNOWN"
+# Read symbol from orchestrator environment variable (not shared sidecar file)
+_current_symbol = os.environ.get("SYNGEX_SYMBOL", "UNKNOWN")
 
 DATA_FILE = DATA_DIR / f"gex_state_{_current_symbol}.json"
 POLL_INTERVAL = 2  # seconds between polls
@@ -80,8 +77,8 @@ def load_gex_state() -> dict | None:
 
 @st.cache_data(ttl=2)
 def load_signals(n: int = 20) -> list[dict]:
-    """Load the N most recent signals from the signals log."""
-    signals_file = LOG_DIR / f"signals.jsonl"
+    """Load the N most recent signals from the symbol-specific signals log."""
+    signals_file = LOG_DIR / f"signals_{_current_symbol}.jsonl"
     if not signals_file.exists():
         return []
     try:

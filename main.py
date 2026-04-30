@@ -23,8 +23,8 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import signal
-import yaml
 import subprocess
 import sys
 import time
@@ -653,13 +653,9 @@ class SyngexOrchestrator:
         if self._dashboard_process is not None:
             return  # already running
 
-        # Ensure data directory exists
-        self._data_dir.mkdir(parents=True, exist_ok=True)
-
-        # Write sidecar file so the dashboard knows which symbol to read
-        symbol_file = self._data_dir / "current_symbol.txt"
-        with open(symbol_file, "w") as f:
-            f.write(self.symbol)
+        # Pass symbol via environment variable so multi-instance works
+        env = os.environ.copy()
+        env["SYNGEX_SYMBOL"] = self.symbol
 
         script_path = Path(__file__).parent / "app_dashboard.py"
         venv_streamlit = Path(__file__).parent / "venv" / "bin" / "streamlit"
@@ -682,6 +678,7 @@ class SyngexOrchestrator:
                 cwd=str(Path(__file__).parent),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                env=env,
             )
             logger.info(
                 "Command Center started (PID %d, port %d).  "
