@@ -134,7 +134,8 @@ class CallPutFlowAsymmetry(BaseStrategy):
             # Calls: use call_gamma_oi as proxy for volume
             call_oi = strike_data.get("call_oi", 0)
             call_gamma = strike_data.get("call_gamma", 0)
-            call_delta = abs(strike_data.get("call_delta_sum", 0))
+            # get_greeks_summary() returns "call_delta" (not "call_delta_sum")
+            call_delta = abs(strike_data.get("call_delta", 0))
             if call_oi > 0 and call_gamma > 0 and call_delta > 0.01:
                 total_call_score += call_oi * call_gamma * call_delta
                 call_points += 1
@@ -142,7 +143,8 @@ class CallPutFlowAsymmetry(BaseStrategy):
             # Puts
             put_oi = strike_data.get("put_oi", 0)
             put_gamma = strike_data.get("put_gamma", 0)
-            put_delta = abs(strike_data.get("put_delta_sum", 0))
+            # get_greeks_summary() returns "put_delta" (not "put_delta_sum")
+            put_delta = abs(strike_data.get("put_delta", 0))
             if put_oi > 0 and put_gamma > 0 and put_delta > 0.01:
                 total_put_score += put_oi * put_gamma * put_delta
                 put_points += 1

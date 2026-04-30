@@ -84,7 +84,7 @@ class EngineConfig:
     min_confidence: float = 0.40       # Minimum confidence to pass the filter
     max_signals_per_tick: int = 10     # Prevent signal spam
     signal_log_path: str = "log/signals.jsonl"
-    dedup_window_seconds: float = 30.0  # Don't repeat same strategy signal within this window
+    dedup_window_seconds: float = 60.0  # Don't repeat same strategy signal within this window
 
 
 class StrategyEngine:

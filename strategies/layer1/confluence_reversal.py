@@ -49,11 +49,14 @@ logger = logging.getLogger("Syngex.Strategies.ConfluenceReversal")
 # ---------------------------------------------------------------------------
 
 CONFLUENCE_DISTANCE_PCT = 0.003  # 0.3% — max distance for confluence
-MIN_SCORE = 2                     # Minimum confluence score to trade
+MIN_STRUCTURAL_SIGNALS = 2        # Must have 2+ independent structural signals
 MAX_CONFIDENCE_BASE = 0.7         # Base confidence for score 3
 MIN_CONFIDENCE = 0.40             # Minimum confidence to emit signal
 STOP_PCT = 0.004                  # 0.4% stop
 TARGET_RISK_MULT = 2.0            # 2× risk for target
+
+# Structural signals (independent sources of truth)
+# Only wall, flip, and VWAP count as structural — rolling extremes are technical, not structural
 
 
 class ConfluenceReversal(BaseStrategy):
@@ -101,8 +104,8 @@ class ConfluenceReversal(BaseStrategy):
 
         # Best resistance level → SHORT signal
         if resistance_levels:
-            best_resist = max(resistance_levels, key=lambda x: x["score"])
-            if best_resist["score"] >= MIN_SCORE:
+            best_resist = max(resistance_levels, key=lambda x: x.get("structural_count", x.get("score", 0)))
+            if best_resist.get("structural_count", best_resist.get("score", 0)) >= MIN_STRUCTURAL_SIGNALS:
                 sig = self._build_short_signal(
                     best_resist, underlying_price, regime
                 )
@@ -111,8 +114,8 @@ class ConfluenceReversal(BaseStrategy):
 
         # Best support level → LONG signal
         if support_levels:
-            best_support = max(support_levels, key=lambda x: x["score"])
-            if best_support["score"] >= MIN_SCORE:
+            best_support = max(support_levels, key=lambda x: x.get("structural_count", x.get("score", 0)))
+            if best_support.get("structural_count", best_support.get("score", 0)) >= MIN_STRUCTURAL_SIGNALS:
                 sig = self._build_long_signal(
                     best_support, underlying_price, regime
                 )
@@ -136,8 +139,10 @@ class ConfluenceReversal(BaseStrategy):
         """
         Find confluence levels on a given side (resistance or support).
 
-        For resistance: look at walls ABOVE price and rolling max.
-        For support: look at walls BELOW price and rolling min.
+        Confluence requires at least MIN_STRUCTURAL_SIGNALS independent
+        structural signals: gamma wall, gamma flip, and/or VWAP.
+        Rolling extremes (max/min) are technical — they can boost
+        confidence but don't count as structural signals.
 
         Returns list of level dicts with score and details.
         """
@@ -149,90 +154,110 @@ class ConfluenceReversal(BaseStrategy):
         else:
             candidate_walls = [w for w in walls if w["strike"] < price]
 
+        # Get rolling window for technical signal check
+        rw = self._get_price_window(rolling_data)
+        has_technical = False
+        technical_type = None
+        if rw is not None and rw.count >= 3:
+            if side == "resistance" and rw.max is not None:
+                if abs(rw.max - price) / price <= CONFLUENCE_DISTANCE_PCT * 2:
+                    has_technical = True
+                    technical_type = "rolling_max"
+            elif side == "support" and rw.min is not None:
+                if abs(rw.min - price) / price <= CONFLUENCE_DISTANCE_PCT * 2:
+                    has_technical = True
+                    technical_type = "rolling_min"
+
+        # Check each wall for confluence with independent structural signals
         for wall in candidate_walls:
             distance_pct = abs(wall["strike"] - price) / price
             if distance_pct > CONFLUENCE_DISTANCE_PCT:
                 continue  # Too far from price
 
-            score = 1  # Wall proximity
+            # Count independent structural signals
+            structural_count = 1  # Wall itself
             level_info = {
                 "type": "wall",
                 "strike": wall["strike"],
-                "score": score,
+                "structural_count": structural_count,
                 "gex": wall["gex"],
                 "side": wall["side"],
                 "distance_pct": distance_pct,
+                "has_flip": False,
+                "has_vwap": False,
+                "has_technical": has_technical,
+                "technical_type": technical_type,
             }
 
-            # Check if flip is also near this wall
+            # Check if flip is also near (independent structural signal)
             if flip is not None:
                 flip_strike = flip.get("flip_strike")
                 if flip_strike is not None:
                     flip_distance = abs(flip_strike - price) / price
                     if flip_distance <= CONFLUENCE_DISTANCE_PCT:
-                        score += 1
+                        structural_count += 1
                         level_info["has_flip"] = True
                         level_info["flip_strike"] = flip_strike
                     elif abs(flip_strike - wall["strike"]) <= CONFLUENCE_DISTANCE_PCT:
-                        # Flip is near the wall itself
-                        score += 1
+                        # Flip is near the wall itself — still independent
+                        structural_count += 1
                         level_info["has_flip"] = True
                         level_info["flip_strike"] = flip_strike
 
-            # Check if price is near rolling max/min
-            rw = self._get_price_window(rolling_data)
-            if rw is not None and rw.count >= 3:
-                if side == "resistance" and rw.max is not None:
-                    max_distance = abs(rw.max - price) / price
-                    if max_distance <= CONFLUENCE_DISTANCE_PCT * 2:
-                        score += 1
-                        level_info["has_technical"] = True
-                        level_info["technical_type"] = "rolling_max"
-                elif side == "support" and rw.min is not None:
-                    min_distance = abs(rw.min - price) / price
-                    if min_distance <= CONFLUENCE_DISTANCE_PCT * 2:
-                        score += 1
-                        level_info["has_technical"] = True
-                        level_info["technical_type"] = "rolling_min"
+            # Check if VWAP is near (independent structural signal)
+            vw = self._get_price_window(rolling_data)
+            if vw is not None and vw.count >= 10 and vw.mean is not None:
+                vw_distance = abs(vw.mean - wall["strike"]) / vw.mean
+                if vw_distance <= CONFLUENCE_DISTANCE_PCT:
+                    structural_count += 1
+                    level_info["has_vwap"] = True
 
-            if score >= MIN_SCORE:
-                level_info["score"] = score
+            # Only emit if we have enough independent structural signals
+            if structural_count >= MIN_STRUCTURAL_SIGNALS:
+                level_info["structural_count"] = structural_count
+                level_info["score"] = structural_count
                 levels.append(level_info)
 
-        # Also check VWAP (rolling mean) as a standalone confluence
+        # Also check VWAP as standalone confluence level
         vw = self._get_price_window(rolling_data)
         if vw is not None and vw.count >= 10:
             mean = vw.mean
             if mean is not None and mean > 0:
                 vw_distance = abs(mean - price) / price
                 if vw_distance <= CONFLUENCE_DISTANCE_PCT:
-                    # VWAP is a confluence level
+                    structural_count = 1  # VWAP itself
+
+                    # Check for wall at VWAP
                     wall_near_vwap = None
                     for wall in candidate_walls:
                         if abs(wall["strike"] - mean) / mean <= CONFLUENCE_DISTANCE_PCT:
                             wall_near_vwap = wall
                             break
 
-                    score = 1  # VWAP
                     if wall_near_vwap:
-                        score += 1  # Wall at VWAP
+                        structural_count += 1  # Wall at VWAP
+
+                    # Check for flip at VWAP
                     if flip is not None:
                         flip_strike = flip.get("flip_strike")
                         if flip_strike is not None:
                             flip_distance = abs(flip_strike - mean) / mean
                             if flip_distance <= CONFLUENCE_DISTANCE_PCT:
-                                score += 1  # Flip at VWAP
+                                structural_count += 1  # Flip at VWAP
 
-                    if score >= MIN_SCORE:
+                    if structural_count >= MIN_STRUCTURAL_SIGNALS:
                         levels.append({
                             "type": "vwap",
                             "strike": mean,
-                            "score": score,
+                            "score": structural_count,
+                            "structural_count": structural_count,
                             "gex": wall_near_vwap["gex"] if wall_near_vwap else 0,
                             "side": wall_near_vwap["side"] if wall_near_vwap else "unknown",
                             "distance_pct": vw_distance,
                             "has_flip": flip is not None,
-                            "technical_type": "vwap",
+                            "has_vwap": True,
+                            "has_technical": has_technical,
+                            "technical_type": technical_type,
                         })
 
         return levels
@@ -249,11 +274,11 @@ class ConfluenceReversal(BaseStrategy):
     ) -> Optional[Signal]:
         """Build a SHORT signal from a resistance confluence level."""
         strike = level["strike"]
-        score = level["score"]
+        structural_count = level.get("structural_count", level.get("score", 0))
         gex = level.get("gex", 0)
 
-        # Base confidence from score
-        if score >= 3:
+        # Base confidence from structural signal count
+        if structural_count >= 3:
             confidence = MAX_CONFIDENCE_BASE
         else:
             confidence = MAX_CONFIDENCE_BASE - 0.25
@@ -261,6 +286,10 @@ class ConfluenceReversal(BaseStrategy):
         # Wall strength bonus
         gex_bonus = min(0.15, abs(gex) / 10_000_000)
         confidence += gex_bonus
+
+        # Technical signal bonus (rolling extreme is a nice-to-have)
+        if level.get("has_technical"):
+            confidence += 0.05
 
         # Regime alignment bonus
         if regime == "NEGATIVE":
@@ -285,15 +314,17 @@ class ConfluenceReversal(BaseStrategy):
             target=round(target, 2),
             strategy_id=self.strategy_id,
             reason=f"Confluence SHORT at {strike:.0f}: "
-                   f"score={score}, type={level.get('type', 'unknown')}, "
+                   f"{structural_count} structural signals, type={level.get('type', 'unknown')}, "
                    f"has_flip={level.get('has_flip', False)}, "
                    f"regime={regime}",
             metadata={
-                "score": score,
+                "structural_count": structural_count,
                 "level_type": level.get("type", "unknown"),
                 "confluence_strike": strike,
                 "wall_gex": gex,
                 "has_flip": level.get("has_flip", False),
+                "has_vwap": level.get("has_vwap", False),
+                "has_technical": level.get("has_technical", False),
                 "technical_type": level.get("technical_type"),
                 "distance_pct": round(level["distance_pct"], 4),
                 "regime": regime,
@@ -310,11 +341,11 @@ class ConfluenceReversal(BaseStrategy):
     ) -> Optional[Signal]:
         """Build a LONG signal from a support confluence level."""
         strike = level["strike"]
-        score = level["score"]
+        structural_count = level.get("structural_count", level.get("score", 0))
         gex = level.get("gex", 0)
 
-        # Base confidence from score
-        if score >= 3:
+        # Base confidence from structural signal count
+        if structural_count >= 3:
             confidence = MAX_CONFIDENCE_BASE
         else:
             confidence = MAX_CONFIDENCE_BASE - 0.25
@@ -322,6 +353,10 @@ class ConfluenceReversal(BaseStrategy):
         # Wall strength bonus
         gex_bonus = min(0.15, abs(gex) / 10_000_000)
         confidence += gex_bonus
+
+        # Technical signal bonus (rolling extreme is a nice-to-have)
+        if level.get("has_technical"):
+            confidence += 0.05
 
         # Regime alignment bonus
         if regime == "POSITIVE":
@@ -346,15 +381,17 @@ class ConfluenceReversal(BaseStrategy):
             target=round(target, 2),
             strategy_id=self.strategy_id,
             reason=f"Confluence LONG at {strike:.0f}: "
-                   f"score={score}, type={level.get('type', 'unknown')}, "
+                   f"{structural_count} structural signals, type={level.get('type', 'unknown')}, "
                    f"has_flip={level.get('has_flip', False)}, "
                    f"regime={regime}",
             metadata={
-                "score": score,
+                "structural_count": structural_count,
                 "level_type": level.get("type", "unknown"),
                 "confluence_strike": strike,
                 "wall_gex": gex,
                 "has_flip": level.get("has_flip", False),
+                "has_vwap": level.get("has_vwap", False),
+                "has_technical": level.get("has_technical", False),
                 "technical_type": level.get("technical_type"),
                 "distance_pct": round(level["distance_pct"], 4),
                 "regime": regime,

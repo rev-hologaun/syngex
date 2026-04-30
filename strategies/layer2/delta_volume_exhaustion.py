@@ -43,13 +43,13 @@ MIN_TREND_POINTS = 5
 MIN_GREEKS_POINTS = 5
 
 # Delta must be below rolling avg by this ratio
-DELTA_DECLINE_RATIO = 0.85            # Delta below 85% of rolling avg
+DELTA_DECLINE_RATIO = 0.90            # Delta below 90% of rolling avg (was 85%)
 
 # Volume must be below rolling avg by this ratio
-VOLUME_DECLINE_RATIO = 0.80           # Volume below 80% of rolling avg
+VOLUME_DECLINE_RATIO = 0.85           # Volume below 85% of rolling avg (was 80%)
 
 # Trend must be sustained for this many points
-MIN_TREND_DURATION = 4                # At least 4 candles in trend
+MIN_TREND_DURATION = 3                # At least 3 candles in trend (was 4)
 
 # Stop distance
 STOP_PCT = 0.008                      # 0.8% beyond swing

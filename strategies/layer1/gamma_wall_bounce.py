@@ -42,6 +42,7 @@ STOP_PAST_WALL_PCT = 0.004       # 0.4% — stop beyond the wall
 TARGET_RISK_MULT = 1.5           # 1.5× risk for target
 MIN_WALL_GEX = 500000            # Minimum |GEX| to consider a wall
 MIN_CONFIDENCE = 0.35            # Minimum confidence to emit signal
+MAX_CONFIDENCE = 0.85            # Hard cap — wall bounce alone can't be max conviction
 
 
 class GammaWallBounce(BaseStrategy):
@@ -278,7 +279,7 @@ class GammaWallBounce(BaseStrategy):
         rejection_conf = 0.2 + 0.1 * rejection_score
 
         confidence = proximity_conf + strength_conf + rejection_conf
-        return min(1.0, max(0.0, confidence))
+        return min(MAX_CONFIDENCE, max(0.0, confidence))
 
     def _better_target(
         self,

@@ -35,13 +35,13 @@ logger = logging.getLogger("Syngex.Strategies.DeltaGammaSqueeze")
 # ---------------------------------------------------------------------------
 
 # How close price must be to call wall (as fraction of price)
-CALL_WALL_PROXIMITY_PCT = 0.015       # 1.5%
+CALL_WALL_PROXIMITY_PCT = 0.02        # 2% (was 1.5%) — wider wall proximity
 
 # Minimum delta acceleration ratio: current delta must exceed rolling avg by this
-DELTA_ACCEL_RATIO = 1.25              # 25% above rolling average
+DELTA_ACCEL_RATIO = 1.15              # 15% above rolling avg (was 25%)
 
 # Volume spike threshold: current volume must exceed rolling avg by this
-VOLUME_SPIKE_RATIO = 1.4              # 40% above rolling average
+VOLUME_SPIKE_RATIO = 1.2              # 20% above rolling avg (was 40%)
 
 # Minimum wall GEX to consider
 MIN_WALL_GEX = 500000
@@ -50,7 +50,7 @@ MIN_WALL_GEX = 500000
 PRICE_ABOVE_MEAN_CONFIDENCE = 0.55    # Price in upper half of 5m window
 
 # Min rolling window data points required
-MIN_DATA_POINTS = 5
+MIN_DATA_POINTS = 3                   # Fewer points needed (was 5)
 
 # Stop and target parameters
 STOP_BELOW_WALL_PCT = 0.008           # 0.8% below entry

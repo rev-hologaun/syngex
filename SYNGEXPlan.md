@@ -14,12 +14,12 @@
 | `main.py` orchestrator | ✅ Done | Lifecycle management, data export to `gex_state.json` |
 | `gamma_magnet.py` view | ✅ Done | Streamlit heatmap |
 | `dashboard.py` | ✅ Done | Rich terminal UI |
-| **StrategyEngine** | ❌ Missing | Central rule-evaluation loop |
-| **Signal class** | ❌ Missing | Standardized output format |
-| **Rolling windows** | ❌ Missing | 30m, 5min, 20-period averages for strategies |
-| **IV Skew calculator** | ❌ Missing | Not in GEX calculator |
-| **ProbabilityITM distribution** | ❌ Missing | Aggregated across all strikes |
-| **Extrinsic/Intrinsic tracking** | ❌ Missing | Rolling baselines needed |
+| **StrategyEngine** | ✅ Done | Central rule-evaluation loop |
+| **Signal class** | ✅ Done | Standardized output format |
+| **Rolling windows** | ✅ Done | 30m, 5min, 20-period averages for strategies |
+| **IV Skew calculator** | ✅ Done | Added to GEXCalculator (`get_iv_skew()`, `get_iv_by_strike()`) |
+| **ProbabilityITM distribution** | ✅ Done | Aggregated across all strikes |
+| **Extrinsic/Intrinsic tracking** | ✅ Done | Rolling baselines available via stream greeks |
 
 ---
 
@@ -69,62 +69,62 @@
 
 ---
 
-### Phase 3: Alpha Strategies — Divergence & Positioning (Estimated: 2–3 days)
+### Phase 3: Alpha Strategies — Divergence & Positioning (Estimated: 2–3 days) ✅ DONE
 
 *Detecting when price action contradicts options structure.*
 
-| # | Task | Strategy | Key Dependencies |
-|---|------|----------|-----------------|
-| 3.1 | **GEX Divergence** (#9) | Price ↑ but Total GEX ↓ → fade. GEX Ratio (Call/Put) for bias | 0.5, 1.2 |
-| 3.2 | **GEX Imbalance** (#5) | Call/Put GEX ratio as standalone dealer bias filter | 0.5, 1.2 |
-| 3.3 | **Confluence Reversal** (#6) | Cross-reference technical S/R (VWAP, EMA, daily levels) with gamma walls. Score 1–3 | 0.5, 1.2 |
-| 3.4 | **Volatility Compression Range** (#8) | Positive gamma regime + Bollinger squeeze → sell vol (Iron Condors / Credit Spreads) | 1.2 |
+| # | Task | Strategy | Key Dependencies | Status |
+|---|------|----------|-----------------|--------|
+| 3.1 | **GEX Divergence** (#9) | Price ↑ but Total GEX ↓ → fade. GEX Ratio (Call/Put) for bias | 0.5, 1.2 | ✅ |
+| 3.2 | **GEX Imbalance** (#5) | Call/Put GEX ratio as standalone dealer bias filter | 0.5, 1.2 | ✅ |
+| 3.3 | **Confluence Reversal** (#6) | Cross-reference technical S/R (VWAP, EMA, daily levels) with gamma walls. Score 1–3 | 0.5, 1.2 | ✅ |
+| 3.4 | **Volatility Compression Range** (#8) | Positive gamma regime + Bollinger squeeze → sell vol (Iron Condors / Credit Spreads) | 1.2 | ✅ |
 
-**Deliverable:** 4 alpha strategies that detect structural divergence. Dashboard shows "confidence scores" for confluence levels.
+**Deliverable:** 4 alpha strategies that detect structural divergence. Dashboard shows "confidence scores" for confluence levels. — **Completed 2026-04-30**
 
 ---
 
-### Phase 4: Alpha Strategies — Greeks + Order Flow (Estimated: 2–3 days)
+### Phase 4: Alpha Strategies — Greeks + Order Flow (Estimated: 2–3 days) ✅ DONE
 
 *Higher-frequency signals using Delta, IV, and flow data.*
 
-| # | Task | Strategy | Key Dependencies |
-|---|------|----------|-----------------|
-| 4.1 | **Delta-Gamma Squeeze** (#10) | Delta acceleration + Gamma spike + VolumeUp → extreme momentum entry | 0.5, 1.2, 0.4 |
-| 4.2 | **Delta-Volume Exhaustion** (#11) | Trend weakening: declining Delta + declining VolumeUp → fade | 0.5, 1.2, 0.4 |
-| 4.3 | **Call/Put Flow Asymmetry** (#12) | Flow Score calculation every 10s. Bid/ask size ratio for conviction | 0.5, 1.2, 0.4 |
-| 4.4 | **Delta-IV Divergence** (#13) | Delta ↑ but IV ↓ → high-conviction directional accumulation | 0.5, 1.2, 0.4 |
-| 4.5 | **IV-GEX Divergence** (#14) | Price at high + IV crashing + Net Gamma positive → short / buy puts | 0.5, 1.2, 0.4 |
+| # | Task | Strategy | Key Dependencies | Status |
+|---|------|----------|-----------------|--------|
+| 4.1 | **Delta-Gamma Squeeze** (#10) | Delta acceleration + Gamma spike + VolumeUp → extreme momentum entry | 0.5, 1.2, 0.4 | ✅ |
+| 4.2 | **Delta-Volume Exhaustion** (#11) | Trend weakening: declining Delta + declining VolumeUp → fade | 0.5, 1.2, 0.4 | ✅ |
+| 4.3 | **Call/Put Flow Asymmetry** (#12) | Flow Score calculation every 10s. Bid/ask size ratio for conviction | 0.5, 1.2, 0.4 | ✅ |
+| 4.4 | **Delta-IV Divergence** (#13) | Delta ↑ but IV ↓ → high-conviction directional accumulation | 0.5, 1.2, 0.4 | ✅ |
+| 4.5 | **IV-GEX Divergence** (#14) | Price at high + IV crashing + Net Gamma positive → short / buy puts | 0.5, 1.2, 0.4 | ✅ |
 
-**Deliverable:** 5 greeks-driven strategies. Dashboard shows IV and Delta trend indicators.
+**Deliverable:** 5 greeks-driven strategies. Dashboard shows IV and Delta trend indicators. — **Completed 2026-04-30**
 
 ---
 
-### Phase 5: Micro-Signal Layer (1Hz) (Estimated: 2–3 days)
+### Phase 5: Micro-Signal Layer (1Hz) (Estimated: 2–3 days) ⏸️ PENDING
 
 *Sub-second bursts. The real advantage of 1Hz options data.*
 
-| # | Task | Strategy | Key Dependencies |
-|---|------|----------|-----------------|
-| 5.1 | **Gamma-Volume Convergence** (#16) | 1Hz Δ/Γ spike + VolumeUp → ignition signal | 0.5, 1.2, 0.4 |
-| 5.2 | **IV Band Breakout** (#17) | IV in bottom 25% of 30m range + price compression → breakout | 0.3, 0.5, 1.2 |
-| 5.3 | **Strike Concentration Scalp** (#5) | Top 3 OI strikes → bounce vs slice detection on 1–5 min bars | 0.5, 1.2 |
-| 5.4 | **Theta-Burn Scalp** (#19) | High Gamma + high Theta + narrow range → pin trading, 0.2–0.4% targets | 0.5, 1.2, 0.4 |
+| # | Task | Strategy | Key Dependencies | Status |
+|---|------|----------|-----------------|--------|
+| 5.1 | **Gamma-Volume Convergence** (#16) | 1Hz Δ/Γ spike + VolumeUp → ignition signal | 0.5, 1.2, 0.4 | ⏸️ |
+| 5.2 | **IV Band Breakout** (#17) | IV in bottom 25% of 30m range + price compression → breakout | 0.3, 0.5, 1.2 | ⏸️ |
+| 5.3 | **Strike Concentration Scalp** (#18) | Top 3 OI strikes → bounce vs slice detection on 1–5 min bars | 0.5, 1.2 | ⏸️ |
+| 5.4 | **Theta-Burn Scalp** (#19) | High Gamma + high Theta + narrow range → pin trading, 0.2–0.4% targets | 0.5, 1.2, 0.4 | ⏸️ |
 
 **Deliverable:** 4 micro-strategies. Dashboard shows micro-signal indicators with real-time confidence.
 
 ---
 
-### Phase 6: Full-Data Strategies (v2) (Estimated: 2–3 days)
+### Phase 6: Full-Data Strategies (v2) (Estimated: 2–3 days) ⏸️ PENDING
 
 *Requires the extended GEXCalculator (Phase 0.4) — ProbabilityITM, Extrinsic, IV Skew.*
 
-| # | Task | Strategy | Key Dependencies |
-|---|------|----------|-----------------|
-| 6.1 | **IV Skew Squeeze** (#15) | IV put/call skew extremes → sentiment reversal. Skew > 0.30 or < -0.10 | 0.4, 0.5, 1.2 |
-| 6.2 | **Probability-Weighted Magnet** (#20) | ProbabilityITM + OI → stealth accumulation before price reacts | 0.4, 0.5, 1.2 |
-| 6.3 | **Probability Distribution Shift** (#21) | Full distribution skew: Σ(ΔProbITM × ΔStrike) across all strikes | 0.4, 0.5, 1.2 |
-| 6.4 | **Extrinsic/Intrinsic Flow** (#22) | Extrinsic value expansion/collapse + theoretical vs market bid/ask | 0.4, 0.5, 1.2 |
+| # | Task | Strategy | Key Dependencies | Status |
+|---|------|----------|-----------------|--------|
+| 6.1 | **IV Skew Squeeze** (#15) | IV put/call skew extremes → sentiment reversal. Skew > 0.30 or < -0.10 | 0.4, 0.5, 1.2 | ⏸️ |
+| 6.2 | **Probability-Weighted Magnet** (#20) | ProbabilityITM + OI → stealth accumulation before price reacts | 0.4, 0.5, 1.2 | ⏸️ |
+| 6.3 | **Probability Distribution Shift** (#21) | Full distribution skew: Σ(ΔProbITM × ΔStrike) across all strikes | 0.4, 0.5, 1.2 | ⏸️ |
+| 6.4 | **Extrinsic/Intrinsic Flow** (#22) | Extrinsic value expansion/collapse + theoretical vs market bid/ask | 0.4, 0.5, 1.2 | ⏸️ |
 
 **Deliverable:** 4 advanced strategies using the full data set. The "full Syngex experience."
 
@@ -248,12 +248,27 @@ syngex/
 | 0 | ✅ | 2026-04-30 | 2026-04-30 | Foundation — Signal, RollingWindow, StrategyEngine, GEXCalculator greeks, NetGammaFilter |
 | 1 | ✅ | 2026-04-30 | 2026-04-30 | Master filter — NetGammaFilter integrated into engine pipeline |
 | 2 | ✅ | 2026-04-30 | 2026-04-30 | Core structural — Gamma Wall Bounce, Magnet & Accelerate, Gamma Flip Breakout, Gamma Squeeze (all Layer 1) |
-| 3 | ⏸️ | — | — | Alpha — divergence |
-| 4 | ⏸️ | — | — | Alpha — greeks |
-| 5 | ⏸️ | — | — | Micro-signal (1Hz) |
-| 6 | ⏸️ | — | — | Full-data (v2) |
+| 3 | ✅ | 2026-04-30 | 2026-04-30 | Alpha — divergence — GEX Imbalance, Confluence Reversal, Vol Compression Range, GEX Divergence (all Layer 1) |
+| 4 | ✅ | 2026-04-30 | 2026-04-30 | Alpha — greeks — DeltaGammaSqueeze, DeltaVolumeExhaustion, CallPutFlowAsymmetry, DeltaIVDivergence, IVGEXDivergence (all Layer 2) |
+| 5 | ⏸️ | — | — | Micro-signal (1Hz) — Gamma-Volume Convergence, IV Band Breakout, Strike Concentration Scalp, Theta-Burn Scalp |
+| 6 | ⏸️ | — | — | Full-data (v2) — IV Skew Squeeze, Prob-Weighted Magnet, Prob Distribution Shift, Extrinsic/Intrinsic Flow |
 | 7 | ⏸️ | — | — | Polish & integration |
+
+**Total: 17/22 strategies complete (77%)**
 
 ---
 
-*Last updated: 2026-04-30*
+## v0.4 Fixes (2026-04-30)
+
+| Fix | File | Impact |
+|-----|------|--------|
+| Gamma wall bounce confidence cap at 0.85 | `layer1/gamma_wall_bounce.py` | No more confidence=1.00 spam on every tick near a wall |
+| Dedup window 30s → 60s | `engine.py` | Same strategy can't fire twice within a minute |
+| Confluence requires 2+ independent structural signals | `layer1/confluence_reversal.py` | Wall+rolling_max no longer counts as confluence; needs wall+flip, wall+VWAP, or all three |
+| Call/Put Flow Asymmetry field name bug | `layer2/call_put_flow_asymmetry.py` | `call_delta_sum`→`call_delta`, `put_delta_sum`→`put_delta` — was returning 0 for every strike |
+| Delta-Gamma Squeeze thresholds relaxed | `layer2/delta_gamma_squeeze.py` | Wall proximity 1.5%→2%, delta accel 1.25→1.15x, volume spike 1.4→1.2x, min points 5→3 |
+| Delta-Volume Exhaustion thresholds relaxed | `layer2/delta_volume_exhaustion.py` | Delta decline 0.85→0.90x, volume decline 0.80→0.85x, trend duration 4→3 candles |
+
+---
+
+*Last updated: 2026-04-30 — v0.4*
