@@ -31,6 +31,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Type
 
+import yaml
+
 # ---------------------------------------------------------------------------
 # Logging — strict, zero-noise
 # ---------------------------------------------------------------------------
