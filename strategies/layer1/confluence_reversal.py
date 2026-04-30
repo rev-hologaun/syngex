@@ -132,7 +132,7 @@ class ConfluenceReversal(BaseStrategy):
         self,
         price: float,
         walls: List[Dict[str, Any]],
-        flip: Optional[Dict[str, Any]],
+        flip: Optional[float],
         rolling_data: Dict[str, Any],
         side: str,
     ) -> List[Dict[str, Any]]:
@@ -191,18 +191,16 @@ class ConfluenceReversal(BaseStrategy):
 
             # Check if flip is also near (independent structural signal)
             if flip is not None:
-                flip_strike = flip.get("flip_strike")
-                if flip_strike is not None:
-                    flip_distance = abs(flip_strike - price) / price
-                    if flip_distance <= CONFLUENCE_DISTANCE_PCT:
-                        structural_count += 1
-                        level_info["has_flip"] = True
-                        level_info["flip_strike"] = flip_strike
-                    elif abs(flip_strike - wall["strike"]) <= CONFLUENCE_DISTANCE_PCT:
-                        # Flip is near the wall itself — still independent
-                        structural_count += 1
-                        level_info["has_flip"] = True
-                        level_info["flip_strike"] = flip_strike
+                flip_distance = abs(flip - price) / price
+                if flip_distance <= CONFLUENCE_DISTANCE_PCT:
+                    structural_count += 1
+                    level_info["has_flip"] = True
+                    level_info["flip_strike"] = flip
+                elif abs(flip - wall["strike"]) <= CONFLUENCE_DISTANCE_PCT:
+                    # Flip is near the wall itself — still independent
+                    structural_count += 1
+                    level_info["has_flip"] = True
+                    level_info["flip_strike"] = flip
 
             # Check if VWAP is near (independent structural signal)
             vw = self._get_price_window(rolling_data)
@@ -239,11 +237,9 @@ class ConfluenceReversal(BaseStrategy):
 
                     # Check for flip at VWAP
                     if flip is not None:
-                        flip_strike = flip.get("flip_strike")
-                        if flip_strike is not None:
-                            flip_distance = abs(flip_strike - mean) / mean
-                            if flip_distance <= CONFLUENCE_DISTANCE_PCT:
-                                structural_count += 1  # Flip at VWAP
+                        flip_distance = abs(flip - mean) / mean
+                        if flip_distance <= CONFLUENCE_DISTANCE_PCT:
+                            structural_count += 1  # Flip at VWAP
 
                     if structural_count >= MIN_STRUCTURAL_SIGNALS:
                         levels.append({
