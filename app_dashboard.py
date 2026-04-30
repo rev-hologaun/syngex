@@ -20,6 +20,7 @@ import json
 import time
 from pathlib import Path
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -148,15 +149,20 @@ def render_metrics(state: dict) -> None:
 
 
 def render_gamma_profile(state: dict) -> None:
-    """Column 1 — Gamma Profile: line chart of Strike vs. Net Gamma."""
+    """Column 1 — Gamma Profile: Altair line chart with micro-signal overlay.
+
+    Shows the gamma profile line with colored markers for strategy signals,
+    sized by confidence. Hover tooltips show strategy, confidence, direction, reason.
+    """
     strikes = state.get("strikes", {})
+    micro_signals = state.get("micro_signals", {})
     st.subheader("📊 Gamma Profile")
 
     if not strikes:
         st.warning("No gamma data available yet.")
         return
 
-    # Build DataFrame: strike (float), net_gamma
+    # Build DataFrame for gamma line
     profile_df = pd.DataFrame(
         [
             {"strike": float(s), "net_gamma": b.get("net_gamma", 0.0)}
@@ -164,11 +170,73 @@ def render_gamma_profile(state: dict) -> None:
         ]
     ).sort_values("strike")
 
-    st.line_chart(
-        profile_df.set_index("strike"),
-        y="net_gamma",
-        width="stretch",
+    # Build DataFrame for micro-signal markers
+    marker_rows = []
+    for strike_str, sig in micro_signals.items():
+        try:
+            strike_val = float(strike_str)
+        except (ValueError, TypeError):
+            continue
+        conf = sig.get("confidence", 0)
+        # Map direction to color category
+        direction = sig.get("direction", "")
+        if "LONG" in direction:
+            color = "green"
+        elif "SHORT" in direction:
+            color = "red"
+        elif "MAGNET" in direction or "PULL" in direction:
+            color = "blue"
+        elif "CONVERGENCE" in sig.get("strategy", "").upper():
+            color = "gold"
+        else:
+            color = "gray"
+
+        marker_rows.append({
+            "strike": strike_val,
+            "confidence": conf,
+            "strategy": sig.get("strategy", ""),
+            "direction": sig.get("direction", ""),
+            "reason": sig.get("reason", ""),
+            "timestamp": sig.get("timestamp", ""),
+            "color": color,
+            "size": 30 + conf * 200,  # scale marker size with confidence
+        })
+
+    marker_df = pd.DataFrame(marker_rows) if marker_rows else pd.DataFrame(
+        columns=["strike", "confidence", "strategy", "direction", "reason", "timestamp", "color", "size"]
     )
+
+    # Base chart
+    base = alt.Chart(profile_df).encode(x=alt.X("strike:Q", scale=alt.Scale(zero=False)))
+
+    # Gamma line
+    gamma_line = base.mark_line(color="steelblue", strokeWidth=2).encode(
+        y=alt.Y("net_gamma:Q", scale=alt.Scale(zero=False)),
+        tooltip=["net_gamma"],
+    )
+
+    # Micro-signal markers (layered on top)
+    markers = alt.Chart(marker_df).encode(
+        x=alt.X("strike:Q"),
+        y=alt.Y("net_gamma:Q", scale=alt.Scale(zero=False)),
+        size=alt.Size("size:Q", legend=None),
+        color=alt.Color("color:N",
+            scale=alt.Scale(
+                domain=["green", "red", "blue", "gold", "gray"],
+                range=["#22c55e", "#ef4444", "#3b82f6", "#eab308", "#9ca3af"],
+            ),
+        ),
+        tooltip=[
+            alt.Tooltip("strategy:N", title="Strategy"),
+            alt.Tooltip("confidence:Q", title="Confidence", format=".0%"),
+            alt.Tooltip("direction:N", title="Direction"),
+            alt.Tooltip("reason:N", title="Signal"),
+        ],
+    ).mark_circle().interactive()
+
+    # Layer them
+    chart = alt.layer(gamma_line, markers).resolve_scale(y="independent")
+    st.altair_chart(chart, use_container_width=True)
 
 
 def render_gamma_flip(state: dict) -> None:
@@ -333,8 +401,18 @@ def render_top_strikes(state: dict) -> None:
     st.dataframe(top_df, width="stretch", height=600)
 
 
+def _confidence_badge(conf: float) -> str:
+    """Return an emoji badge based on confidence level."""
+    if conf >= 0.80:
+        return f"🟢 {conf:.0%}"
+    elif conf >= 0.60:
+        return f"🟡 {conf:.0%}"
+    else:
+        return f"🔴 {conf:.0%}"
+
+
 def render_signals(signals: list[dict]) -> None:
-    """Display recent strategy signals."""
+    """Display recent strategy signals with confidence badges."""
     st.subheader("📡 Recent Signals")
 
     if not signals:
@@ -349,6 +427,7 @@ def render_signals(signals: list[dict]) -> None:
                 "Strategy": s.get("strategy_id", ""),
                 "Direction": s.get("direction", ""),
                 "Confidence": f"{s.get('confidence', 0):.2f}",
+                "Confidence Badge": _confidence_badge(s.get("confidence", 0)),
                 "Entry": f"${s.get('entry', 0):,.2f}",
                 "Stop": f"${s.get('stop', 0):,.2f}",
                 "Target": f"${s.get('target', 0):,.2f}",

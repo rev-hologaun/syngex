@@ -128,6 +128,10 @@ class StrategyEngine:
         self._signal_count: int = 0
         self._tick_count: int = 0
 
+        # In-memory ring buffer for recent signals (used by dashboard)
+        self._recent_signals: List[Dict[str, Any]] = []  # last N signal dicts
+        self._recent_buffer_size: int = 200  # keep up to 200 recent signals in memory
+
         # Ensure log directory exists
         log_path = Path(self.config.signal_log_path)
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -245,6 +249,11 @@ class StrategyEngine:
             self._signal_count += 1
             # Log to file
             self._log_signal(signal)
+            # Store in memory buffer for dashboard queries
+            sig_dict = signal.to_dict()
+            self._recent_signals.append(sig_dict)
+            if len(self._recent_signals) > self._recent_buffer_size:
+                self._recent_signals = self._recent_signals[-self._recent_buffer_size:]
             # Push to handlers
             for handler in self._signal_handlers:
                 try:
@@ -279,6 +288,10 @@ class StrategyEngine:
     # Status
     # ------------------------------------------------------------------
 
+    def get_recent_signals(self, n: int = 20) -> List[Dict[str, Any]]:
+        """Return the last N signals as dicts (for dashboard micro-signal overlay)."""
+        return list(self._recent_signals[-n:])
+
     @property
     def strategy_count(self) -> int:
         return len(self._strategies)
@@ -296,3 +309,7 @@ class StrategyEngine:
             "total_signals": self._signal_count,
             "ticks_processed": self._tick_count,
         }
+
+    def reset_recent_signals(self) -> None:
+        """Clear the in-memory signal buffer (e.g. on restart)."""
+        self._recent_signals.clear()

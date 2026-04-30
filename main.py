@@ -729,6 +729,24 @@ class SyngexOrchestrator:
         # Add strategy engine status
         if self._strategy_engine:
             export["strategy_engine"] = self._strategy_engine.get_status()
+            # Micro-signal confidence overlay for dashboard
+            recent = self._strategy_engine.get_recent_signals(20)
+            micro_signals: Dict[str, Dict[str, Any]] = {}
+            for sig in recent:
+                strike = sig.get("target", sig.get("entry", 0))
+                if strike:
+                    key = f"{strike:.1f}"
+                    # Keep highest confidence per strike
+                    if key not in micro_signals or sig.get("confidence", 0) > micro_signals[key]["confidence"]:
+                        micro_signals[key] = {
+                            "confidence": sig.get("confidence", 0),
+                            "strategy": sig.get("strategy_id", ""),
+                            "direction": sig.get("direction", ""),
+                            "reason": sig.get("reason", ""),
+                            "timestamp": sig.get("timestamp", ""),
+                        }
+            if micro_signals:
+                export["micro_signals"] = micro_signals
         if self._gamma_filter:
             export["regime_filter"] = self._gamma_filter.get_status()
 
