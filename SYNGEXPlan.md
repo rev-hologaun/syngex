@@ -100,45 +100,45 @@
 
 ---
 
-### Phase 5: Micro-Signal Layer (1Hz) (Estimated: 2–3 days) ⏸️ PENDING
+### Phase 5: Micro-Signal Layer (1Hz) (Estimated: 2–3 days) ✅ DONE
 
 *Sub-second bursts. The real advantage of 1Hz options data.*
 
 | # | Task | Strategy | Key Dependencies | Status |
 |---|------|----------|-----------------|--------|
-| 5.1 | **Gamma-Volume Convergence** (#16) | 1Hz Δ/Γ spike + VolumeUp → ignition signal | 0.5, 1.2, 0.4 | ⏸️ |
-| 5.2 | **IV Band Breakout** (#17) | IV in bottom 25% of 30m range + price compression → breakout | 0.3, 0.5, 1.2 | ⏸️ |
-| 5.3 | **Strike Concentration Scalp** (#18) | Top 3 OI strikes → bounce vs slice detection on 1–5 min bars | 0.5, 1.2 | ⏸️ |
-| 5.4 | **Theta-Burn Scalp** (#19) | High Gamma + high Theta + narrow range → pin trading, 0.2–0.4% targets | 0.5, 1.2, 0.4 | ⏸️ |
+| 5.1 | **Gamma-Volume Convergence** (#16) | 1Hz Δ/Γ spike + VolumeUp → ignition signal | 0.5, 1.2, 0.4 | ✅ |
+| 5.2 | **IV Band Breakout** (#17) | IV in bottom 25% of 30m range + price compression → breakout | 0.3, 0.5, 1.2 | ✅ |
+| 5.3 | **Strike Concentration Scalp** (#18) | Top 3 OI strikes → bounce vs slice detection on 1–5 min bars | 0.5, 1.2 | ✅ |
+| 5.4 | **Theta-Burn Scalp** (#19) | High Gamma + high Theta + narrow range → pin trading, 0.2–0.4% targets | 0.5, 1.2, 0.4 | ✅ |
 
 **Deliverable:** 4 micro-strategies. Dashboard shows micro-signal indicators with real-time confidence.
 
 ---
 
-### Phase 6: Full-Data Strategies (v2) (Estimated: 2–3 days) ⏸️ PENDING
+### Phase 6: Full-Data Strategies (v2) (Estimated: 2–3 days) ✅ DONE
 
 *Requires the extended GEXCalculator (Phase 0.4) — ProbabilityITM, Extrinsic, IV Skew.*
 
 | # | Task | Strategy | Key Dependencies | Status |
 |---|------|----------|-----------------|--------|
-| 6.1 | **IV Skew Squeeze** (#15) | IV put/call skew extremes → sentiment reversal. Skew > 0.30 or < -0.10 | 0.4, 0.5, 1.2 | ⏸️ |
-| 6.2 | **Probability-Weighted Magnet** (#20) | ProbabilityITM + OI → stealth accumulation before price reacts | 0.4, 0.5, 1.2 | ⏸️ |
-| 6.3 | **Probability Distribution Shift** (#21) | Full distribution skew: Σ(ΔProbITM × ΔStrike) across all strikes | 0.4, 0.5, 1.2 | ⏸️ |
-| 6.4 | **Extrinsic/Intrinsic Flow** (#22) | Extrinsic value expansion/collapse + theoretical vs market bid/ask | 0.4, 0.5, 1.2 | ⏸️ |
+| 6.1 | **IV Skew Squeeze** (#15) | IV put/call skew extremes → sentiment reversal. Skew > 0.30 or < -0.10 | 0.4, 0.5, 1.2 | ✅ |
+| 6.2 | **Probability-Weighted Magnet** (#20) | ProbabilityITM + OI → stealth accumulation before price reacts | 0.4, 0.5, 1.2 | ✅ |
+| 6.3 | **Probability Distribution Shift** (#21) | Full distribution skew: Σ(ΔProbITM × ΔStrike) across all strikes | 0.4, 0.5, 1.2 | ✅ |
+| 6.4 | **Extrinsic/Intrinsic Flow** (#22) | Extrinsic value expansion/collapse + theoretical vs market bid/ask | 0.4, 0.5, 1.2 | ✅ |
 
 **Deliverable:** 4 advanced strategies using the full data set. The "full Syngex experience."
 
 ---
 
-### Phase 7: Polish & Integration (Estimated: 1–2 days)
+### Phase 7: Polish & Integration (Estimated: 1–2 days) ✅ 7.1–7.4 DONE
 
-| # | Task | Description |
-|---|------|-------------|
-| 7.1 | **Dashboard signal overlay** | Update `GammaMagnetView` to show strategy confidence scores directly on heatmap |
-| 7.2 | **Signal logging** | Persist all signals to JSON/SQLite for backtesting and review |
-| 7.3 | **Per-strategy toggles** | Enable/disable individual strategies from config |
-| 7.4 | **Parameter tuning UI** | Allow threshold adjustments (GEX wall threshold, RSI periods, ATR multipliers) without code changes |
-| 7.5 | **Documentation** | Update README with strategy index, setup guide, and API reference |
+| # | Task | Description | Status |
+|---|------|-------------|--------|
+| 7.1 | **Dashboard micro-signal overlay** | Altair layered chart — gamma profile with confidence markers at signal strikes, hover tooltips, color-coded by strategy type | ✅ |
+| 7.2 | **Signal outcome tracking** | SignalTracker resolves signals as WIN/LOSS/CLOSED, computes PnL, win rate, avg hold time, avg RR per strategy. CLI analyzer tool | ✅ |
+| 7.3 | **Per-strategy toggles** | Enable/disable individual strategies via YAML config with graceful fallback defaults | ✅ |
+| 7.4 | **Parameter tuning** | All strategy params injected from YAML, hot-reload every 2s without restart | ✅ |
+| 7.5 | **Documentation** | Update README with strategy index, setup guide, API reference | ⏸️ PENDING |
 
 ---
 
@@ -252,9 +252,9 @@ syngex/
 | 4 | ✅ | 2026-04-30 | 2026-04-30 | Alpha — greeks — DeltaGammaSqueeze, DeltaVolumeExhaustion, CallPutFlowAsymmetry, DeltaIVDivergence, IVGEXDivergence (all Layer 2) |
 | 5 | ✅ | 2026-04-30 | 2026-04-30 | Micro-signal (1Hz) — Gamma-Volume Convergence, IV Band Breakout, Strike Concentration Scalp, Theta-Burn Scalp (all Layer 3) |
 | 6 | ✅ | 2026-04-30 | 2026-04-30 | Full-data (v2) — IV Skew Squeeze, Prob-Weighted Magnet, Prob Distribution Shift, Extrinsic/Intrinsic Flow (all full_data) |
-| 7 | ⏸️ | — | — | Polish & integration — dashboard overlay, signal logging, per-strategy toggles, parameter tuning UI, docs |
+| 7 | 🟡 | 2026-04-30 | — | 7.1–7.4 complete (overlay, outcome tracking, toggles, hot-reload). 7.5 docs pending |
 
-**Total: 22/22 strategies complete (100%)**
+**Total: 22/22 strategies complete (100%) | v1.0 tagged and pushed**
 
 ---
 
@@ -276,11 +276,10 @@ syngex/
 | Priority | Task | Notes |
 |----------|------|-------|
 | 🔴 High | **Full-market validation** | Run all 21 strategies through a complete market day. Validate signal quality, false positive rate, and strategy behavior under real conditions. |
-| 🟡 Medium | Phase 7 — Dashboard micro-signal overlay | Add strategy confidence scores to gamma heatmap |
-| 🟡 Medium | Phase 7 — Per-strategy toggles + config | Enable/disable strategies from YAML config |
-| 🟢 Low | Phase 7 — Parameter tuning UI | Adjust thresholds without code changes |
-| 🟢 Low | Phase 7 — Documentation | Update README with strategy index, setup guide |
+| 🟡 Medium | Phase 7.5 — Documentation | Update README with strategy index, setup guide, API reference, and architecture overview |
+| 🟢 Low | Future — Backtesting framework | Use signal_outcomes.jsonl for historical strategy performance analysis |
+| 🟢 Low | Future — Real execution pipeline | TradeStation API integration for automated order placement |
 
 ---
 
-*Last updated: 2026-04-30 — v0.6 — All 22 strategies complete, awaiting full-market validation*
+*Last updated: 2026-04-30 — v1.0 — All 21 tradable strategies live, Phase 7.1–7.4 complete, awaiting full-market validation*
