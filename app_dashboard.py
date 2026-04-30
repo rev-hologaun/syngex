@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import datetime
 from pathlib import Path
 
 import altair as alt
@@ -401,6 +402,14 @@ def render_top_strikes(state: dict) -> None:
     st.dataframe(top_df, width="stretch", height=600)
 
 
+def _format_timestamp(ts) -> str:
+    """Convert Unix epoch to HH:MM:SS 24-hour format."""
+    try:
+        return datetime.fromtimestamp(float(ts)).strftime("%H:%M:%S")
+    except (ValueError, TypeError, OSError):
+        return str(ts)
+
+
 def _confidence_badge(conf: float) -> str:
     """Return an emoji badge based on confidence level."""
     if conf >= 0.80:
@@ -423,7 +432,7 @@ def render_signals(signals: list[dict]) -> None:
     sig_df = pd.DataFrame(
         [
             {
-                "Time": s.get("timestamp", ""),
+                "Time": _format_timestamp(s.get("timestamp")),
                 "Strategy": s.get("strategy_id", ""),
                 "Direction": s.get("direction", ""),
                 "Confidence": f"{s.get('confidence', 0):.2f}",
