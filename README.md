@@ -15,7 +15,7 @@ source venv/bin/activate
 # Stream mode — terminal logging only
 python3 main.py TSLA
 
-# Dashboard mode — starts Streamlit at localhost:8501
+# Command Center mode — starts Streamlit at localhost:8501
 python3 main.py TSLA dashboard
 ```
 
@@ -80,7 +80,7 @@ python3 main.py TSLA dashboard
 | **Rolling Windows** | `strategies/rolling_window.py` | Time-based (30m/5m) and count-based (20p) statistics |
 | **Signal Tracker** | `strategies/signal_tracker.py` | Outcome resolution (WIN/LOSS/CLOSED), PnL, hold time |
 | **Analyzer CLI** | `strategies/analyzer.py` | Signal review: summary, per-strategy stats, open signals |
-| **Dashboard** | `app_dashboard.py` | Streamlit real-time gamma heatmap + micro-signal overlay |
+| **Command Center** | `app_dashboard.py` | Streamlit real-time gamma heatmap + micro-signal overlay |
 
 ---
 
@@ -132,7 +132,7 @@ All 21 tradable strategies + 1 master filter. Confidence caps enforced by layer.
 
 ---
 
-## Dashboard
+## Command Center
 
 **Launch:** `python3 main.py TSLA dashboard` → opens `http://localhost:8501`
 
@@ -140,7 +140,7 @@ All 21 tradable strategies + 1 master filter. Confidence caps enforced by layer.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  🕸️ Syngex Gamma Dashboard — TSLA  |  Price: $381.12       │
+│  🕸️ Syngex Command Center — TSLA  |  Price: $381.12       │
 ├──────────────────────────────────────────────────────────────┤
 │  📈 $381.12   ⚡ +39,284   🎯 48 strikes   📨 1,558 msgs    │
 ├──────────────┬──────────────────┬───────────────────────────┤
@@ -413,7 +413,7 @@ Every 1 second, the orchestrator writes `data/gex_state.json` — a shared file 
 ```
 syngex/
 ├── main.py                      # Orchestrator — lifecycle, data wiring, config hot-reload
-├── app_dashboard.py             # Streamlit dashboard — gamma heatmap + micro-signal overlay
+├── app_dashboard.py             # Streamlit Command Center — gamma heatmap + micro-signal overlay
 ├── requirements.txt             # Python dependencies
 ├── SYNGEXPlan.md                # Build tracker (phases, tasks, status)
 ├── SYNGEXStrats.md              # All 22 strategy definitions (reference)
@@ -469,7 +469,7 @@ syngex/
 │   └── strategies.yaml          # Per-strategy config — toggles + parameters (hot-reload)
 │
 ├── data/
-│   └── gex_state.json           # Shared state — written every 1s, read by dashboard
+│   └── gex_state.json           # Shared state — written every 1s, read by Command Center
 │
 ├── log/
 │   ├── signals.jsonl            # All signals (one JSON per line)
@@ -536,7 +536,7 @@ python3 -m strategies.analyzer stats
 # View raw signals
 cat log/signals.jsonl | tail -20
 
-# Check dashboard state file
+# Check Command Center state file
 cat data/gex_state.json | python3 -m json.tool | head -30
 ```
 
