@@ -276,7 +276,6 @@ syngex/
 | Priority | Task | Notes |
 |----------|------|-------|
 | 🔴 High | **Full-market validation** | Run all 21 strategies through a complete market day. Validate signal quality, false positive rate, and strategy behavior under real conditions. |
-| 🟡 Medium |  |
 | 🟢 Low | Future — Backtesting framework | Use signal_outcomes.jsonl for historical strategy performance analysis |
 | 🟢 Low | Future — Real execution pipeline | TradeStation API integration for automated order placement |
 
