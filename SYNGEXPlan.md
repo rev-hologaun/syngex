@@ -250,11 +250,11 @@ syngex/
 | 2 | ✅ | 2026-04-30 | 2026-04-30 | Core structural — Gamma Wall Bounce, Magnet & Accelerate, Gamma Flip Breakout, Gamma Squeeze (all Layer 1) |
 | 3 | ✅ | 2026-04-30 | 2026-04-30 | Alpha — divergence — GEX Imbalance, Confluence Reversal, Vol Compression Range, GEX Divergence (all Layer 1) |
 | 4 | ✅ | 2026-04-30 | 2026-04-30 | Alpha — greeks — DeltaGammaSqueeze, DeltaVolumeExhaustion, CallPutFlowAsymmetry, DeltaIVDivergence, IVGEXDivergence (all Layer 2) |
-| 5 | ⏸️ | — | — | Micro-signal (1Hz) — Gamma-Volume Convergence, IV Band Breakout, Strike Concentration Scalp, Theta-Burn Scalp |
-| 6 | ⏸️ | — | — | Full-data (v2) — IV Skew Squeeze, Prob-Weighted Magnet, Prob Distribution Shift, Extrinsic/Intrinsic Flow |
-| 7 | ⏸️ | — | — | Polish & integration |
+| 5 | ✅ | 2026-04-30 | 2026-04-30 | Micro-signal (1Hz) — Gamma-Volume Convergence, IV Band Breakout, Strike Concentration Scalp, Theta-Burn Scalp (all Layer 3) |
+| 6 | ✅ | 2026-04-30 | 2026-04-30 | Full-data (v2) — IV Skew Squeeze, Prob-Weighted Magnet, Prob Distribution Shift, Extrinsic/Intrinsic Flow (all full_data) |
+| 7 | ⏸️ | — | — | Polish & integration — dashboard overlay, signal logging, per-strategy toggles, parameter tuning UI, docs |
 
-**Total: 17/22 strategies complete (77%)**
+**Total: 22/22 strategies complete (100%)**
 
 ---
 
@@ -271,4 +271,16 @@ syngex/
 
 ---
 
-*Last updated: 2026-04-30 — v0.4*
+## Next Steps
+
+| Priority | Task | Notes |
+|----------|------|-------|
+| 🔴 High | **Full-market validation** | Run all 21 strategies through a complete market day. Validate signal quality, false positive rate, and strategy behavior under real conditions. |
+| 🟡 Medium | Phase 7 — Dashboard micro-signal overlay | Add strategy confidence scores to gamma heatmap |
+| 🟡 Medium | Phase 7 — Per-strategy toggles + config | Enable/disable strategies from YAML config |
+| 🟢 Low | Phase 7 — Parameter tuning UI | Adjust thresholds without code changes |
+| 🟢 Low | Phase 7 — Documentation | Update README with strategy index, setup guide |
+
+---
+
+*Last updated: 2026-04-30 — v0.6 — All 22 strategies complete, awaiting full-market validation*
