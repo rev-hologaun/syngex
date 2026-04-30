@@ -95,6 +95,7 @@ from strategies.full_data import (
     ProbDistributionShift,
     ExtrinsicIntrinsicFlow,
 )
+from strategies.signal_tracker import SignalTracker
 
 
 # ---------------------------------------------------------------------------
@@ -125,6 +126,7 @@ class SyngexOrchestrator:
         self._rolling_data: Dict[str, RollingWindow] = {}
         self._running = False
         self._profile_timer: float = 0.0
+        self._signal_timer: float = 0.0
         self._dashboard_process: subprocess.Popen | None = None
         self._state_export_timer: float = 0.0
 
@@ -137,6 +139,9 @@ class SyngexOrchestrator:
         self._config_path = Path(__file__).parent / "config" / "strategies.yaml"
         self._config_mtime: float = 0.0  # Last known modification time
         self._config_lock = asyncio.Lock()  # Thread-safe config reload
+
+        # Signal outcome tracker
+        self._signal_tracker: SignalTracker | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -152,6 +157,13 @@ class SyngexOrchestrator:
 
         # Phase 0: Strategy Engine + Filter
         self._gamma_filter = NetGammaFilter(flip_buffer=0.5)
+
+        # Signal tracker for outcome resolution
+        log_dir = self._data_dir.parent / "log"
+        self._signal_tracker = SignalTracker(
+            max_hold_seconds=900,
+            log_dir=str(log_dir),
+        )
 
         # Load strategy configuration from YAML
         config_path = Path(__file__).parent / "config" / "strategies.yaml"
@@ -266,6 +278,23 @@ class SyngexOrchestrator:
                 if now - self._state_export_timer >= 1.0:
                     self._export_gex_state()
                     self._state_export_timer = now
+
+                # Signal resolution (every ~1s)
+                if now - self._signal_timer >= 1.0:
+                    if self._signal_tracker and self._calculator:
+                        price = self._calculator.get_summary()["underlying_price"]
+                        resolved = self._signal_tracker.update(price, time.time())
+                        if resolved:
+                            for r in resolved:
+                                logger.info(
+                                    "SIGNAL_RESOLVED  |  %s  |  %s  |  %s  |  PnL: $%.2f  |  Hold: %.0fs",
+                                    r.open_signal.strategy_id,
+                                    r.open_signal.direction,
+                                    r.outcome.value,
+                                    r.pnl,
+                                    r.hold_time,
+                                )
+                    self._signal_timer = now
 
                 # Strategy evaluation (every ~1s)
                 if now - self._profile_timer >= 1.0:
@@ -553,6 +582,11 @@ class SyngexOrchestrator:
         signals = self._strategy_engine.process(data)
 
         if signals:
+            # Track new signals for outcome resolution
+            if self._signal_tracker:
+                for s in signals:
+                    self._signal_tracker.track(s.to_dict())
+
             for s in signals:
                 logger.info("SIGNAL  |  %s  |  %s  |  conf=%.2f  |  %s",
                            s.strategy_id, s.direction.value, s.confidence, s.reason)
