@@ -7,7 +7,7 @@ Responsibilities:
     1. Accept incoming data snapshots from the orchestrator
     2. Pass data to all registered strategies
     3. Collect signals, apply the Net Gamma regime filter
-    4. Route filtered signals to the dashboard / signal log
+    4. Route filtered signals to the Command Center / signal log
 
 Architecture:
     Data → [Net Gamma Filter] → [Strategy 1, Strategy 2, ...] → Signal Collector → Route
@@ -128,7 +128,7 @@ class StrategyEngine:
         self._signal_count: int = 0
         self._tick_count: int = 0
 
-        # In-memory ring buffer for recent signals (used by dashboard)
+        # In-memory ring buffer for recent signals (used by Command Center)
         self._recent_signals: List[Dict[str, Any]] = []  # last N signal dicts
         self._recent_buffer_size: int = 200  # keep up to 200 recent signals in memory
 
@@ -161,7 +161,7 @@ class StrategyEngine:
         logger.info("Regime filter registered")
 
     def register_signal_handler(self, callback: Callable[[Signal], None]) -> None:
-        """Register a handler for output signals (e.g., dashboard push)."""
+        """Register a handler for output signals (e.g., Command Center push)."""
         self._signal_handlers.append(callback)
 
     # ------------------------------------------------------------------
@@ -249,7 +249,7 @@ class StrategyEngine:
             self._signal_count += 1
             # Log to file
             self._log_signal(signal)
-            # Store in memory buffer for dashboard queries
+            # Store in memory buffer for Command Center queries
             sig_dict = signal.to_dict()
             self._recent_signals.append(sig_dict)
             if len(self._recent_signals) > self._recent_buffer_size:
@@ -289,7 +289,7 @@ class StrategyEngine:
     # ------------------------------------------------------------------
 
     def get_recent_signals(self, n: int = 20) -> List[Dict[str, Any]]:
-        """Return the last N signals as dicts (for dashboard micro-signal overlay)."""
+        """Return the last N signals as dicts (for Command Center micro-signal overlay)."""
         return list(self._recent_signals[-n:])
 
     @property
@@ -301,7 +301,7 @@ class StrategyEngine:
         return self._signal_count
 
     def get_status(self) -> Dict[str, Any]:
-        """Engine status for dashboard."""
+        """Engine status for Command Center."""
         return {
             "running": self._running,
             "strategies": len(self._strategies),

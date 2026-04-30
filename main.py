@@ -647,7 +647,7 @@ class SyngexOrchestrator:
     # ------------------------------------------------------------------
 
     def _start_dashboard(self) -> None:
-        """Spawn the Streamlit dashboard as a background subprocess."""
+        """Spawn the Streamlit Command Center as a background subprocess."""
         if self._dashboard_process is not None:
             return  # already running
 
@@ -657,7 +657,7 @@ class SyngexOrchestrator:
         script_path = Path(__file__).parent / "app_dashboard.py"
         venv_streamlit = Path(__file__).parent / "venv" / "bin" / "streamlit"
 
-        logger.info("Starting Streamlit dashboard…")
+        logger.info("Starting Command Center…")
 
         try:
             self._dashboard_process = subprocess.Popen(
@@ -675,25 +675,25 @@ class SyngexOrchestrator:
                 stderr=subprocess.DEVNULL,
             )
             logger.info(
-                "Dashboard started (PID %d).  "
+                "Command Center started (PID %d).  "
                 "Open http://localhost:8501 in a browser.",
                 self._dashboard_process.pid,
             )
         except FileNotFoundError:
             logger.warning(
-                "Streamlit not found at %s — dashboard will not start.  "
+                "Streamlit not found at %s — Command Center will not start.  "
                 "Install with: pip install streamlit",
                 venv_streamlit,
             )
         except Exception as exc:
-            logger.warning("Failed to start dashboard: %s", exc)
+            logger.warning("Failed to start Command Center: %s", exc)
 
     def _stop_dashboard(self) -> None:
-        """Terminate the Streamlit dashboard subprocess."""
+        """Terminate the Streamlit Command Center subprocess."""
         if self._dashboard_process is None:
             return
 
-        logger.info("Stopping dashboard (PID %d)…", self._dashboard_process.pid)
+        logger.info("Stopping Command Center (PID %d)…", self._dashboard_process.pid)
         try:
             self._dashboard_process.terminate()
             self._dashboard_process.wait(timeout=5)

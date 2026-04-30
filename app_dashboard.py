@@ -1,5 +1,5 @@
 """
-app_dashboard.py — Syngex Real-Time Gamma Exposure Dashboard
+app_dashboard.py — Syngex Real-Time Gamma Exposure Command Center
 
 Standalone Streamlit app that reads GEX data from a shared JSON file
 written by the Syngex orchestrator (`main.py`).
@@ -39,7 +39,7 @@ POLL_INTERVAL = 2  # seconds between polls
 # ---------------------------------------------------------------------------
 
 st.set_page_config(
-    page_title="Syngex GEX Dashboard",
+    page_title="Syngex Command Center",
     page_icon="🕸️",
     layout="wide",
 )
@@ -53,7 +53,7 @@ st.set_page_config(
 def load_gex_state() -> dict | None:
     """Load the latest GEX state from the shared JSON file.
 
-    Cached with a 2-second TTL so the dashboard auto-refreshes
+    Cached with a 2-second TTL so the Command Center auto-refreshes
     without requiring a manual page reload.
 
     Returns None when the file is missing, empty, or corrupt.
@@ -104,7 +104,7 @@ def render_header(state: dict) -> None:
     symbol = state.get("symbol", "???")
     price = state.get("underlying_price", 0.0)
     st.markdown(
-        f"### 🕸️ **Syngex Gamma Dashboard** — **{symbol}**  |  Price: ${price:,.2f}"
+        f"### 🕸️ **Syngex Command Center** — **{symbol}**  |  Price: ${price:,.2f}"
     )
 
 
@@ -455,7 +455,7 @@ def render_status(state: dict | None, signals: list[dict]) -> None:
         st.info(
             "⏳ **Waiting for data…**  "
             "Start the Syngex orchestrator (`python3 main.py TSLA dashboard`) and the "
-            "dashboard will update automatically."
+            "Command Center will update automatically."
         )
     else:
         last_updated = state.get("last_updated", "unknown")
@@ -488,7 +488,7 @@ if state is None:
     st.info(
         "⏳ **Waiting for data…**  "
         "Start the Syngex orchestrator (`python3 main.py TSLA dashboard`) and the "
-        "dashboard will update automatically."
+        "Command Center will update automatically."
     )
     # Poll until data arrives
     while state is None:
