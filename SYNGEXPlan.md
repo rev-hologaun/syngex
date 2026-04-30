@@ -130,7 +130,7 @@
 
 ---
 
-### Phase 7: Polish & Integration (Estimated: 1–2 days) ✅ 7.1–7.4 DONE
+### Phase 7: Polish & Integration (Estimated: 1–2 days) ✅ COMPLETE
 
 | # | Task | Description | Status |
 |---|------|-------------|--------|
@@ -138,7 +138,7 @@
 | 7.2 | **Signal outcome tracking** | SignalTracker resolves signals as WIN/LOSS/CLOSED, computes PnL, win rate, avg hold time, avg RR per strategy. CLI analyzer tool | ✅ |
 | 7.3 | **Per-strategy toggles** | Enable/disable individual strategies via YAML config with graceful fallback defaults | ✅ |
 | 7.4 | **Parameter tuning** | All strategy params injected from YAML, hot-reload every 2s without restart | ✅ |
-| 7.5 | **Documentation** | Update README with strategy index, setup guide, API reference | ⏸️ PENDING |
+| 7.5 | **Documentation** | Comprehensive README — architecture, strategy index, config, dashboard, CLI, signal format, analyzer | ✅ |
 
 ---
 
@@ -252,7 +252,7 @@ syngex/
 | 4 | ✅ | 2026-04-30 | 2026-04-30 | Alpha — greeks — DeltaGammaSqueeze, DeltaVolumeExhaustion, CallPutFlowAsymmetry, DeltaIVDivergence, IVGEXDivergence (all Layer 2) |
 | 5 | ✅ | 2026-04-30 | 2026-04-30 | Micro-signal (1Hz) — Gamma-Volume Convergence, IV Band Breakout, Strike Concentration Scalp, Theta-Burn Scalp (all Layer 3) |
 | 6 | ✅ | 2026-04-30 | 2026-04-30 | Full-data (v2) — IV Skew Squeeze, Prob-Weighted Magnet, Prob Distribution Shift, Extrinsic/Intrinsic Flow (all full_data) |
-| 7 | 🟡 | 2026-04-30 | — | 7.1–7.4 complete (overlay, outcome tracking, toggles, hot-reload). 7.5 docs pending |
+| 7 | ✅ | 2026-04-30 | 2026-04-30 | 7.1–7.5 complete (overlay, outcome tracking, toggles, hot-reload, docs) |
 
 **Total: 22/22 strategies complete (100%) | v1.0 tagged and pushed**
 
@@ -276,10 +276,10 @@ syngex/
 | Priority | Task | Notes |
 |----------|------|-------|
 | 🔴 High | **Full-market validation** | Run all 21 strategies through a complete market day. Validate signal quality, false positive rate, and strategy behavior under real conditions. |
-| 🟡 Medium | Phase 7.5 — Documentation | Update README with strategy index, setup guide, API reference, and architecture overview |
+| 🟡 Medium |  |
 | 🟢 Low | Future — Backtesting framework | Use signal_outcomes.jsonl for historical strategy performance analysis |
 | 🟢 Low | Future — Real execution pipeline | TradeStation API integration for automated order placement |
 
 ---
 
-*Last updated: 2026-04-30 — v1.0 — All 21 tradable strategies live, Phase 7.1–7.4 complete, awaiting full-market validation*
+*Last updated: 2026-04-30 — v1.0 — All 21 tradable strategies live, Phase 7.1–7.5 complete, awaiting full-market validation*
