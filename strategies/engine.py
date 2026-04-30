@@ -54,7 +54,26 @@ class BaseStrategy:
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         """Allow subclasses to accept any init args (calculator, config, etc)."""
-        pass
+        self._params: Dict[str, Any] = {}
+
+    def set_params(self, params: Dict[str, Any]) -> None:
+        """Apply config params to this strategy."""
+        self._params = params
+
+    def _apply_params(self, data: Dict[str, Any]) -> None:
+        """
+        Apply config params from data dict to this strategy.
+
+        This is called at the start of evaluate() to override
+        class-level constants with config values.
+
+        Usage in subclasses (override in each strategy):
+            self._apply_params(data)
+            # Now use self.params for config-driven values
+        """
+        params = data.get("params", {}).get(self.strategy_id, {})
+        if params:
+            self.set_params(params)
 
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """
@@ -188,6 +207,11 @@ class StrategyEngine:
             if not strategy.enabled:
                 continue
             try:
+                # Inject params into data before evaluation
+                params = data.get("params", {})
+                strat_params = params.get(strategy.strategy_id, {})
+                strategy.set_params(strat_params)
+
                 signals = strategy.evaluate(data)
                 for signal in signals:
                     # Apply minimum confidence threshold

@@ -134,6 +134,9 @@ class SyngexOrchestrator:
 
         # Strategy configuration (loaded from YAML in initialize())
         self._strategy_config: Dict[str, Any] = {}
+        self._config_path = Path(__file__).parent / "config" / "strategies.yaml"
+        self._config_mtime: float = 0.0  # Last known modification time
+        self._config_lock = asyncio.Lock()  # Thread-safe config reload
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -248,6 +251,9 @@ class SyngexOrchestrator:
             self._start_dashboard()
 
         try:
+            # Start config watcher task
+            config_task = asyncio.create_task(self._watch_config())
+
             while self._running:
                 now = time.monotonic()
 
@@ -272,6 +278,7 @@ class SyngexOrchestrator:
 
                 await asyncio.sleep(0.25)
         finally:
+            config_task.cancel()
             self._stop_dashboard()
 
     async def shutdown(self) -> None:
@@ -293,6 +300,73 @@ class SyngexOrchestrator:
         summary = self._calculator.get_summary() if self._calculator else {}
         logger.info("Final state: %s", summary)
         logger.info("System shutdown complete.")
+
+    # ------------------------------------------------------------------
+    # Config hot-reload
+    # ------------------------------------------------------------------
+
+    async def _reload_config(self) -> None:
+        """Re-read config and apply new params to all strategies."""
+        async with self._config_lock:
+            try:
+                if not self._config_path.exists():
+                    return
+
+                mtime = self._config_path.stat().st_mtime
+                if mtime == self._config_mtime:
+                    return  # No change
+
+                with open(self._config_path, "r") as f:
+                    strategy_config = yaml.safe_load(f)
+
+                self._config_mtime = mtime
+                self._strategy_config = strategy_config
+
+                # Apply global config
+                global_cfg = strategy_config.get("global", {})
+                if global_cfg and self._strategy_engine:
+                    self._strategy_engine.config.min_confidence = global_cfg.get("min_confidence", 0.35)
+                    self._strategy_engine.config.max_signals_per_tick = global_cfg.get("max_signals_per_tick", 10)
+                    self._strategy_engine.config.dedup_window_seconds = global_cfg.get("dedup_window_seconds", 60.0)
+                    log_path = global_cfg.get("signal_log_path", "log/signals.jsonl")
+                    self._strategy_engine.config.signal_log_path = str(self._data_dir.parent / log_path)
+
+                # Apply per-strategy params
+                for layer in ["layer1", "layer2", "layer3", "full_data"]:
+                    layer_config = strategy_config.get(layer, {})
+                    for strat_name, strat_cfg in layer_config.items():
+                        params = strat_cfg.get("params", {})
+                        # Find the registered strategy by name
+                        if self._strategy_engine:
+                            for strat in self._strategy_engine._strategies:
+                                if strat.strategy_id == strat_name:
+                                    strat.set_params(params)
+                                    break
+
+                # Apply filter config
+                filter_cfg = strategy_config.get("filter", {}).get("net_gamma", {})
+                if filter_cfg and self._gamma_filter:
+                    params = filter_cfg.get("params", {})
+                    if "flip_buffer" in params:
+                        self._gamma_filter.flip_buffer = params["flip_buffer"]
+
+                logger.info("Config reloaded: %d strategies updated", len(self._strategy_engine._strategies) if self._strategy_engine else 0)
+
+            except Exception as exc:
+                logger.error("Config reload error: %s", exc, exc_info=True)
+
+    async def _watch_config(self) -> None:
+        """Watch config file for changes and reload when detected."""
+        while self._running:
+            try:
+                if self._config_path.exists():
+                    mtime = self._config_path.stat().st_mtime
+                    if mtime != self._config_mtime:
+                        await self._reload_config()
+            except Exception as exc:
+                logger.debug("Config watch error: %s", exc)
+
+            await asyncio.sleep(2)  # Check every 2 seconds
 
     # ------------------------------------------------------------------
     # Config-driven strategy registration
