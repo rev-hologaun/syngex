@@ -179,13 +179,14 @@ class SyngexOrchestrator:
             "net_gamma": RollingWindow(window_type="time", window_size=300),
             "net_gamma_5m": RollingWindow(window_type="time", window_size=300),
             "volume_5m": RollingWindow(window_type="time", window_size=300),
+            # Layer 2 rolling windows
+            "total_delta_5m": RollingWindow(window_type="time", window_size=300),
+            "delta": RollingWindow(window_type="time", window_size=300),
+            "volume": RollingWindow(window_type="time", window_size=300),
         }
 
-        # Layer 2 rolling windows
-        if "delta" not in self._rolling_data:
-            self._rolling_data["delta"] = RollingWindow(window_type="time", window_size=300)
-        if "volume" not in self._rolling_data:
-            self._rolling_data["volume"] = RollingWindow(window_type="time", window_size=300)
+        # Per-strike IV windows (populated lazily)
+        self._iv_windows: Dict[str, RollingWindow] = {}
 
         # Wire callback: ingestor → calculator + engine
         self._client.set_on_message_callback(self._on_message)
@@ -308,6 +309,20 @@ class SyngexOrchestrator:
                 if "volume" in self._rolling_data:
                     total_vol = gex_summary.get("total_volume", 0)
                     self._rolling_data["volume"].push(total_vol)
+                # Track total_delta_5m for delta_volume_exhaustion
+                if "total_delta_5m" in self._rolling_data:
+                    self._rolling_data["total_delta_5m"].push(net_delta)
+
+                # Per-strike IV windows for iv_gex_divergence
+                iv_by_strike = self._calculator.get_iv_by_strike_avg()
+                for strike, avg_iv in iv_by_strike.items():
+                    key = f"iv_{strike}_5m"
+                    if key not in self._rolling_data:
+                        self._rolling_data[key] = RollingWindow(
+                            window_type="time", window_size=300
+                        )
+                    if avg_iv > 0:
+                        self._rolling_data[key].push(avg_iv)
 
         except Exception as exc:
             logger.error("Error processing message: %s", exc, exc_info=True)

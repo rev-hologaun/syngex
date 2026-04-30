@@ -25,11 +25,34 @@ logger = logging.getLogger("Syngex.Engine.GEXCalculator")
 
 @dataclass
 class _StrikeBucket:
-    """Aggregate state for a single strike price."""
+    """Aggregate state for a single strike price.
+
+    Note: OI values from stream greeks are **relative** (not absolute
+    contract counts). The stream does not include real open interest —
+    OI defaults to 1.0 per message. Use `set_open_interest()` to update
+    with real OI from REST API if/when we add periodic OI fetching.
+
+    OI-dependent strategies (e.g. Call/Put Flow Asymmetry) use relative
+    ratios which still work for detecting asymmetry direction and magnitude.
+    """
 
     strike: float
-    call_gamma_oi: float = 0.0        # Σ(gamma × OI) for calls
-    put_gamma_oi: float = 0.0          # Σ(gamma × OI) for puts
+    # Accumulated gamma × OI products (used for GEX calculation)
+    call_gamma_oi: float = 0.0
+    put_gamma_oi: float = 0.0
+    # Individual gamma sums (for per-strike analysis)
+    call_gamma: float = 0.0
+    put_gamma: float = 0.0
+    # Open interest (relative from stream; update via set_open_interest)
+    call_oi: float = 0.0
+    put_oi: float = 0.0
+    # Delta sums (for per-strike delta analysis)
+    call_delta: float = 0.0
+    put_delta: float = 0.0
+    # IV sums (for per-strike IV averaging)
+    call_iv_sum: float = 0.0
+    put_iv_sum: float = 0.0
+    # Message counts
     call_count: int = 0
     put_count: int = 0
     last_update: float = field(default_factory=time.perf_counter)
@@ -42,6 +65,16 @@ class _StrikeBucket:
     @property
     def total_gamma_oi(self) -> float:
         return self.call_gamma_oi + self.put_gamma_oi
+
+    @property
+    def net_oi(self) -> float:
+        """Net open interest: calls minus puts."""
+        return self.call_oi - self.put_oi
+
+    @property
+    def net_delta(self) -> float:
+        """Net delta: call_delta_sum minus put_delta_sum."""
+        return self.call_delta - self.put_delta
 
 
 class GEXCalculator:
@@ -83,6 +116,7 @@ class GEXCalculator:
             - underlying_update  → updates the underlying price
             - raw TradeStation quotes  → extracts underlying price
             - raw TradeStation option-chain  → extracts contracts
+            - stream greeks objects  → infers strike/side from greeks
         """
         self._msg_count += 1
 
@@ -120,6 +154,13 @@ class GEXCalculator:
             chain = message.get("optionChain") or message.get("option_chain")
             if chain and isinstance(chain, dict):
                 self._process_raw_option_chain(chain)
+                return
+
+            # Stream greeks objects — flat JSON with Delta, Gamma, IntrinsicValue, etc.
+            # No contract identifier, strike, or side. Must infer everything.
+            if self._is_stream_greeks(message):
+                self._option_count += 1
+                self._update_strike_from_stream(message)
                 return
 
         except Exception as exc:
@@ -239,6 +280,207 @@ class GEXCalculator:
         return profile
 
     # ------------------------------------------------------------------
+    # Greeks Summary (for Layer 2 strategies)
+    # ------------------------------------------------------------------
+
+    def get_greeks_summary(self) -> Dict[float, Dict[str, float]]:
+        """Return per-strike greeks summary for strategy use.
+
+        Returns dict mapping strike -> {
+            'net_gamma': float,
+            'call_gamma': float,
+            'put_gamma': float,
+            'call_oi': float,
+            'put_oi': float,
+            'net_oi': float,
+            'net_delta': float,
+            'call_delta_sum': float,
+            'put_delta_sum': float,
+        }
+
+        Note: OI values are **relative** (not absolute contract counts).
+        OI-dependent strategies use relative ratios which still work for
+        detecting asymmetry direction and magnitude.
+        """
+        summary: Dict[float, Dict[str, float]] = {}
+        for strike, bucket in self._ladder.items():
+            summary[strike] = {
+                "net_gamma": bucket.net_gamma,
+                "call_gamma": bucket.call_gamma,
+                "put_gamma": bucket.put_gamma,
+                "call_oi": bucket.call_oi,
+                "put_oi": bucket.put_oi,
+                "net_oi": bucket.net_oi,
+                "net_delta": bucket.net_delta,
+                "call_delta_sum": bucket.call_delta,
+                "put_delta_sum": bucket.put_delta,
+            }
+        return summary
+
+    # ------------------------------------------------------------------
+    # Layer 2 helper methods (for strategy use)
+    # ------------------------------------------------------------------
+
+    def get_delta_by_strike(self, strike: float) -> Dict[str, float]:
+        """Return delta data for a specific strike.
+
+        Returns dict with:
+            call_delta: sum of call deltas at this strike
+            put_delta: sum of put deltas at this strike
+            net_delta: call_delta - put_delta
+            call_count, put_count: number of messages
+        """
+        bucket = self._ladder.get(strike)
+        if bucket is None:
+            return {
+                "call_delta": 0.0,
+                "put_delta": 0.0,
+                "net_delta": 0.0,
+                "call_count": 0,
+                "put_count": 0,
+            }
+        return {
+            "call_delta": bucket.call_delta,
+            "put_delta": bucket.put_delta,
+            "net_delta": bucket.net_delta,
+            "call_count": bucket.call_count,
+            "put_count": bucket.put_count,
+        }
+
+    def get_iv_by_strike(self, strike: float) -> Optional[float]:
+        """Return average IV at a specific strike.
+
+        IV is tracked per-message and averaged across all messages
+        for that strike/side.
+        """
+        bucket = self._ladder.get(strike)
+        if bucket is None:
+            return None
+
+        total_iv = bucket.call_iv_sum + bucket.put_iv_sum
+        total_count = bucket.call_count + bucket.put_count
+        if total_count == 0:
+            return None
+        return total_iv / total_count
+
+    def get_iv_skew(self) -> Optional[float]:
+        """Return IV skew: average call IV minus average put IV.
+
+        Positive skew = calls more expensive (bullish fear).
+        Negative skew = puts more expensive (bearish fear).
+
+        Returns None if insufficient data.
+        """
+        total_call_iv = 0.0
+        total_put_iv = 0.0
+        call_count = 0
+        put_count = 0
+
+        for bucket in self._ladder.values():
+            total_call_iv += bucket.call_iv_sum
+            call_count += bucket.call_count
+            total_put_iv += bucket.put_iv_sum
+            put_count += bucket.put_count
+
+        if call_count == 0 or put_count == 0:
+            return None
+
+        avg_call_iv = total_call_iv / call_count
+        avg_put_iv = total_put_iv / put_count
+        return avg_call_iv - avg_put_iv
+
+    def get_greeks_cache(self) -> Dict[str, Any]:
+        """Return a read-only view of per-strike greeks data for Layer 2 strategies.
+
+        Returns dict mapping strike -> {"calls": [...], "puts": [...]}
+        where each entry contains delta, gamma, iv, oi from stream messages.
+
+        Note: This is a snapshot of current state. For read-only access,
+        consumers should not modify the returned data.
+        """
+        cache: Dict[str, Any] = {}
+        for strike, bucket in self._ladder.items():
+            cache[strike] = {
+                "call_delta": bucket.call_delta,
+                "put_delta": bucket.put_delta,
+                "call_gamma": bucket.call_gamma,
+                "put_gamma": bucket.put_gamma,
+                "call_oi": bucket.call_oi,
+                "put_oi": bucket.put_oi,
+                "call_count": bucket.call_count,
+                "put_count": bucket.put_count,
+                "call_iv_sum": bucket.call_iv_sum,
+                "put_iv_sum": bucket.put_iv_sum,
+                "net_gamma": bucket.net_gamma,
+                "net_oi": bucket.net_oi,
+            }
+        return cache
+
+    def set_open_interest(self, strike: float, call_oi: float, put_oi: float) -> None:
+        """Update open interest for a specific strike.
+
+        Called from REST API data when we add periodic OI fetching.
+        Replaces the relative OI (default 1.0) with real contract counts.
+
+        Args:
+            strike: The strike price to update.
+            call_oi: Real call open interest (contract count).
+            put_oi: Real put open interest (contract count).
+        """
+        bucket = self._ladder.get(strike)
+        if bucket is None:
+            logger.warning("No bucket for strike %.1f — OI update ignored", strike)
+            return
+
+        # Recalculate gamma_oi products with real OI
+        # gamma_oi = gamma × oi for each side
+        # We preserve the per-gamma values and recompute products
+        if bucket.call_count > 0:
+            avg_call_gamma = bucket.call_gamma / bucket.call_count
+            bucket.call_gamma_oi = avg_call_gamma * call_oi
+            bucket.call_oi = call_oi
+        if bucket.put_count > 0:
+            avg_put_gamma = bucket.put_gamma / bucket.put_count
+            bucket.put_gamma_oi = avg_put_gamma * put_oi
+            bucket.put_oi = put_oi
+
+        self._net_gamma_dirty = True
+        logger.debug("Updated OI for strike %.1f: call=%.0f put=%.0f", strike, call_oi, put_oi)
+
+    def get_iv_by_strike_avg(self) -> Dict[float, float]:
+        """Return average IV per strike for all strikes with data.
+
+        Returns dict mapping strike -> average IV value.
+        Used by iv_gex_divergence for rolling IV window tracking.
+        """
+        result: Dict[float, float] = {}
+        for strike, bucket in self._ladder.items():
+            total_count = bucket.call_count + bucket.put_count
+            if total_count > 0:
+                total_iv = bucket.call_iv_sum + bucket.put_iv_sum
+                result[strike] = total_iv / total_count
+        return result
+
+    def get_atm_strike(self, price: float) -> Optional[float]:
+        """Find the nearest strike in the gamma ladder to the current price.
+
+        Public API — replaces direct access to _ladder.
+        """
+        if not self._ladder:
+            return None
+
+        nearest = None
+        min_dist = float("inf")
+
+        for strike in self._ladder:
+            dist = abs(strike - price)
+            if dist < min_dist:
+                min_dist = dist
+                nearest = strike
+
+        return nearest
+
+    # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
 
@@ -253,6 +495,179 @@ class GEXCalculator:
     def _is_option_contract(self, msg: Dict[str, Any]) -> bool:
         """Check if this message is a raw TradeStation option contract."""
         return "Gamma" in msg and "DailyOpenInterest" in msg
+
+    def _is_stream_greeks(self, msg: Dict[str, Any]) -> bool:
+        """
+        Detect a stream greeks object from the TradeStation option-chain SSE.
+
+        These are flat JSON objects with Delta, Gamma, IntrinsicValue, etc.
+        but NO contract identifier, strike, or side field.
+
+        Heuristic: has Delta AND Gamma AND IntrinsicValue, but NO
+        DailyOpenInterest (which distinguishes from the old contract format).
+        """
+        has_greeks = "Delta" in msg and "Gamma" in msg
+        has_intrinsic = "IntrinsicValue" in msg
+        no_oi = "DailyOpenInterest" not in msg
+        return has_greeks and has_intrinsic and no_oi
+
+    def _infer_side(self, delta: float) -> str:
+        """Infer call/put from Delta sign. Delta > 0 → call, Delta < 0 → put."""
+        return "call" if delta > 0 else "put"
+
+    def _infer_strike_from_intrinsic(self, intrinsic_value: float, delta: float) -> Optional[float]:
+        """
+        Infer strike price from IntrinsicValue and underlying price.
+
+        For ITM options (intrinsic > 0):
+            Put:  strike = underlying + intrinsic
+            Call: strike = underlying - intrinsic
+
+        For OTM options (intrinsic == 0), return None — strike must be
+        approximated from delta/probability instead.
+
+        Returns the strike rounded to the nearest $2.50 interval (standard
+        for equity options), or None if strike cannot be determined.
+        """
+        if self.underlying_price <= 0:
+            return None
+
+        if intrinsic_value > 0:
+            # ITM: exact strike from intrinsic value
+            if delta > 0:
+                # Call: intrinsic = underlying - strike
+                strike = self.underlying_price - intrinsic_value
+            else:
+                # Put: intrinsic = strike - underlying
+                strike = self.underlying_price + intrinsic_value
+            return self._round_strike(strike)
+
+        return None  # OTM — need delta-based approximation
+
+    def _infer_strike_from_probability(self, prob_itm: float, delta: float) -> Optional[float]:
+        """
+        Approximate strike for OTM options using ProbabilityITM.
+
+        Calibrated mapping: each ~10% drop in ProbITM ≈ 1 strike interval ($2.50)
+        from ATM. This is more reliable than delta for strike inference.
+
+        For calls: ProbITM directly gives the probability.
+        For puts: ProbITM = 1 - ProbOTM (but stream gives both).
+
+        Calibration (TSLA observed):
+            ProbITM ~0.41 → 1 strike OTM
+            ProbITM ~0.30 → 2 strikes OTM
+            ProbITM ~0.20 → 3 strikes OTM
+            ProbITM ~0.13 → 4 strikes OTM
+            ProbITM ~0.08 → 5 strikes OTM
+        """
+        if self.underlying_price <= 0:
+            return None
+
+        # Use ProbabilityITM for calls, (1 - ProbITM) for puts
+        if delta > 0:
+            # Call: ProbITM is directly available
+            prob = prob_itm
+        else:
+            # Put: use 1 - ProbITM (since ProbITM for puts is low when OTM)
+            # Actually, for puts ProbITM IS the probability the put is ITM
+            # An OTM put has LOW ProbITM (e.g., 0.08 for 5 strikes OTM)
+            # So we need 1 - ProbITM to get the "distance" metric
+            prob = 1.0 - prob_itm
+
+        # If prob is very close to 0.5, this is ATM — can't distinguish
+        if abs(prob - 0.5) < 0.05:
+            return None
+
+        # Distance from ATM in probability units
+        prob_distance = abs(prob - 0.5)
+
+        # Each $2.50 strike ≈ 0.10 probability change near ATM
+        prob_per_strike = 0.10
+        strikes_away = prob_distance / prob_per_strike
+
+        strikes_away_rounded = round(strikes_away)
+
+        if strikes_away_rounded < 1:
+            return None
+
+        # Direction: OTM call → strike > underlying, OTM put → strike < underlying
+        if delta > 0:
+            strike = self.underlying_price + strikes_away_rounded * 2.5
+        else:
+            strike = self.underlying_price - strikes_away_rounded * 2.5
+
+        return self._round_strike(strike)
+
+    @staticmethod
+    def _round_strike(strike: float) -> float:
+        """Round to nearest $2.50 interval (standard equity option strike)."""
+        return round(strike / 2.5) * 2.5
+
+    def _update_strike_from_stream(self, msg: Dict[str, Any]) -> None:
+        """
+        Process a stream greeks object — infer strike, side, and update ladder.
+
+        Stream greeks objects have:
+            Delta, Theta, Gamma, Rho, Vega, ImpliedVolatility,
+            IntrinsicValue, ExtrinsicValue, TheoreticalValue,
+            ProbabilityITM, ProbabilityOTM, ProbabilityBE
+
+        Missing fields (inferred):
+            side    → from Delta sign
+            strike  → from IntrinsicValue + underlying_price (ITM)
+                      or from delta approximation (OTM)
+            open_interest → defaults to 1.0 (not in stream)
+
+        Note: OI values are **relative** (not absolute contract counts).
+        The stream does not include real open interest. Use
+        `set_open_interest()` to update with real OI from REST API
+        when we add periodic OI fetching.
+        """
+        # Extract greeks
+        try:
+            delta = float(msg.get("Delta", 0))
+            gamma = float(msg.get("Gamma", 0))
+            intrinsic = float(msg.get("IntrinsicValue", 0))
+        except (ValueError, TypeError):
+            return
+
+        if gamma <= 0:
+            return  # Skip invalid gamma
+
+        # Infer side from delta sign
+        side = self._infer_side(delta)
+
+        # Try to infer strike from intrinsic value (works for ITM)
+        strike = self._infer_strike_from_intrinsic(intrinsic, delta)
+
+        # If intrinsic is 0 (OTM), approximate from ProbabilityITM
+        if strike is None:
+            prob_itm = float(msg.get("ProbabilityITM", 0.5))
+            strike = self._infer_strike_from_probability(prob_itm, delta)
+
+        if strike is None or strike <= 0:
+            logger.debug(
+                "Cannot infer strike for delta=%.4f intrinsic=%.2f, skipping",
+                delta, intrinsic,
+            )
+            return
+
+        # Open interest not in stream — default to 1.0
+        # This means GEX values are relative, not absolute
+        oi = 1.0
+
+        # Extract IV from stream greeks
+        iv = float(msg.get("ImpliedVolatility", 0))
+
+        self._update_strike({
+            "strike": strike,
+            "gamma": gamma,
+            "open_interest": oi,
+            "side": side,
+            "delta": delta,
+            "iv": iv,
+        })
 
     def _update_strike_from_contract(self, msg: Dict[str, Any]) -> None:
         """Extract strike, gamma, OI, and side from a raw option contract message."""
@@ -336,6 +751,8 @@ class GEXCalculator:
         gamma = data["gamma"]
         oi = data["open_interest"]
         side = data.get("side", "")
+        delta = data.get("delta", 0.0)  # Optional from stream greeks
+        iv = data.get("iv", 0.0)  # Optional IV from stream greeks
 
         # Determine sign: call = +1, put = -1
         is_call = side == "call"
@@ -349,10 +766,27 @@ class GEXCalculator:
 
         if is_call:
             bucket.call_gamma_oi += contribution
+            bucket.call_gamma += gamma
+            bucket.call_oi += oi
+            bucket.call_delta += delta
+            bucket.call_iv_sum += iv
             bucket.call_count += 1
         else:
             bucket.put_gamma_oi += contribution
+            bucket.put_gamma += gamma
+            bucket.put_oi += oi
+            bucket.put_delta += delta
+            bucket.put_iv_sum += iv
             bucket.put_count += 1
 
         bucket.last_update = time.perf_counter()
         self._net_gamma_dirty = True
+
+    def set_underlying_price(self, price: float) -> None:
+        """
+        Set the underlying price directly.
+
+        Required for strike inference from stream greeks objects,
+        since the SSE stream does not include the underlying price.
+        """
+        self._update_underlying_price(price)

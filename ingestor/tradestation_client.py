@@ -58,6 +58,7 @@ class TradeStationClient:
         self._option_chain_failed = False
         self._session_lock = asyncio.Lock()
         self._watched_symbol: str = ""  # Symbol whose quotes feed the underlying price
+        self._stream_tasks: list[asyncio.Task] = []
 
     # ------------------------------------------------------------------
     # Public API

@@ -4,13 +4,14 @@ app_dashboard.py — Syngex Real-Time Gamma Exposure Dashboard
 Standalone Streamlit app that reads GEX data from a shared JSON file
 written by the Syngex orchestrator (`main.py`).
 
-Data file : data/gex_state.json  (written by orchestrator every ~1 s)
-Refresh   : every 2 s via Streamlit rerun
+Data file : data/gex_state.json  (written by orchestrator every ~1s)
+Refresh   : every 2s via Streamlit rerun
+Bind      : 0.0.0.0:8501
 
 Layout
 ------
-    Single-page "Command Center" — no tabs, no st.empty() placeholders.
-    Header → Metrics → 3-col grid (Profile / Flip / Walls) → Bottom table → Footer
+    Header → Metric cards → 3-col grid (Profile / Flip / Walls) →
+    Top Strikes table → Signals log → Footer
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ import streamlit as st
 
 DATA_DIR = Path(__file__).parent / "data"
 DATA_FILE = DATA_DIR / "gex_state.json"
+SIGNALS_FILE = Path(__file__).parent / "log" / "signals.jsonl"
 POLL_INTERVAL = 2  # seconds between polls
 
 # ---------------------------------------------------------------------------
@@ -36,7 +38,7 @@ POLL_INTERVAL = 2  # seconds between polls
 
 st.set_page_config(
     page_title="Syngex GEX Dashboard",
-    page_icon="🐙",
+    page_icon="🕸️",
     layout="wide",
 )
 
@@ -66,6 +68,20 @@ def load_gex_state() -> dict | None:
         return None
 
 
+@st.cache_data(ttl=2)
+def load_signals(n: int = 20) -> list[dict]:
+    """Load the N most recent signals from the signals log."""
+    if not SIGNALS_FILE.exists():
+        return []
+    try:
+        lines = SIGNALS_FILE.read_text().strip().splitlines()
+        # Read last N lines
+        recent = [json.loads(line) for line in lines[-n:] if line.strip()]
+        return list(reversed(recent))  # Oldest first
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
 def is_data_stale(state: dict, max_age_seconds: int = 30) -> bool:
     """Return True if the last_updated timestamp is older than *max_age_seconds*."""
     try:
@@ -86,7 +102,7 @@ def render_header(state: dict) -> None:
     symbol = state.get("symbol", "???")
     price = state.get("underlying_price", 0.0)
     st.markdown(
-        f"### 🐙 **Syngex Gamma Dashboard** — **{symbol}**  |  Price: ${price:,.2f}"
+        f"### 🕸️ **Syngex Gamma Dashboard** — **{symbol}**  |  Price: ${price:,.2f}"
     )
 
 
@@ -95,6 +111,7 @@ def render_metrics(state: dict) -> None:
     net_gamma = state.get("net_gamma", 0.0)
     active_strikes = state.get("active_strikes", 0)
     total_messages = state.get("total_messages", 0)
+    underlying_price = state.get("underlying_price", 0.0)
 
     # Color decision for the Net Gamma delta
     if net_gamma > 0:
@@ -112,7 +129,7 @@ def render_metrics(state: dict) -> None:
     with col1:
         st.metric(
             label="📈 Underlying Price",
-            value=f"${state.get('underlying_price', 0.0):,.2f}",
+            value=f"${underlying_price:,.2f}",
         )
 
     with col2:
@@ -316,12 +333,40 @@ def render_top_strikes(state: dict) -> None:
     st.dataframe(top_df, width="stretch", height=600)
 
 
-def render_status(state: dict | None) -> None:
+def render_signals(signals: list[dict]) -> None:
+    """Display recent strategy signals."""
+    st.subheader("📡 Recent Signals")
+
+    if not signals:
+        st.info("No signals generated yet. Start the orchestrator to generate signals.")
+        return
+
+    # Build display table
+    sig_df = pd.DataFrame(
+        [
+            {
+                "Time": s.get("timestamp", ""),
+                "Strategy": s.get("strategy_id", ""),
+                "Direction": s.get("direction", ""),
+                "Confidence": f"{s.get('confidence', 0):.2f}",
+                "Entry": f"${s.get('entry', 0):,.2f}",
+                "Stop": f"${s.get('stop', 0):,.2f}",
+                "Target": f"${s.get('target', 0):,.2f}",
+                "Reason": s.get("reason", ""),
+            }
+            for s in signals
+        ]
+    )
+
+    st.dataframe(sig_df, width="stretch", height=min(400, len(signals) * 35))
+
+
+def render_status(state: dict | None, signals: list[dict]) -> None:
     """Footer / status message."""
     if state is None:
         st.info(
             "⏳ **Waiting for data…**  "
-            "Start the Syngex orchestrator (`python3 main.py TSLA`) and the "
+            "Start the Syngex orchestrator (`python3 main.py TSLA dashboard`) and the "
             "dashboard will update automatically."
         )
     else:
@@ -336,23 +381,32 @@ def render_status(state: dict | None) -> None:
         else:
             st.caption(f"Last updated: {last_updated}  |  Symbol: {symbol}")
 
+        # Show strategy engine status
+        engine_status = state.get("strategy_engine", {})
+        if engine_status:
+            signal_count = engine_status.get("signal_count", 0)
+            registered = engine_status.get("registered_strategies", 0)
+            st.caption(f"Strategy engine: {registered} strategies registered, {signal_count} signals produced")
+
 
 # ---------------------------------------------------------------------------
 # Main loop — auto-refresh
 # ---------------------------------------------------------------------------
 
 state = load_gex_state()
+signals = load_signals(20)
 
 if state is None:
     st.info(
         "⏳ **Waiting for data…**  "
-        "Start the Syngex orchestrator (`python3 main.py TSLA`) and the "
+        "Start the Syngex orchestrator (`python3 main.py TSLA dashboard`) and the "
         "dashboard will update automatically."
     )
     # Poll until data arrives
     while state is None:
         time.sleep(1)
         state = load_gex_state()
+        signals = load_signals(20)
 
 # All data loaded — render single-page Command Center layout
 render_header(state)
@@ -373,8 +427,11 @@ with col3:
 # Bottom full-width table
 render_top_strikes(state)
 
+# Recent signals
+render_signals(signals)
+
 # Status footer
-render_status(state)
+render_status(state, signals)
 
 # Auto-refresh loop
 while True:
