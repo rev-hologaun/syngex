@@ -88,6 +88,12 @@ from strategies.layer3 import (
     StrikeConcentration,
     ThetaBurn,
 )
+from strategies.full_data import (
+    IVSkewSqueeze,
+    ProbWeightedMagnet,
+    ProbDistributionShift,
+    ExtrinsicIntrinsicFlow,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +195,19 @@ class SyngexOrchestrator:
             for strat_cls in layer3_strategies:
                 self._strategy_engine.register(strat_cls(self._calculator))
             logger.info("Registered %d layer3 strategies", len(layer3_strategies))
+
+        # Register Layer 4 strategies (Full-Data / v2)
+        ENABLE_FULL_DATA = True
+        if ENABLE_FULL_DATA:
+            full_data_strategies = (
+                IVSkewSqueeze,
+                ProbWeightedMagnet,
+                ProbDistributionShift,
+                ExtrinsicIntrinsicFlow,
+            )
+            for strat_cls in full_data_strategies:
+                self._strategy_engine.register(strat_cls(self._calculator))
+            logger.info("Registered %d full-data strategies", len(full_data_strategies))
 
         # Rolling windows for key metrics
         self._rolling_data = {
