@@ -114,10 +114,11 @@ class SyngexOrchestrator:
     PROFILE_INTERVAL: float = 5.0
 
     def __init__(
-        self, symbol: str, mode: str = "stream"
+        self, symbol: str, mode: str = "stream", port: int = 8501
     ) -> None:
         self.symbol = symbol.upper()
         self.mode = mode.lower()
+        self._port = port
         self._client: TradeStationClient | None = None
         self._calculator: GEXCalculator | None = None
         self._dashboard: SyngexDashboard | None = None
@@ -130,9 +131,9 @@ class SyngexOrchestrator:
         self._dashboard_process: subprocess.Popen | None = None
         self._state_export_timer: float = 0.0
 
-        # Shared data file for Streamlit dashboard
+        # Shared data file for Streamlit dashboard (symbol-specific)
         self._data_dir = Path(__file__).parent / "data"
-        self._data_file = self._data_dir / "gex_state.json"
+        self._data_file = self._data_dir / f"gex_state_{self.symbol}.json"
 
         # Strategy configuration (loaded from YAML in initialize())
         self._strategy_config: Dict[str, Any] = {}
@@ -158,11 +159,12 @@ class SyngexOrchestrator:
         # Phase 0: Strategy Engine + Filter
         self._gamma_filter = NetGammaFilter(flip_buffer=0.5)
 
-        # Signal tracker for outcome resolution
+        # Signal tracker for outcome resolution (symbol-specific log)
         log_dir = self._data_dir.parent / "log"
         self._signal_tracker = SignalTracker(
             max_hold_seconds=900,
             log_dir=str(log_dir),
+            symbol=self.symbol,
         )
 
         # Load strategy configuration from YAML
@@ -654,6 +656,11 @@ class SyngexOrchestrator:
         # Ensure data directory exists
         self._data_dir.mkdir(parents=True, exist_ok=True)
 
+        # Write sidecar file so the dashboard knows which symbol to read
+        symbol_file = self._data_dir / "current_symbol.txt"
+        with open(symbol_file, "w") as f:
+            f.write(self.symbol)
+
         script_path = Path(__file__).parent / "app_dashboard.py"
         venv_streamlit = Path(__file__).parent / "venv" / "bin" / "streamlit"
 
@@ -669,15 +676,19 @@ class SyngexOrchestrator:
                     "true",
                     "--browser.gatherUsageStats",
                     "false",
+                    "--server.port",
+                    str(self._port),
                 ],
                 cwd=str(Path(__file__).parent),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
             logger.info(
-                "Command Center started (PID %d).  "
-                "Open http://localhost:8501 in a browser.",
+                "Command Center started (PID %d, port %d).  "
+                "Open http://localhost:%d in a browser.",
                 self._dashboard_process.pid,
+                self._port,
+                self._port,
             )
         except FileNotFoundError:
             logger.warning(
@@ -780,10 +791,16 @@ async def main() -> None:
         action="store_true",
         help="(deprecated — quotes are always subscribed)",
     )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8501,
+        help="Port for the Streamlit Command Center (default: 8501)",
+    )
     args = parser.parse_args()
 
     orchestrator = SyngexOrchestrator(
-        symbol=args.symbol, mode=args.mode
+        symbol=args.symbol, mode=args.mode, port=args.port
     )
 
     # Graceful shutdown on signals

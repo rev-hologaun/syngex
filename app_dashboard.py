@@ -30,8 +30,16 @@ import streamlit as st
 # ---------------------------------------------------------------------------
 
 DATA_DIR = Path(__file__).parent / "data"
-DATA_FILE = DATA_DIR / "gex_state.json"
-SIGNALS_FILE = Path(__file__).parent / "log" / "signals.jsonl"
+LOG_DIR = Path(__file__).parent / "log"
+
+# Read the current symbol from the orchestrator's sidecar file
+_symbol_file = DATA_DIR / "current_symbol.txt"
+if _symbol_file.exists():
+    _current_symbol = _symbol_file.read_text().strip()
+else:
+    _current_symbol = "UNKNOWN"
+
+DATA_FILE = DATA_DIR / f"gex_state_{_current_symbol}.json"
 POLL_INTERVAL = 2  # seconds between polls
 
 # ---------------------------------------------------------------------------
@@ -73,10 +81,11 @@ def load_gex_state() -> dict | None:
 @st.cache_data(ttl=2)
 def load_signals(n: int = 20) -> list[dict]:
     """Load the N most recent signals from the signals log."""
-    if not SIGNALS_FILE.exists():
+    signals_file = LOG_DIR / f"signals.jsonl"
+    if not signals_file.exists():
         return []
     try:
-        lines = SIGNALS_FILE.read_text().strip().splitlines()
+        lines = signals_file.read_text().strip().splitlines()
         # Read last N lines
         recent = [json.loads(line) for line in lines[-n:] if line.strip()]
         return list(reversed(recent))  # Oldest first

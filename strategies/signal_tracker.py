@@ -80,12 +80,14 @@ class SignalTracker:
         self,
         max_hold_seconds: int = 900,
         log_dir: str = "log",
+        symbol: str = "UNKNOWN",
     ) -> None:
         self.max_hold_seconds = max_hold_seconds
         self._open_signals: Dict[str, OpenSignal] = {}
         self._resolved_signals: List[ResolvedSignal] = []
         self._log_dir = Path(log_dir)
         self._log_dir.mkdir(parents=True, exist_ok=True)
+        self._symbol = symbol
 
         # Per-strategy statistics
         self._strategy_stats: Dict[str, Dict[str, Any]] = {}
@@ -328,7 +330,7 @@ class SignalTracker:
 
     def _save_resolved(self) -> None:
         """Append newly resolved signals to disk for persistence."""
-        log_path = self._log_dir / "signal_outcomes.jsonl"
+        log_path = self._log_dir / f"signal_outcomes_{self._symbol}.jsonl"
         # Only write signals that haven't been persisted yet
         new_start = self._saved_count
         for r in self._resolved_signals[new_start:]:
@@ -358,7 +360,7 @@ class SignalTracker:
 
     def _load_resolved(self) -> None:
         """Load previously resolved signals from disk."""
-        log_path = self._log_dir / "signal_outcomes.jsonl"
+        log_path = self._log_dir / f"signal_outcomes_{self._symbol}.jsonl"
         if not log_path.exists():
             return
         try:
