@@ -40,6 +40,9 @@ class OpenSignal:
     reason: str = ""
     metadata: Dict[str, Any] = field(default_factory=dict)
 
+    # Per-strategy hold time (0 = use global default)
+    max_hold_seconds: int = 0
+
     # Computed
     risk: float = 0.0
     reward: float = 0.0
@@ -81,8 +84,20 @@ class SignalTracker:
         max_hold_seconds: int = 900,
         log_dir: str = "log",
         symbol: str = "UNKNOWN",
+        strategy_hold_times: Optional[Dict[str, int]] = None,
     ) -> None:
+        """
+        Initialize the SignalTracker.
+
+        Args:
+            max_hold_seconds: Global default max hold time (seconds) for strategies
+                              that don't have a per-strategy override.
+            log_dir: Directory for signal outcome logs.
+            symbol: Symbol this tracker is monitoring.
+            strategy_hold_times: Optional dict mapping strategy_id to max_hold_seconds.
+        """
         self.max_hold_seconds = max_hold_seconds
+        self._strategy_hold_times = strategy_hold_times or {}
         self._open_signals: Dict[str, OpenSignal] = {}
         self._resolved_signals: List[ResolvedSignal] = []
         self._log_dir = Path(log_dir)
@@ -106,10 +121,14 @@ class SignalTracker:
         """
         signal_id = f"{signal['strategy_id']}_{signal['timestamp']:.0f}"
 
+        # Look up per-strategy hold time; fall back to global default (0)
+        strat_id = signal.get("strategy_id", "")
+        hold_seconds = self._strategy_hold_times.get(strat_id, 0)
+
         open_signal = OpenSignal(
             signal_id=signal_id,
             direction=signal.get("direction", "LONG"),
-            strategy_id=signal.get("strategy_id", ""),
+            strategy_id=strat_id,
             entry=float(signal.get("entry", 0)),
             stop=float(signal.get("stop", 0)),
             target=float(signal.get("target", 0)),
@@ -117,6 +136,7 @@ class SignalTracker:
             timestamp=float(signal.get("timestamp", time.time())),
             reason=signal.get("reason", ""),
             metadata=signal.get("metadata", {}),
+            max_hold_seconds=hold_seconds,
         )
 
         self._open_signals[signal_id] = open_signal
@@ -181,8 +201,9 @@ class SignalTracker:
         """Resolve a single signal based on price and time."""
         hold_time = timestamp - open_sig.timestamp
 
-        # Check time expiry first
-        if hold_time > self.max_hold_seconds:
+        # Check time expiry first (use per-strategy hold time if set, else global default)
+        max_hold = open_sig.max_hold_seconds if open_sig.max_hold_seconds > 0 else self.max_hold_seconds
+        if hold_time > max_hold:
             exit_price = price
             pnl = self._calc_pnl(open_sig.direction, open_sig.entry, exit_price)
             pnl_pct = (pnl / open_sig.risk * 100) if open_sig.risk > 0 else 0.0

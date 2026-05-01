@@ -13,6 +13,8 @@ global:
 layer1:
   gamma_wall_bounce:
     enabled: true
+    tracker:
+      max_hold_seconds: 1800
     params:
       wall_proximity_pct: 0.005
       stop_past_wall_pct: 0.004
@@ -23,6 +25,8 @@ layer1:
 
   magnet_accelerate:
     enabled: true
+    tracker:
+      max_hold_seconds: 3600
     params:
       magnet_proximity_pct: 0.01
       ema_fast: 9
@@ -31,6 +35,8 @@ layer1:
 
   gamma_flip_breakout:
     enabled: true
+    tracker:
+      max_hold_seconds: 3600
     params:
       flip_buffer_pct: 0.5
       atr_mult: 1.5
@@ -38,6 +44,8 @@ layer1:
 
   gamma_squeeze:
     enabled: true
+    tracker:
+      max_hold_seconds: 1800
     params:
       atr_threshold: 0.003
       volume_spike_ratio: 1.5
@@ -45,6 +53,8 @@ layer1:
 
   gex_imbalance:
     enabled: true
+    tracker:
+      max_hold_seconds: 2700
     params:
       put_heavy_threshold: 0.4
       call_heavy_threshold: 0.6
@@ -52,6 +62,8 @@ layer1:
 
   confluence_reversal:
     enabled: true
+    tracker:
+      max_hold_seconds: 3600
     params:
       min_confluence_score: 2
       max_confidence: 0.80
@@ -59,6 +71,8 @@ layer1:
 
   vol_compression_range:
     enabled: true
+    tracker:
+      max_hold_seconds: 7200
     params:
       compression_threshold_pct: 0.5
       wall_proximity_pct: 0.005
@@ -66,6 +80,8 @@ layer1:
 
   gex_divergence:
     enabled: true
+    tracker:
+      max_hold_seconds: 3600
     params:
       min_confidence: 0.35
 
@@ -73,6 +89,8 @@ layer1:
 layer2:
   delta_gamma_squeeze:
     enabled: true
+    tracker:
+      max_hold_seconds: 1800
     params:
       call_wall_proximity_pct: 0.02
       delta_accel_ratio: 1.15
@@ -82,6 +100,8 @@ layer2:
 
   delta_volume_exhaustion:
     enabled: true
+    tracker:
+      max_hold_seconds: 2700
     params:
       delta_decline_ratio: 0.90
       volume_decline_ratio: 0.85
@@ -90,6 +110,8 @@ layer2:
 
   call_put_flow_asymmetry:
     enabled: true
+    tracker:
+      max_hold_seconds: 3600
     params:
       flow_threshold: 1.5
       iv_skew_threshold: 0.03
@@ -99,6 +121,8 @@ layer2:
 
   iv_gex_divergence:
     enabled: true
+    tracker:
+      max_hold_seconds: 2700
     params:
       iv_decline_pct: 0.05
       min_confidence: 0.35
@@ -107,6 +131,8 @@ layer2:
 layer3:
   gamma_volume_convergence:
     enabled: true
+    tracker:
+      max_hold_seconds: 900
     params:
       delta_accel_ratio: 1.15
       gamma_spike_ratio: 1.20
@@ -119,6 +145,8 @@ layer3:
 
   iv_band_breakout:
     enabled: true
+    tracker:
+      max_hold_seconds: 2700
     params:
       price_compression_ratio: 0.30
       volume_spike_ratio: 1.20
@@ -130,6 +158,8 @@ layer3:
 
   strike_concentration:
     enabled: true
+    tracker:
+      max_hold_seconds: 900
     params:
       top_oi_strikes_count: 3
       bounce_proximity_pct: 0.003
@@ -142,6 +172,8 @@ layer3:
 
   theta_burn:
     enabled: true
+    tracker:
+      max_hold_seconds: 480
     params:
       min_net_gamma: 10000.0
       wall_proximity_pct: 0.005
@@ -157,6 +189,8 @@ layer3:
 full_data:
   iv_skew_squeeze:
     enabled: true
+    tracker:
+      max_hold_seconds: 14400
     params:
       skew_extreme_positive: 0.30
       skew_extreme_negative: -0.10
@@ -171,6 +205,8 @@ full_data:
 
   prob_weighted_magnet:
     enabled: true
+    tracker:
+      max_hold_seconds: 2700
     params:
       min_oi_concentration: 5.0
       consolidation_ratio: 0.40
@@ -184,6 +220,8 @@ full_data:
 
   prob_distribution_shift:
     enabled: true
+    tracker:
+      max_hold_seconds: 7200
     params:
       z_score_threshold: 2.0
       min_consecutive_signals: 3
@@ -197,6 +235,8 @@ full_data:
 
   extrinsic_intrinsic_flow:
     enabled: true
+    tracker:
+      max_hold_seconds: 10800
     params:
       extrinsic_expansion_threshold: 0.05
       extrinsic_collapse_threshold: 0.10

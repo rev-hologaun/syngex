@@ -161,14 +161,6 @@ class SyngexOrchestrator:
         # Phase 0: Strategy Engine + Filter
         self._gamma_filter = NetGammaFilter(flip_buffer=0.5)
 
-        # Signal tracker for outcome resolution (symbol-specific log)
-        log_dir = self._data_dir.parent / "log"
-        self._signal_tracker = SignalTracker(
-            max_hold_seconds=900,
-            log_dir=str(log_dir),
-            symbol=self.symbol,
-        )
-
         # Load strategy configuration from YAML
         config_path = Path(__file__).parent / "config" / "strategies.yaml"
         self._strategy_config: Dict[str, Any] = {}
@@ -182,6 +174,24 @@ class SyngexOrchestrator:
                 self._strategy_config = {}
         else:
             logger.warning("Strategy config not found at %s, using defaults", config_path)
+
+        # Build per-strategy hold times from YAML config
+        strategy_hold_times: Dict[str, int] = {}
+        for layer_key in ["layer1", "layer2", "layer3", "full_data"]:
+            layer_config = self._strategy_config.get(layer_key, {})
+            for strat_name, strat_cfg in layer_config.items():
+                hold = strat_cfg.get("tracker", {}).get("max_hold_seconds")
+                if hold is not None:
+                    strategy_hold_times[strat_name] = hold
+
+        # Signal tracker for outcome resolution (symbol-specific log)
+        log_dir = self._data_dir.parent / "log"
+        self._signal_tracker = SignalTracker(
+            max_hold_seconds=900,  # global default
+            strategy_hold_times=strategy_hold_times,
+            log_dir=str(log_dir),
+            symbol=self.symbol,
+        )
 
         # Apply global config to EngineConfig
         global_config = self._strategy_config.get("global", {})
