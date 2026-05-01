@@ -131,12 +131,16 @@ class NetGammaFilter:
         Positive gamma regime: dealers stabilize.
         Fade extremes, range-bound strategies.
         """
+        # No flip data yet — allow signal through
+        if self._flip_strike is None:
+            return True
+
         if signal.direction == Direction.LONG:
             # Longs allowed when price is above flip (momentum with dealer support)
-            return True
+            return self._underlying_price > self._flip_strike
         elif signal.direction == Direction.SHORT:
             # Shorts allowed as fade (deals sell rallies)
-            return True
+            return self._underlying_price < self._flip_strike
         return True
 
     def _evaluate_negative(self, signal: Signal) -> bool:
@@ -144,12 +148,16 @@ class NetGammaFilter:
         Negative gamma regime: dealers accelerate.
         Trend-follow, breakout-biased.
         """
+        # No flip data yet — allow signal through
+        if self._flip_strike is None:
+            return True
+
         if signal.direction == Direction.LONG:
             # Longs allowed when price is above flip (breakout momentum)
-            return True
+            return self._underlying_price > self._flip_strike
         elif signal.direction == Direction.SHORT:
             # Shorts allowed when price is below flip (breakdown momentum)
-            return True
+            return self._underlying_price < self._flip_strike
         return True
 
     def get_status(self) -> dict:
