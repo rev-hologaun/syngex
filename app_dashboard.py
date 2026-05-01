@@ -217,7 +217,7 @@ def render_gamma_profile(state: dict) -> None:
     base = alt.Chart(profile_df).encode(x=alt.X("strike:Q", scale=alt.Scale(zero=False)))
 
     # Gamma line
-    gamma_line = base.mark_line(color="steelblue", strokeWidth=2).encode(
+    gamma_line = base.mark_line(color="steelblue", strokeWidth=1).encode(
         y=alt.Y("net_gamma:Q", scale=alt.Scale(zero=False)),
         tooltip=["net_gamma"],
     )
