@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
+from strategies.rolling_keys import KEY_PRICE_5M
 
 logger = logging.getLogger("Syngex.Strategies.MagnetAccelerate")
 
@@ -153,7 +154,7 @@ class MagnetAccelerate(BaseStrategy):
         stop = price * (1 - 0.01)
 
         # Check rolling window low for tighter stop
-        price_window = rolling_data.get("price_5m")
+        price_window = rolling_data.get(KEY_PRICE_5M)
         if price_window and price_window.min is not None:
             stop = max(stop, price_window.min * 0.998)
 
@@ -291,7 +292,7 @@ class MagnetAccelerate(BaseStrategy):
 
         Returns 0.0–1.0. Positive = upward momentum.
         """
-        price_window = rolling_data.get("price_5m")
+        price_window = rolling_data.get(KEY_PRICE_5M)
         if price_window is None:
             return 0.5  # Neutral if no data
 

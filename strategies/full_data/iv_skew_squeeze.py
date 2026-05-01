@@ -45,6 +45,7 @@ from typing import Any, Dict, List, Optional
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_window import RollingWindow
+from strategies.rolling_keys import KEY_PRICE_5M, KEY_VOLUME_5M, KEY_IV_SKEW_5M
 
 logger = logging.getLogger("Syngex.Strategies.IVSkewSqueeze")
 
@@ -140,7 +141,7 @@ class IVSkewSqueeze(BaseStrategy):
             return []
 
         # --- Get price data ---
-        price_window = rolling_data.get("price_5m")
+        price_window = rolling_data.get(KEY_PRICE_5M)
         if price_window is None or price_window.count < MIN_DATA_POINTS:
             return []
 
@@ -149,7 +150,7 @@ class IVSkewSqueeze(BaseStrategy):
             return []
 
         # --- Get volume data ---
-        volume_window = rolling_data.get("volume_5m")
+        volume_window = rolling_data.get(KEY_VOLUME_5M)
         if volume_window is None or volume_window.count < MIN_DATA_POINTS:
             return []
 

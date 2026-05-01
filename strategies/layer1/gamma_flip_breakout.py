@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
+from strategies.rolling_keys import KEY_PRICE_5M
 
 logger = logging.getLogger("Syngex.Strategies.GammaFlipBreakout")
 
@@ -126,7 +127,7 @@ class GammaFlipBreakout(BaseStrategy):
         # Determine direction based on recent price action
         # If price is trending UP (z_score positive) → SHORT fade
         # If price is trending DOWN (z_score negative) → LONG fade
-        price_window = rolling_data.get("price_5m")
+        price_window = rolling_data.get(KEY_PRICE_5M)
         zs = price_window.z_score if price_window else None
 
         if zs is not None and zs > 0.3:
@@ -260,7 +261,7 @@ class GammaFlipBreakout(BaseStrategy):
         atr = self._atrs(rolling_data, price)
 
         # Check price action for breakout direction
-        price_window = rolling_data.get("price_5m")
+        price_window = rolling_data.get(KEY_PRICE_5M)
         zs = price_window.z_score if price_window else None
 
         if zs is not None and zs > 0.3:
@@ -378,7 +379,7 @@ class GammaFlipBreakout(BaseStrategy):
 
         Returns ATR as a dollar amount.
         """
-        price_window = rolling_data.get("price_5m")
+        price_window = rolling_data.get(KEY_PRICE_5M)
         if price_window and price_window.range is not None:
             return price_window.range
         # Fallback: 0.5% of price

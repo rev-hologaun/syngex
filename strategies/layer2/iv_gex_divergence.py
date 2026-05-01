@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
+from strategies.rolling_keys import KEY_PRICE_30M, KEY_TOTAL_DELTA_5M
 
 logger = logging.getLogger("Syngex.Strategies.IVGEXDivergence")
 
@@ -126,7 +127,7 @@ class IVGEXDivergence(BaseStrategy):
         risk = stop - entry
 
         # Target: toward rolling mean
-        price_window = rolling_data.get("price_30m")
+        price_window = rolling_data.get(KEY_PRICE_30M)
         rolling_mean = price_window.mean if price_window else entry
         target = entry - (entry - rolling_mean) * TARGET_RISK_MULT
         target = max(target, stop - risk * 0.1)  # At least a little room
@@ -167,7 +168,7 @@ class IVGEXDivergence(BaseStrategy):
         Returns the percentile rank of current price in the window,
         or 0.0 if conditions not met.
         """
-        window = rolling_data.get("price_30m")
+        window = rolling_data.get(KEY_PRICE_30M)
         if window is None or window.count < MIN_PRICE_POINTS:
             return 0.0
 
@@ -211,7 +212,7 @@ class IVGEXDivergence(BaseStrategy):
         if iv_window is None or iv_window.count < MIN_IV_POINTS:
             # Fallback: use total_delta window as proxy for IV trend
             # (IV often correlates with total_delta direction)
-            delta_window = rolling_data.get("total_delta_5m")
+            delta_window = rolling_data.get(KEY_TOTAL_DELTA_5M)
             if delta_window is None or delta_window.count < MIN_IV_POINTS:
                 return False, None, 0.0
 

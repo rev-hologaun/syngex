@@ -34,6 +34,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
+from strategies.rolling_keys import KEY_PRICE_5M, KEY_VOLUME_5M
 
 logger = logging.getLogger("Syngex.Strategies.StrikeConcentration")
 
@@ -120,8 +121,8 @@ class StrikeConcentration(BaseStrategy):
             return []
 
         # Must have enough rolling data
-        price_window = rolling_data.get("price_5m")
-        vol_window = rolling_data.get("volume_5m")
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        vol_window = rolling_data.get(KEY_VOLUME_5M)
         if (
             price_window is None
             or vol_window is None
@@ -522,8 +523,8 @@ class StrikeConcentration(BaseStrategy):
             1. Bullish divergence: price made a lower low but volume declined
             2. Bullish candlestick: close > open, upper wick < lower wick * 0.5
         """
-        price_window = rolling_data.get("price_5m")
-        vol_window = rolling_data.get("volume_5m")
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        vol_window = rolling_data.get(KEY_VOLUME_5M)
 
         if price_window is None or vol_window is None:
             return False
@@ -555,8 +556,8 @@ class StrikeConcentration(BaseStrategy):
             1. Bearish divergence: price made a higher high but volume declined
             2. Bearish candlestick: close < open, lower wick < upper wick * 0.5
         """
-        price_window = rolling_data.get("price_5m")
-        vol_window = rolling_data.get("volume_5m")
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        vol_window = rolling_data.get(KEY_VOLUME_5M)
 
         if price_window is None or vol_window is None:
             return False
@@ -710,7 +711,7 @@ class StrikeConcentration(BaseStrategy):
             high = window max
             low = window min
         """
-        window = rolling_data.get("price_5m")
+        window = rolling_data.get(KEY_PRICE_5M)
         if window is None or window.count < MIN_DATA_POINTS:
             return None
 
@@ -741,7 +742,7 @@ class StrikeConcentration(BaseStrategy):
     @staticmethod
     def _check_volume_spike(rolling_data: Dict[str, Any]) -> bool:
         """Check if current volume exceeds rolling average by ≥20%."""
-        window = rolling_data.get("volume_5m")
+        window = rolling_data.get(KEY_VOLUME_5M)
         if window is None or window.count < MIN_DATA_POINTS:
             return False
 
@@ -956,7 +957,7 @@ class StrikeConcentration(BaseStrategy):
 
         # 3. Signal strength (0.15–0.20)
         # Approximate from volume profile
-        vol_window = rolling_data.get("volume_5m")
+        vol_window = rolling_data.get(KEY_VOLUME_5M)
         if vol_window is not None and vol_window.mean and vol_window.mean > 0:
             vol_latest = vol_window.latest or 0
             vol_ratio = vol_latest / vol_window.mean
@@ -1014,7 +1015,7 @@ class StrikeConcentration(BaseStrategy):
         body_conf = 0.20 + 0.10 * min(1.0, (body_ratio - SLICE_BODY_RATIO) / 0.5)
 
         # 3. Volume spike component (0.15–0.20)
-        vol_window = rolling_data.get("volume_5m")
+        vol_window = rolling_data.get(KEY_VOLUME_5M)
         if vol_window is not None and vol_window.mean and vol_window.mean > 0:
             vol_latest = vol_window.latest or 0
             vol_ratio = vol_latest / vol_window.mean

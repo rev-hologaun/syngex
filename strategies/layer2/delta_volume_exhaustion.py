@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
+from strategies.rolling_keys import KEY_PRICE_5M, KEY_TOTAL_DELTA_5M, KEY_VOLUME_5M
 
 logger = logging.getLogger("Syngex.Strategies.DeltaVolumeExhaustion")
 
@@ -126,7 +127,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
             trend_direction: "UP" or "DOWN"
         """
         # 1. Check price trend
-        price_window = rolling_data.get("price_5m")
+        price_window = rolling_data.get(KEY_PRICE_5M)
         if price_window is None or price_window.count < MIN_TREND_POINTS:
             return None
 
@@ -227,7 +228,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
         current_delta: float,
     ) -> bool:
         """Check if total delta is declining below rolling average."""
-        window = rolling_data.get("total_delta_5m")
+        window = rolling_data.get(KEY_TOTAL_DELTA_5M)
         if window is None or window.count < MIN_GREEKS_POINTS:
             return False
 
@@ -249,7 +250,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
 
     def _check_volume_decline(self, rolling_data: Dict[str, Any]) -> bool:
         """Check if volume is declining below rolling average."""
-        window = rolling_data.get("volume_5m")
+        window = rolling_data.get(KEY_VOLUME_5M)
         if window is None or window.count < MIN_GREEKS_POINTS:
             return False
 

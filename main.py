@@ -68,6 +68,7 @@ from engine.dashboard import SyngexDashboard
 from strategies.engine import StrategyEngine, EngineConfig
 from strategies.filters.net_gamma_filter import NetGammaFilter
 from strategies.rolling_window import RollingWindow
+from strategies.rolling_keys import *
 from strategies.layer1 import (
     GammaWallBounce,
     MagnetAccelerate,
@@ -210,16 +211,16 @@ class SyngexOrchestrator:
 
         # Rolling windows for key metrics
         self._rolling_data = {
-            "price": RollingWindow(window_type="time", window_size=300),
-            "price_5m": RollingWindow(window_type="time", window_size=300),
-            "price_30m": RollingWindow(window_type="time", window_size=1800),
-            "net_gamma": RollingWindow(window_type="time", window_size=300),
-            "net_gamma_5m": RollingWindow(window_type="time", window_size=300),
-            "volume_5m": RollingWindow(window_type="time", window_size=300),
+            KEY_PRICE: RollingWindow(window_type="time", window_size=300),
+            KEY_PRICE_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_PRICE_30M: RollingWindow(window_type="time", window_size=1800),
+            KEY_NET_GAMMA: RollingWindow(window_type="time", window_size=300),
+            KEY_NET_GAMMA_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_VOLUME_5M: RollingWindow(window_type="time", window_size=300),
             # Layer 2 rolling windows
-            "total_delta_5m": RollingWindow(window_type="time", window_size=300),
-            "delta": RollingWindow(window_type="time", window_size=300),
-            "volume": RollingWindow(window_type="time", window_size=300),
+            KEY_TOTAL_DELTA_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_DELTA: RollingWindow(window_type="time", window_size=300),
+            KEY_VOLUME: RollingWindow(window_type="time", window_size=300),
         }
 
         # Per-strike IV windows (populated lazily)
@@ -506,28 +507,28 @@ class SyngexOrchestrator:
                 price = data.get("price")
                 if price and price > 0:
                     ts = time.time()
-                    self._rolling_data["price"].push(price, ts)
-                    self._rolling_data["price_5m"].push(price, ts)
-                    self._rolling_data["price_30m"].push(price, ts)
+                    self._rolling_data[KEY_PRICE].push(price, ts)
+                    self._rolling_data[KEY_PRICE_5M].push(price, ts)
+                    self._rolling_data[KEY_PRICE_30M].push(price, ts)
 
             # Periodically update net_gamma rolling window
             if self._calculator._msg_count % 20 == 0:
                 ng = self._calculator.get_net_gamma()
-                self._rolling_data["net_gamma"].push(ng)
-                self._rolling_data["net_gamma_5m"].push(ng)
+                self._rolling_data[KEY_NET_GAMMA].push(ng)
+                self._rolling_data[KEY_NET_GAMMA_5M].push(ng)
 
             # Update Layer 2 rolling windows
             gex_summary = self._calculator.get_greeks_summary()
             if gex_summary:
                 net_delta = gex_summary.get("net_delta", 0.0)
-                if "delta" in self._rolling_data:
-                    self._rolling_data["delta"].push(net_delta)
-                if "volume" in self._rolling_data:
+                if KEY_DELTA in self._rolling_data:
+                    self._rolling_data[KEY_DELTA].push(net_delta)
+                if KEY_VOLUME in self._rolling_data:
                     total_vol = gex_summary.get("total_volume", 0)
-                    self._rolling_data["volume"].push(total_vol)
+                    self._rolling_data[KEY_VOLUME].push(total_vol)
                 # Track total_delta_5m for delta_volume_exhaustion
-                if "total_delta_5m" in self._rolling_data:
-                    self._rolling_data["total_delta_5m"].push(net_delta)
+                if KEY_TOTAL_DELTA_5M in self._rolling_data:
+                    self._rolling_data[KEY_TOTAL_DELTA_5M].push(net_delta)
 
                 # Per-strike IV windows for iv_gex_divergence
                 iv_by_strike = self._calculator.get_iv_by_strike_avg()

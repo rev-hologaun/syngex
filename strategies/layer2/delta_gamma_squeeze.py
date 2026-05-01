@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
+from strategies.rolling_keys import KEY_PRICE_5M, KEY_VOLUME_5M, KEY_TOTAL_DELTA_5M
 
 logger = logging.getLogger("Syngex.Strategies.DeltaGammaSqueeze")
 
@@ -212,7 +213,7 @@ class DeltaGammaSqueeze(BaseStrategy):
         window = rolling_data.get(key)
         if window is None or window.count < MIN_DATA_POINTS:
             # Fallback: use total_delta rolling window
-            window = rolling_data.get("total_delta_5m")
+            window = rolling_data.get(KEY_TOTAL_DELTA_5M)
         if window is None or window.count < MIN_DATA_POINTS:
             return None
 
@@ -224,7 +225,7 @@ class DeltaGammaSqueeze(BaseStrategy):
 
     def _check_volume_spike(self, rolling_data: Dict[str, Any]) -> bool:
         """Check if volume is spiking above rolling average."""
-        window = rolling_data.get("volume_5m")
+        window = rolling_data.get(KEY_VOLUME_5M)
         if window is None or window.count < 3:
             return False
 
@@ -237,7 +238,7 @@ class DeltaGammaSqueeze(BaseStrategy):
 
     def _check_price_momentum(self, rolling_data: Dict[str, Any]) -> str:
         """Check price momentum from rolling window."""
-        window = rolling_data.get("price_5m")
+        window = rolling_data.get(KEY_PRICE_5M)
         if window is None:
             return "FLAT"
         return window.trend

@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
+from strategies.rolling_keys import KEY_PRICE_5M
 
 logger = logging.getLogger("Syngex.Strategies.GammaSqueeze")
 
@@ -118,7 +119,7 @@ class GammaSqueeze(BaseStrategy):
             3. Price is between two gamma walls
         """
         # Condition 1: Narrow range
-        price_window = rolling_data.get("price_5m")
+        price_window = rolling_data.get(KEY_PRICE_5M)
         if price_window is None or price_window.range is None:
             return False
 

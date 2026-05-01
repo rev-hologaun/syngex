@@ -39,6 +39,7 @@ from typing import Any, Dict, List, Optional
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_window import RollingWindow
+from strategies.rolling_keys import KEY_PROB_MOMENTUM_5M, KEY_CONSEC_LONG, KEY_CONSEC_SHORT, KEY_VOLUME_5M
 
 logger = logging.getLogger("Syngex.Strategies.ProbDistributionShift")
 
@@ -135,13 +136,13 @@ class ProbDistributionShift(BaseStrategy):
             return []
 
         # --- Ensure rolling window exists ---
-        if "prob_momentum_5m" not in rolling_data:
-            rolling_data["prob_momentum_5m"] = RollingWindow(
+        if KEY_PROB_MOMENTUM_5M not in rolling_data:
+            rolling_data[KEY_PROB_MOMENTUM_5M] = RollingWindow(
                 window_type="count",
                 window_size=MOMENTUM_WINDOW_SIZE,
             )
 
-        momentum_window: RollingWindow = rolling_data["prob_momentum_5m"]
+        momentum_window: RollingWindow = rolling_data[KEY_PROB_MOMENTUM_5M]
         momentum_window.push(momentum, data.get("timestamp"))
 
         # --- Need enough data for z-score ---
@@ -154,11 +155,11 @@ class ProbDistributionShift(BaseStrategy):
             return []
 
         # --- Consecutive signal tracking ---
-        consec_long = rolling_data.get("consec_long", 0)
-        consec_short = rolling_data.get("consec_short", 0)
+        consec_long = rolling_data.get(KEY_CONSEC_LONG, 0)
+        consec_short = rolling_data.get(KEY_CONSEC_SHORT, 0)
 
         # --- Volume check ---
-        volume_5m = rolling_data.get("volume_5m")
+        volume_5m = rolling_data.get(KEY_VOLUME_5M)
         vol_trend = "FLAT"
         if volume_5m is not None and volume_5m.count >= MIN_DATA_POINTS:
             vol_trend = volume_5m.trend
@@ -185,8 +186,8 @@ class ProbDistributionShift(BaseStrategy):
             consec_long = 0
             consec_short = 0
 
-        rolling_data["consec_long"] = consec_long
-        rolling_data["consec_short"] = consec_short
+        rolling_data[KEY_CONSEC_LONG] = consec_long
+        rolling_data[KEY_CONSEC_SHORT] = consec_short
 
         if signal_direction is None:
             return []

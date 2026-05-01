@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
+from strategies.rolling_keys import KEY_VOLUME_5M
 
 logger = logging.getLogger("Syngex.Strategies.CallPutFlowAsymmetry")
 
@@ -275,14 +276,14 @@ class CallPutFlowAsymmetry(BaseStrategy):
 
     def _check_volume_up(self, rolling_data: Dict[str, Any]) -> bool:
         """Check if volume is trending up."""
-        window = rolling_data.get("volume_5m")
+        window = rolling_data.get(KEY_VOLUME_5M)
         if window is None or window.count < 3:
             return False
         return window.trend == "UP"
 
     def _check_volume_down(self, rolling_data: Dict[str, Any]) -> bool:
         """Check if volume is trending down."""
-        window = rolling_data.get("volume_5m")
+        window = rolling_data.get(KEY_VOLUME_5M)
         if window is None or window.count < 3:
             return False
         return window.trend == "DOWN"

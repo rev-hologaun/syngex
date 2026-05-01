@@ -41,6 +41,7 @@ from typing import Any, Dict, List, Optional
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_window import RollingWindow
+from strategies.rolling_keys import KEY_EXTRINSIC_PROXY_5M, KEY_VOLUME_5M
 
 logger = logging.getLogger("Syngex.Strategies.ExtrinsicIntrinsicFlow")
 
@@ -138,13 +139,13 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
             return []
 
         # --- Ensure extrinsic rolling window exists ---
-        if "extrinsic_proxy_5m" not in rolling_data:
-            rolling_data["extrinsic_proxy_5m"] = RollingWindow(
+        if KEY_EXTRINSIC_PROXY_5M not in rolling_data:
+            rolling_data[KEY_EXTRINSIC_PROXY_5M] = RollingWindow(
                 window_type="count",
                 window_size=EXTRINSIC_WINDOW_SIZE,
             )
 
-        extrinsic_window: RollingWindow = rolling_data["extrinsic_proxy_5m"]
+        extrinsic_window: RollingWindow = rolling_data[KEY_EXTRINSIC_PROXY_5M]
         extrinsic_window.push(extrinsic_proxy, data.get("timestamp"))
 
         # --- Need enough data for rolling stats ---
@@ -164,7 +165,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         extrinsic_change_pct = (current_extrinsic - extrinsic_mean) / extrinsic_mean
 
         # --- Volume check ---
-        volume_5m = rolling_data.get("volume_5m")
+        volume_5m = rolling_data.get(KEY_VOLUME_5M)
         if volume_5m is None or volume_5m.count < MIN_DATA_POINTS:
             return []
 

@@ -39,6 +39,7 @@ from typing import Any, Dict, List, Optional
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_window import RollingWindow
+from strategies.rolling_keys import KEY_PRICE_5M, KEY_PRICE_30M, KEY_VOLUME_5M
 
 logger = logging.getLogger("Syngex.Strategies.ProbWeightedMagnet")
 
@@ -115,8 +116,8 @@ class ProbWeightedMagnet(BaseStrategy):
             return []
 
         # --- Price consolidation check ---
-        price_5m = rolling_data.get("price_5m")
-        price_30m = rolling_data.get("price_30m")
+        price_5m = rolling_data.get(KEY_PRICE_5M)
+        price_30m = rolling_data.get(KEY_PRICE_30M)
         if price_5m is None or price_30m is None:
             return []
         if price_5m.count < MIN_DATA_POINTS or price_30m.count < MIN_DATA_POINTS:
@@ -133,7 +134,7 @@ class ProbWeightedMagnet(BaseStrategy):
             return []
 
         # --- Volume check ---
-        volume_5m = rolling_data.get("volume_5m")
+        volume_5m = rolling_data.get(KEY_VOLUME_5M)
         if volume_5m is None or volume_5m.count < MIN_DATA_POINTS:
             return []
         vol_trend = volume_5m.trend

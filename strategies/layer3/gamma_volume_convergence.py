@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
+from strategies.rolling_keys import KEY_PRICE_5M, KEY_VOLUME_5M, KEY_VOLUME_UP_5M, KEY_VOLUME_DOWN_5M, KEY_TOTAL_DELTA_5M, KEY_TOTAL_GAMMA_5M
 
 logger = logging.getLogger("Syngex.Strategies.GammaVolumeConvergence")
 
@@ -356,7 +357,7 @@ class GammaVolumeConvergence(BaseStrategy):
             < 1.0 = accelerating downward
             None  = insufficient data
         """
-        window = rolling_data.get("total_delta_5m")
+        window = rolling_data.get(KEY_TOTAL_DELTA_5M)
         if window is None or window.count < MIN_DATA_POINTS:
             return None
 
@@ -380,7 +381,7 @@ class GammaVolumeConvergence(BaseStrategy):
             > 1.0 = spiking upward
             None  = insufficient data
         """
-        window = rolling_data.get("total_gamma_5m")
+        window = rolling_data.get(KEY_TOTAL_GAMMA_5M)
         if window is None or window.count < MIN_DATA_POINTS:
             return None
 
@@ -424,7 +425,7 @@ class GammaVolumeConvergence(BaseStrategy):
 
         Returns "UP", "DOWN", or "FLAT".
         """
-        window = rolling_data.get("price_5m")
+        window = rolling_data.get(KEY_PRICE_5M)
         if window is None:
             return "FLAT"
 

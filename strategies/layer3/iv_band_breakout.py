@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
+from strategies.rolling_keys import KEY_PRICE_5M, KEY_VOLUME_5M, KEY_TOTAL_DELTA_5M
 
 logger = logging.getLogger("Syngex.Strategies.IVBandBreakout")
 
@@ -385,7 +386,7 @@ class IVBandBreakout(BaseStrategy):
         Current high-low range must be < 30% of the rolling mean range.
         Tighter range = more coiled = higher breakout probability.
         """
-        window = rolling_data.get("price_5m")
+        window = rolling_data.get(KEY_PRICE_5M)
         if window is None or window.count < MIN_DATA_POINTS:
             return False
 
@@ -401,7 +402,7 @@ class IVBandBreakout(BaseStrategy):
     @staticmethod
     def _get_price_compression_ratio(rolling_data: Dict[str, Any]) -> float:
         """Get the current price compression ratio for metadata."""
-        window = rolling_data.get("price_5m")
+        window = rolling_data.get(KEY_PRICE_5M)
         if window is None:
             return 1.0
 
@@ -427,7 +428,7 @@ class IVBandBreakout(BaseStrategy):
             < 1.0 = decelerating (coiling)
             >= 1.0 = not coiling
         """
-        window = rolling_data.get("total_delta_5m")
+        window = rolling_data.get(KEY_TOTAL_DELTA_5M)
         if window is None or window.count < MIN_DATA_POINTS:
             return None
 
@@ -449,7 +450,7 @@ class IVBandBreakout(BaseStrategy):
         Latest price must be above the rolling window max by at least
         BREAKOUT_MOVE_PCT.
         """
-        window = rolling_data.get("price_5m")
+        window = rolling_data.get(KEY_PRICE_5M)
         if window is None or window.count < 3:
             return False
 
@@ -475,7 +476,7 @@ class IVBandBreakout(BaseStrategy):
         Latest price must be below the rolling window min by at least
         BREAKOUT_MOVE_PCT.
         """
-        window = rolling_data.get("price_5m")
+        window = rolling_data.get(KEY_PRICE_5M)
         if window is None or window.count < 3:
             return False
 
@@ -496,7 +497,7 @@ class IVBandBreakout(BaseStrategy):
     @staticmethod
     def _get_volume_trend(rolling_data: Dict[str, Any]) -> str:
         """Get the volume trend direction from the rolling window."""
-        window = rolling_data.get("volume_5m")
+        window = rolling_data.get(KEY_VOLUME_5M)
         if window is None:
             return "FLAT"
         return window.trend

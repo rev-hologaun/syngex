@@ -41,6 +41,7 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
+from strategies.rolling_keys import KEY_PRICE, KEY_PRICE_5M, KEY_PRICE_30M, KEY_NET_GAMMA, KEY_NET_GAMMA_5M
 
 logger = logging.getLogger("Syngex.Strategies.GEXDivergence")
 
@@ -304,7 +305,7 @@ class GEXDivergence(BaseStrategy):
         self, rolling_data: Dict[str, Any]
     ) -> Optional[Any]:
         """Get the best available price rolling window."""
-        for key in ("price", "price_5m", "price_30m"):
+        for key in (KEY_PRICE, KEY_PRICE_5M, KEY_PRICE_30M):
             rw = rolling_data.get(key)
             if rw is not None and rw.count >= MIN_DATA_POINTS:
                 return rw
@@ -319,7 +320,7 @@ class GEXDivergence(BaseStrategy):
         This is critical for the divergence strategy. If not present,
         the strategy cannot function — return None to skip.
         """
-        for key in ("net_gamma", "net_gamma_5m"):
+        for key in (KEY_NET_GAMMA, KEY_NET_GAMMA_5M):
             rw = rolling_data.get(key)
             if rw is not None and rw.count >= MIN_DATA_POINTS:
                 return rw

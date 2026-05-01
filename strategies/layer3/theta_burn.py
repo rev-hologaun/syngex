@@ -38,6 +38,7 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
+from strategies.rolling_keys import KEY_PRICE_5M, KEY_PRICE_30M, KEY_VOLUME_5M
 
 logger = logging.getLogger("Syngex.Strategies.ThetaBurn")
 
@@ -130,9 +131,9 @@ class ThetaBurn(BaseStrategy):
             return []
 
         # Validate rolling data availability
-        price_5m = rolling_data.get("price_5m")
-        price_30m = rolling_data.get("price_30m")
-        volume_5m = rolling_data.get("volume_5m")
+        price_5m = rolling_data.get(KEY_PRICE_5M)
+        price_30m = rolling_data.get(KEY_PRICE_30M)
+        volume_5m = rolling_data.get(KEY_VOLUME_5M)
 
         if (
             price_5m is None
@@ -402,8 +403,8 @@ class ThetaBurn(BaseStrategy):
             2. Price position: price in lower/upper quartile of recent range
             3. Candle pattern: bullish/bearish candle (close > open or close < open)
         """
-        price_window = rolling_data.get("price_5m")
-        vol_window = rolling_data.get("volume_5m")
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        vol_window = rolling_data.get(KEY_VOLUME_5M)
 
         if price_window is None or vol_window is None:
             return 0.0, "none"
