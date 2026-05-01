@@ -139,6 +139,7 @@
 | 7.3 | **Per-strategy toggles** | Enable/disable individual strategies via YAML config with graceful fallback defaults | ✅ |
 | 7.4 | **Parameter tuning** | All strategy params injected from YAML, hot-reload every 2s without restart | ✅ |
 | 7.5 | **Documentation** | Comprehensive README — architecture, strategy index, config, dashboard, CLI, signal format, analyzer | ✅ |
+| 7.6 | **SignalTracker hold times** | Per-strategy `max_hold_seconds` from YAML config — Theta-Burn gets 8min, IV Skew gets 4hr | ✅ |
 
 ---
 
@@ -184,9 +185,10 @@ syngex/
 │   ├── signal.py                # 0.1 — Signal class
 │   ├── engine.py                # 0.2 — StrategyEngine
 │   ├── rolling_window.py        # 0.3 — RollingWindow
+│   ├── rolling_keys.py          # Rolling window key constants (prevents silent typos)
 │   ├── filters/
 │   │   ├── __init__.py
-│   │   └── net_gamma_filter.py  # 1.1 — Phase 1
+│   │   └── net_gamma_filter.py  # 1.1 — Phase 1 (now with actual directional filtering)
 │   ├── layer1/                  # Structural (GEX + OHLC)
 │   │   ├── gamma_wall_bounce.py       # 2.1
 │   │   ├── magnet_accelerate.py       # 2.2
@@ -249,12 +251,29 @@ syngex/
 | 1 | ✅ | 2026-04-30 | 2026-04-30 | Master filter — NetGammaFilter integrated into engine pipeline |
 | 2 | ✅ | 2026-04-30 | 2026-04-30 | Core structural — Gamma Wall Bounce, Magnet & Accelerate, Gamma Flip Breakout, Gamma Squeeze (all Layer 1) |
 | 3 | ✅ | 2026-04-30 | 2026-04-30 | Alpha — divergence — GEX Imbalance, Confluence Reversal, Vol Compression Range, GEX Divergence (all Layer 1) |
-| 4 | ✅ | 2026-04-30 | 2026-04-30 | Alpha — greeks — DeltaGammaSqueeze, DeltaVolumeExhaustion, CallPutFlowAsymmetry, DeltaIVDivergence, IVGEXDivergence (all Layer 2) |
+| 4 | ✅ | 2026-04-30 | 2026-04-30 | Alpha — greeks — DeltaGammaSqueeze, DeltaVolumeExhaustion, CallPutFlowAsymmetry, IVGEXDivergence (all Layer 2) |
 | 5 | ✅ | 2026-04-30 | 2026-04-30 | Micro-signal (1Hz) — Gamma-Volume Convergence, IV Band Breakout, Strike Concentration Scalp, Theta-Burn Scalp (all Layer 3) |
 | 6 | ✅ | 2026-04-30 | 2026-04-30 | Full-data (v2) — IV Skew Squeeze, Prob-Weighted Magnet, Prob Distribution Shift, Extrinsic/Intrinsic Flow (all full_data) |
-| 7 | ✅ | 2026-04-30 | 2026-04-30 | 7.1–7.5 complete (overlay, outcome tracking, toggles, hot-reload, docs) |
+| 7 | ✅ | 2026-04-30 | 2026-05-01 | 7.1–7.6 complete (overlay, outcome tracking, toggles, hot-reload, docs, per-strategy hold times) |
 
-**Total: 22/22 strategies complete (100%) | v1.0 tagged and pushed**
+**Total: 22/22 strategies complete (100%) | v1.4 tagged and pushed**
+
+---
+
+## v1.3–v1.4 Fixes (2026-05-01)
+
+| Fix | File | Impact |
+|-----|------|--------|
+| **NetGammaFilter directional logic** | `filters/net_gamma_filter.py` | Master filter now actually filters — LONG only when price > flip, SHORT only when price < flip in both regimes. Was a NO-OP (always returned True). |
+| **Rolling window key constants** | `strategies/rolling_keys.py` (new) | All 18 rolling window keys centralized as constants. 20 strategy files updated. Prevents silent typos from creating phantom windows. |
+| **Dead views cleanup** | Removed `views/` directory | Broken import stub for deleted `gamma_magnet.py`. Zero references anywhere in codebase. |
+| **SignalTracker per-strategy hold times** | `signal_tracker.py`, `main.py`, `strategies.yaml` | Each strategy gets its own `max_hold_seconds` from YAML config. Theta-Burn: 8min, IV Skew Squeeze: 4hr. Global default 15min for missing configs. |
+| **Confluence + Vol Compression target inversion** | `layer1/confluence_reversal.py`, `layer1/vol_compression_range.py` | SHORT targets were placed above entry, LONG below. Standardized to `price +/- risk * TARGET_RISK_MULT`. |
+| **Dashboard gamma line thinning** | `app_dashboard.py` (Forge) | Reduced gamma line `strokeWidth` from 2 to 1. |
+| **Dashboard micro-signal markers** | `app_dashboard.py` (Forge) | Added `net_gamma` Y-position lookup so dots are visible against gamma profile line. |
+| **GEX Imbalance dynamic stops** | `layer1/gex_imbalance.py` | Replaced fixed 1%/1.5% with volatility-based (price_5m rolling std × 2.5, 0.5% fallback). Fixed unreachable thresholds for low-vol symbols. |
+| **Delta-IV Divergence removal** | `layer2/` (removed) | 0% win rate across all 10 symbols, 3,611 signals, all losses at 0-1s holds. Per-strike delta rolling windows never populated correctly. |
+| **Gamma Flip Breakout thresholds** | `layer1/gamma_flip_breakout.py` | FLIP_PROXIMITY_PCT 2.5%→5%, z-score ±0.5→±0.3. |
 
 ---
 
@@ -275,10 +294,10 @@ syngex/
 
 | Priority | Task | Notes |
 |----------|------|-------|
-| 🔴 High | **Full-market validation** | Run all 21 strategies through a complete market day. Validate signal quality, false positive rate, and strategy behavior under real conditions. |
+| 🔴 High | **Full-market validation** | **Monday 2026-05-04 at 6:30 AM PT** — Run all 21 strategies through a complete market day. Validate signal quality, false positive rate, and strategy behavior under real conditions. |
 | 🟢 Low | Future — Backtesting framework | Use signal_outcomes.jsonl for historical strategy performance analysis |
 | 🟢 Low | Future — Real execution pipeline | TradeStation API integration for automated order placement |
 
 ---
 
-*Last updated: 2026-04-30 — v1.0 — All 21 tradable strategies live, Phase 7.1–7.5 complete, awaiting full-market validation*
+*Last updated: 2026-05-01 — v1.4 — All 21 tradable strategies live, Phase 7.1–7.6 complete, NetGammaFilter now actually filters, per-strategy hold times via YAML. Next: Full-market validation Monday 6:30 AM PT.*
