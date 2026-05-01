@@ -77,8 +77,8 @@ def load_gex_state() -> dict | None:
 
 @st.cache_data(ttl=2)
 def load_signals(n: int = 20) -> list[dict]:
-    """Load the N most recent signals from the symbol-specific signals log."""
-    signals_file = LOG_DIR / f"signals_{_current_symbol}.jsonl"
+    """Load the N most recent signals from the shared signals log."""
+    signals_file = LOG_DIR / "signals.jsonl"
     if not signals_file.exists():
         return []
     try:
@@ -426,13 +426,25 @@ def _confidence_badge(conf: float) -> str:
         return f"🔴 {conf:.0%}"
 
 
-def render_signals(signals: list[dict]) -> None:
-    """Display recent strategy signals with confidence badges."""
+def render_signals(signals: list[dict], symbol: str = "") -> None:
+    """Display recent strategy signals with confidence badges.
+
+    If *symbol* is provided, only signals for that underlying are shown.
+    """
     st.subheader("📡 Recent Signals")
 
     if not signals:
         st.info("No signals generated yet. Start the orchestrator to generate signals.")
         return
+
+    # Filter by active symbol if provided
+    if symbol:
+        signals = [s for s in signals if s.get("symbol", "") == symbol]
+        if not signals:
+            st.info(
+                f"⏳ No signals for **{symbol}** yet — the orchestrator is still warming up."
+            )
+            return
 
     # Build display table
     sig_df = pd.DataFrame(
@@ -446,6 +458,7 @@ def render_signals(signals: list[dict]) -> None:
                 "Entry": f"${s.get('entry', 0):,.2f}",
                 "Stop": f"${s.get('stop', 0):,.2f}",
                 "Target": f"${s.get('target', 0):,.2f}",
+                "Symbol": s.get("symbol", ""),
                 "Reason": s.get("reason", ""),
             }
             for s in signals
@@ -518,8 +531,9 @@ with col2:
 with col3:
     render_gamma_walls(state)
 
-# Recent signals
-render_signals(signals)
+# Recent signals — filter by active symbol
+active_symbol = state.get("symbol", "") if state else ""
+render_signals(signals, active_symbol)
 
 # Bottom full-width table
 render_top_strikes(state)

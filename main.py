@@ -562,6 +562,7 @@ class SyngexOrchestrator:
         # Build data snapshot for strategies
         data = {
             "underlying_price": price,
+            "symbol": self.symbol,
             "gex_calculator": self._calculator,
             "rolling_data": self._rolling_data,
             "timestamp": time.time(),

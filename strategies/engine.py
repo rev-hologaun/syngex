@@ -206,6 +206,9 @@ class StrategyEngine:
         all_signals: List[Signal] = []
         now = time.time()
 
+        # Extract symbol from data for propagation to signals
+        signal_symbol = data.get("symbol", "")
+
         # Phase 1: Evaluate all strategies
         for strategy in self._strategies:
             if not strategy.enabled:
@@ -218,6 +221,22 @@ class StrategyEngine:
 
                 signals = strategy.evaluate(data)
                 for signal in signals:
+                    # Attach symbol to signal if not already set
+                    if signal_symbol and not signal.symbol:
+                        # Can't mutate frozen dataclass — rebuild with symbol
+                        signal = Signal(
+                            direction=signal.direction,
+                            confidence=signal.confidence,
+                            entry=signal.entry,
+                            stop=signal.stop,
+                            target=signal.target,
+                            strategy_id=signal.strategy_id,
+                            symbol=signal_symbol,
+                            timestamp=signal.timestamp,
+                            reason=signal.reason,
+                            expiry=signal.expiry,
+                            metadata=signal.metadata,
+                        )
                     # Apply minimum confidence threshold
                     if signal.confidence < self.config.min_confidence:
                         continue

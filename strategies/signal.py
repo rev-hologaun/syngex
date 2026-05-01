@@ -60,6 +60,7 @@ class Signal:
     timestamp: float = field(default_factory=time.time)
 
     # Optional
+    symbol: str = ""           # Underlying symbol (e.g. "TSLA")
     reason: str = ""
     expiry: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -94,6 +95,7 @@ class Signal:
             "stop": self.stop,
             "target": self.target,
             "strategy_id": self.strategy_id,
+            "symbol": self.symbol,
             "reason": self.reason,
             "risk_reward_ratio": round(self.risk_reward_ratio, 2),
             "strength": self.strength.value,
@@ -111,6 +113,7 @@ class Signal:
             stop=data["stop"],
             target=data["target"],
             strategy_id=data["strategy_id"],
+            symbol=data.get("symbol", ""),
             timestamp=data.get("timestamp", time.time()),
             reason=data.get("reason", ""),
             expiry=data.get("expiry"),
