@@ -10,8 +10,8 @@ Bind      : 0.0.0.0:8501
 
 Layout
 ------
-    Header → Metric cards → 3-col grid (Profile / Flip / Walls) →
-    Top Strikes table → Signals log → Footer
+    Header → Metric cards → Gamma Profile (full-width) →
+    Gamma Flip + Gamma Walls (2-col) → Recent Signals → Top Strikes → Footer
 """
 
 from __future__ import annotations
@@ -519,16 +519,16 @@ if state is None:
 render_header(state)
 render_metrics(state)
 
-# 3-column grid
-col1, col2, col3 = st.columns(3)
+# Gamma Profile — full-width row by itself
+render_gamma_profile(state)
+
+# Gamma Flip & Gamma Walls — side by side
+col1, col2 = st.columns(2)
 
 with col1:
-    render_gamma_profile(state)
-
-with col2:
     render_gamma_flip(state)
 
-with col3:
+with col2:
     render_gamma_walls(state)
 
 # Recent signals — filter by active symbol
