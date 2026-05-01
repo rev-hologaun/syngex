@@ -198,8 +198,31 @@ def render_gamma_profile(state: dict) -> None:
         else:
             color = "gray"
 
+        # Look up gamma value for this strike so dots render at correct Y
+        # Try exact match first, then nearest strike in the bucket
+        strike_bucket = strikes.get(str(strike_val), {})
+        if not strike_bucket:
+            # Find nearest strike with gamma data
+            nearest_strike = None
+            nearest_dist = float('inf')
+            for s_key in strikes:
+                try:
+                    s_float = float(s_key)
+                    dist = abs(s_float - strike_val)
+                    if dist < nearest_dist:
+                        nearest_dist = dist
+                        nearest_strike = s_key
+                except ValueError:
+                    pass
+            if nearest_strike:
+                strike_bucket = strikes[nearest_strike]
+            else:
+                strike_bucket = {}
+        net_gamma = strike_bucket.get("net_gamma", 0.0)
+
         marker_rows.append({
             "strike": strike_val,
+            "net_gamma": net_gamma,
             "confidence": conf,
             "strategy": sig.get("strategy", ""),
             "direction": sig.get("direction", ""),
