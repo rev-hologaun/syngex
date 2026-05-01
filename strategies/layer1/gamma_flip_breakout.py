@@ -36,8 +36,8 @@ logger = logging.getLogger("Syngex.Strategies.GammaFlipBreakout")
 # Constants
 # ---------------------------------------------------------------------------
 
-FLIP_PROXIMITY_PCT = 0.005      # 0.5% — price must be within this of flip
-STOP_OTHER_SIDE_PCT = 0.005     # 0.5% — stop on other side of flip
+FLIP_PROXIMITY_PCT = 0.025      # 2.5% — price must be within this of flip
+STOP_OTHER_SIDE_PCT = 0.01      # 1% — stop on other side of flip
 ATR_MULT = 1.5                   # 1.5× rolling range as ATR proxy
 TARGET_RR = 2.5                  # 1:2.5 risk-reward minimum
 MIN_CONFIDENCE = 0.35            # Minimum confidence to emit signal
@@ -406,7 +406,12 @@ class GammaFlipBreakout(BaseStrategy):
         # Wall proximity bonus (0.1–0.2)
         wall_conf = 0.1 + 0.1 * min(1.0, abs(net_gamma) / 500_000)
 
-        return min(1.0, risk_conf + gamma_conf + regime_conf + wall_conf)
+        # Normalize each component to [0,1] and average
+        norm_risk = (risk_conf - 0.2) / (0.3 - 0.2) if 0.3 != 0.2 else 1.0
+        norm_gamma = (gamma_conf - 0.2) / (0.5 - 0.2) if 0.5 != 0.2 else 1.0
+        norm_regime = (regime_conf - 0.15) / (0.3 - 0.15) if 0.3 != 0.15 else 1.0
+        norm_wall = (wall_conf - 0.1) / (0.2 - 0.1) if 0.2 != 0.1 else 1.0
+        return min(1.0, max(0.0, (norm_risk + norm_gamma + norm_regime + norm_wall) / 4.0))
 
     def _breakout_confidence(
         self,
@@ -429,4 +434,9 @@ class GammaFlipBreakout(BaseStrategy):
         # Wall proximity bonus (0.1–0.2)
         wall_conf = 0.1 + 0.1 * min(1.0, abs(net_gamma) / 500_000)
 
-        return min(1.0, risk_conf + gamma_conf + regime_conf + wall_conf)
+        # Normalize each component to [0,1] and average
+        norm_risk = (risk_conf - 0.2) / (0.3 - 0.2) if 0.3 != 0.2 else 1.0
+        norm_gamma = (gamma_conf - 0.2) / (0.5 - 0.2) if 0.5 != 0.2 else 1.0
+        norm_regime = (regime_conf - 0.15) / (0.3 - 0.15) if 0.3 != 0.15 else 1.0
+        norm_wall = (wall_conf - 0.1) / (0.2 - 0.1) if 0.2 != 0.1 else 1.0
+        return min(1.0, max(0.0, (norm_risk + norm_gamma + norm_regime + norm_wall) / 4.0))

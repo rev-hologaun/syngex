@@ -415,13 +415,13 @@ class ProbDistributionShift(BaseStrategy):
         breadth_scaled = min(1.0, (breadth - MIN_STRIKES_WITH_DATA) / 10)
         breadth_component = 0.10 + 0.05 * max(0, breadth_scaled)
 
-        confidence = (
-            z_component
-            + dur_component
-            + vol_component
-            + gamma_component
-            + breadth_component
-        )
+        # Normalize each component to [0,1] and average
+        norm_z = (z_component - 0.20) / (0.30 - 0.20) if 0.30 != 0.20 else 1.0
+        norm_dur = (dur_component - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
+        norm_vol = (vol_component - 0.08) / (0.15 - 0.08) if 0.15 != 0.08 else 1.0
+        norm_gamma = (gamma_component - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
+        norm_breadth = (breadth_component - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
+        confidence = (norm_z + norm_dur + norm_vol + norm_gamma + norm_breadth) / 5.0
 
         return min(MAX_CONFIDENCE, max(0.0, confidence))
 

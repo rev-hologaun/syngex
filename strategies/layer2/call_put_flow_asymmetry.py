@@ -317,5 +317,11 @@ class CallPutFlowAsymmetry(BaseStrategy):
         # 5. Net gamma context (0.0–0.05)
         gamma_conf = 0.05 if abs(net_gamma) > 500000 else 0.0
 
-        confidence = ratio_conf + iv_conf + vol_conf + regime_conf + gamma_conf
+        # Normalize each component to [0,1] and average
+        norm_ratio = (ratio_conf - 0.25) / (0.35 - 0.25) if 0.35 != 0.25 else 1.0
+        norm_iv = (iv_conf - 0.05) / (0.20 - 0.05) if 0.20 != 0.05 else 1.0
+        norm_vol = (vol_conf - 0.05) / (0.15 - 0.05) if 0.15 != 0.05 else 1.0
+        norm_regime = (regime_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
+        norm_gamma = gamma_conf / 0.05 if 0.05 != 0 else 0.0
+        confidence = (norm_ratio + norm_iv + norm_vol + norm_regime + norm_gamma) / 5.0
         return min(1.0, max(0.0, confidence))

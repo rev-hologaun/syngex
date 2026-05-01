@@ -667,7 +667,13 @@ class ThetaBurn(BaseStrategy):
         # Midday lull 11:30-14:30 ET = 16:30-19:30 UTC
         tod_conf = self._time_of_day_confidence(timestamp)
 
-        confidence = gamma_conf + prox_conf + nar_conf + rejection_conf + tod_conf
+        # Normalize each component to [0,1] and average
+        norm_gamma = (gamma_conf - 0.15) / (0.25 - 0.15) if 0.25 != 0.15 else 1.0
+        norm_prox = (prox_conf - 0.15) / (0.25 - 0.15) if 0.25 != 0.15 else 1.0
+        norm_nar = (nar_conf - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
+        norm_reject = (rejection_conf - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
+        norm_tod = (tod_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
+        confidence = (norm_gamma + norm_prox + norm_nar + norm_reject + norm_tod) / 5.0
         return min(MAX_CONFIDENCE, max(MIN_CONFIDENCE, confidence))
 
     @staticmethod

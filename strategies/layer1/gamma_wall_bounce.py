@@ -278,7 +278,11 @@ class GammaWallBounce(BaseStrategy):
         # Rejection component: 0.2–0.3
         rejection_conf = 0.2 + 0.1 * rejection_score
 
-        confidence = proximity_conf + strength_conf + rejection_conf
+        # Normalize each component to [0,1] and average
+        norm_prox = (proximity_conf - 0.3) / (0.5 - 0.3) if 0.5 != 0.3 else 1.0
+        norm_strength = (strength_conf - 0.2) / (0.5 - 0.2) if 0.5 != 0.2 else 1.0
+        norm_reject = (rejection_conf - 0.2) / (0.3 - 0.2) if 0.3 != 0.2 else 1.0
+        confidence = (norm_prox + norm_strength + norm_reject) / 3.0
         return min(MAX_CONFIDENCE, max(0.0, confidence))
 
     def _better_target(

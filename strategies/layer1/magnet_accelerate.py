@@ -43,7 +43,9 @@ logger = logging.getLogger("Syngex.Strategies.MagnetAccelerate")
 MIN_MAGNET_GEX = 500000       # Minimum |net_gamma| to be a magnet
 MAGNET_EXIT_PCT = 0.003       # 0.3% — exit within this % of magnet
 BREAKOUT_PCT = 0.002          # 0.2% — price must be this far past magnet to breakout
+MAX_BREAKOUT_PCT = 0.02       # 2% — max distance past magnet (no chasing)
 TRAIL_STOP_PCT = 0.01         # 1% — trailing stop for Phase 2
+TARGET_RISK_MULT = 1.5        # Minimum 1.5× risk for target distance
 MIN_CONFIDENCE = 0.35         # Minimum confidence to emit signal
 
 
@@ -204,17 +206,19 @@ class MagnetAccelerate(BaseStrategy):
         if abs(distance_from_magnet) < BREAKOUT_PCT:
             return None
 
+        # Reject if price is too far past the magnet — don't chase established moves
+        if abs(distance_from_magnet) > MAX_BREAKOUT_PCT:
+            return None
+
         # Direction depends on which side of magnet we are
         if distance_from_magnet > 0:
             # Price above magnet → potential LONG breakout
             direction = Direction.LONG
             stop = magnet_strike * (1 - TRAIL_STOP_PCT)
-            target = price * (1 + 0.02)  # 2% upside target
         else:
             # Price below magnet → potential SHORT breakout
             direction = Direction.SHORT
             stop = magnet_strike * (1 + TRAIL_STOP_PCT)
-            target = price * (1 - 0.02)  # 2% downside target
 
         # Confidence: further from magnet + stronger negative gamma
         confidence = self._phase2_confidence(
@@ -225,6 +229,17 @@ class MagnetAccelerate(BaseStrategy):
 
         risk = abs(price - stop)
         if risk <= 0:
+            return None
+
+        # Calculate target proportional to risk (minimum 1.5× R/R)
+        if direction == Direction.LONG:
+            target = price + risk * TARGET_RISK_MULT
+        else:
+            target = price - risk * TARGET_RISK_MULT
+
+        # Verify computed R/R meets minimum threshold
+        computed_rr = abs(target - price) / risk
+        if computed_rr < TARGET_RISK_MULT:
             return None
 
         return Signal(
@@ -308,7 +323,11 @@ class MagnetAccelerate(BaseStrategy):
         # Momentum: 0.1–0.2
         momentum_conf = 0.1 + 0.1 * momentum
 
-        return min(1.0, proximity + gamma_strength + momentum_conf)
+        # Normalize each component to [0,1] and average
+        norm_prox = (proximity - 0.2) / (0.4 - 0.2) if 0.4 != 0.2 else 1.0
+        norm_gamma = (gamma_strength - 0.2) / (0.5 - 0.2) if 0.5 != 0.2 else 1.0
+        norm_mom = (momentum_conf - 0.1) / (0.2 - 0.1) if 0.2 != 0.1 else 1.0
+        return min(1.0, max(0.0, (norm_prox + norm_gamma + norm_mom) / 3.0))
 
     def _phase2_confidence(
         self,
@@ -326,4 +345,8 @@ class MagnetAccelerate(BaseStrategy):
         # Gamma magnitude: stronger negative gamma = higher confidence (0.1–0.2)
         gamma_conf = 0.1 + 0.1 * min(1.0, abs(net_gamma) / 500000)
 
-        return min(1.0, dist_conf + regime_conf + gamma_conf)
+        # Normalize each component to [0,1] and average
+        norm_dist = (dist_conf - 0.2) / (0.3 - 0.2) if 0.3 != 0.2 else 1.0
+        norm_regime = (regime_conf - 0.15) / (0.3 - 0.15) if 0.3 != 0.15 else 1.0
+        norm_gamma = (gamma_conf - 0.1) / (0.2 - 0.1) if 0.2 != 0.1 else 1.0
+        return min(1.0, max(0.0, (norm_dist + norm_regime + norm_gamma) / 3.0))

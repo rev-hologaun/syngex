@@ -578,9 +578,13 @@ class IVBandBreakout(BaseStrategy):
         # Positive gamma regime adds confidence
         regime_conf = 0.10
 
-        confidence = (
-            iv_conf + compression_conf + delta_conf + vol_conf + regime_conf
-        )
+        # Normalize each component to [0,1] and average
+        norm_iv = (iv_conf - 0.30) / (0.45 - 0.30) if 0.45 != 0.30 else 1.0
+        norm_comp = compression_conf / 0.15 if 0.15 != 0 else 0.0
+        norm_delta = (delta_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
+        norm_vol = (vol_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
+        norm_regime = regime_conf / 0.10 if 0.10 != 0 else 0.0
+        confidence = (norm_iv + norm_comp + norm_delta + norm_vol + norm_regime) / 5.0
         return min(MAX_CONFIDENCE, max(0.0, confidence))
 
     def _compute_short_confidence(
@@ -622,7 +626,11 @@ class IVBandBreakout(BaseStrategy):
         # 5. Regime alignment (0.0–0.10)
         regime_conf = 0.10
 
-        confidence = (
-            iv_conf + compression_conf + delta_conf + vol_conf + regime_conf
-        )
+        # Normalize each component to [0,1] and average
+        norm_iv = (iv_conf - 0.30) / (0.45 - 0.30) if 0.45 != 0.30 else 1.0
+        norm_comp = compression_conf / 0.15 if 0.15 != 0 else 0.0
+        norm_delta = (delta_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
+        norm_vol = (vol_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
+        norm_regime = regime_conf / 0.10 if 0.10 != 0 else 0.0
+        confidence = (norm_iv + norm_comp + norm_delta + norm_vol + norm_regime) / 5.0
         return min(MAX_CONFIDENCE, max(0.0, confidence))

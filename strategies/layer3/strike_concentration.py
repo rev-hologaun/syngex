@@ -976,9 +976,13 @@ class StrikeConcentration(BaseStrategy):
         # Higher total OI = more significant strike
         oi_conf = 0.05 + 0.05 * min(1.0, total_oi / 1000)
 
-        confidence = (
-            rank_conf + prox_conf + signal_conf + regime_conf + oi_conf
-        )
+        # Normalize each component to [0,1] and average
+        norm_rank = (rank_conf - 0.20) / (0.30 - 0.20) if 0.30 != 0.20 else 1.0
+        norm_prox = (prox_conf - 0.15) / (0.25 - 0.15) if 0.25 != 0.15 else 1.0
+        norm_signal = (signal_conf - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
+        norm_regime = (regime_conf - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
+        norm_oi = (oi_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
+        confidence = (norm_rank + norm_prox + norm_signal + norm_regime + norm_oi) / 5.0
         return min(MAX_CONFIDENCE, max(0.0, confidence))
 
     def _compute_slice_confidence(
@@ -1024,7 +1028,11 @@ class StrikeConcentration(BaseStrategy):
         # 5. OI volume component (0.05–0.10)
         oi_conf = 0.05 + 0.05 * min(1.0, total_oi / 1000)
 
-        confidence = (
-            rank_conf + body_conf + vol_conf + regime_conf + oi_conf
-        )
+        # Normalize each component to [0,1] and average
+        norm_rank = (rank_conf - 0.15) / (0.25 - 0.15) if 0.25 != 0.15 else 1.0
+        norm_body = (body_conf - 0.20) / (0.30 - 0.20) if 0.30 != 0.20 else 1.0
+        norm_vol = (vol_conf - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
+        norm_regime = (regime_conf - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
+        norm_oi = (oi_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
+        confidence = (norm_rank + norm_body + norm_vol + norm_regime + norm_oi) / 5.0
         return min(MAX_CONFIDENCE, max(0.0, confidence))

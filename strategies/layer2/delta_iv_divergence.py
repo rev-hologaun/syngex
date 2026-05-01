@@ -34,6 +34,11 @@ from strategies.signal import Direction, Signal
 
 logger = logging.getLogger("Syngex.Strategies.DeltaIVDivergence")
 
+
+# Internal state keys used to store previous averages between calls
+_PREV_AVG_DELTA = "_prev_avg_delta"
+_PREV_AVG_IV = "_prev_avg_iv"
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -122,8 +127,13 @@ class DeltaIVDivergence(BaseStrategy):
         """
         Scan all strikes for delta-IV divergence pattern.
 
-        Compares current IV (from greeks_cache) against rolling average IV
-        (from rolling_data windows) to detect IV drops.
+        Computes actual delta changes by comparing the current average delta
+        per message (call_delta / call_count) against the rolling window mean.
+        Compares current IV against rolling average IV to detect IV drops.
+
+        A divergence requires:
+          - Delta change >= MIN_DELTA_INCREASE (delta increasing)
+          - IV change <= -MIN_IV_DECREASE (IV decreasing)
 
         Returns (call_divergences, put_divergences) — lists of strike
         dicts with delta_change, iv_change, and current values.
@@ -137,18 +147,40 @@ class DeltaIVDivergence(BaseStrategy):
         call_divergences: List[Dict[str, Any]] = []
         put_divergences: List[Dict[str, Any]] = []
 
-        for strike, data in greeks_cache.items():
-            call_delta = data.get("call_delta", 0)
-            call_oi = data.get("call_oi", 0)
-            call_count = data.get("call_count", 0)
-            if call_count >= MIN_STRIKE_POINTS and call_oi > 0:
-                # Get current IV for this strike
-                current_iv = iv_by_strike.get(strike, 0)
-                # Get rolling average IV from window
-                iv_window = rolling_data.get(f"iv_{strike}_5m")
-                rolling_avg_iv = iv_window.mean if iv_window else 0.0
+        for strike, bucket in greeks_cache.items():
+            call_delta = bucket.get("call_delta", 0.0)
+            call_oi = bucket.get("call_oi", 0.0)
+            call_count = bucket.get("call_count", 0)
+            put_delta = bucket.get("put_delta", 0.0)
+            put_oi = bucket.get("put_oi", 0.0)
+            put_count = bucket.get("put_count", 0)
 
-                # Calculate IV change: current vs rolling avg
+            # Get current IV for this strike
+            current_iv = iv_by_strike.get(strike, 0.0) or 0.0
+            iv_window = rolling_data.get(f"iv_{strike}_5m")
+            rolling_avg_iv = iv_window.mean if iv_window is not None and iv_window.mean is not None else 0.0
+
+            # ------------------------------------------------------------------
+            # Call side: compute actual delta change
+            # ------------------------------------------------------------------
+            if call_count >= MIN_STRIKE_POINTS and call_oi > 0:
+                # Average delta per message (normalizes the cumulative sum)
+                avg_call_delta = call_delta / call_count if call_count != 0 else 0.0
+
+                # Delta change: compare current avg delta per message against
+                # the rolling window mean of those averages
+                delta_window = rolling_data.get(f"delta_call_{strike}_5m")
+                rolling_avg_delta = 0.0
+                if delta_window is not None and delta_window.count >= MIN_STRIKE_POINTS:
+                    rolling_avg_delta = delta_window.mean or 0.0
+                    if rolling_avg_delta != 0:
+                        delta_change_pct = (avg_call_delta - rolling_avg_delta) / abs(rolling_avg_delta)
+                    else:
+                        delta_change_pct = 0.0
+                else:
+                    delta_change_pct = 0.0
+
+                # IV change: current vs rolling avg
                 if rolling_avg_iv > 0 and current_iv > 0:
                     iv_change_pct = (current_iv - rolling_avg_iv) / rolling_avg_iv
                 else:
@@ -157,26 +189,33 @@ class DeltaIVDivergence(BaseStrategy):
                 call_div = {
                     "strike": strike,
                     "side": "call",
-                    "delta_change": call_delta,
-                    "delta_change_pct": call_delta / abs(call_delta) if call_delta != 0 else 0,
-                    "recent_delta": call_delta,
-                    "recent_iv": current_iv,
-                    "rolling_avg_iv": rolling_avg_iv,
-                    "iv_change_pct": iv_change_pct,
+                    "delta_change": round(avg_call_delta, 6),
+                    "delta_change_pct": round(delta_change_pct, 4),
+                    "recent_delta": round(avg_call_delta, 6),
+                    "recent_iv": round(current_iv, 4),
+                    "rolling_avg_iv": round(rolling_avg_iv, 4),
+                    "rolling_avg_delta": round(rolling_avg_delta, 6) if delta_window is not None else 0.0,
+                    "iv_change_pct": round(iv_change_pct, 4),
                 }
                 call_divergences.append(call_div)
 
-            put_delta = data.get("put_delta", 0)
-            put_oi = data.get("put_oi", 0)
-            put_count = data.get("put_count", 0)
+            # ------------------------------------------------------------------
+            # Put side: compute actual delta change
+            # ------------------------------------------------------------------
             if put_count >= MIN_STRIKE_POINTS and put_oi > 0:
-                # Get current IV for this strike
-                current_iv = iv_by_strike.get(strike, 0)
-                # Get rolling average IV from window
-                iv_window = rolling_data.get(f"iv_{strike}_5m")
-                rolling_avg_iv = iv_window.mean if iv_window else 0.0
+                avg_put_delta = put_delta / put_count if put_count != 0 else 0.0
 
-                # Calculate IV change: current vs rolling avg
+                put_delta_window = rolling_data.get(f"delta_put_{strike}_5m")
+                put_rolling_avg_delta = 0.0
+                if put_delta_window is not None and put_delta_window.count >= MIN_STRIKE_POINTS:
+                    put_rolling_avg_delta = put_delta_window.mean or 0.0
+                    if put_rolling_avg_delta != 0:
+                        delta_change_pct = (avg_put_delta - put_rolling_avg_delta) / abs(put_rolling_avg_delta)
+                    else:
+                        delta_change_pct = 0.0
+                else:
+                    delta_change_pct = 0.0
+
                 if rolling_avg_iv > 0 and current_iv > 0:
                     iv_change_pct = (current_iv - rolling_avg_iv) / rolling_avg_iv
                 else:
@@ -185,12 +224,13 @@ class DeltaIVDivergence(BaseStrategy):
                 put_div = {
                     "strike": strike,
                     "side": "put",
-                    "delta_change": put_delta,
-                    "delta_change_pct": put_delta / abs(put_delta) if put_delta != 0 else 0,
-                    "recent_delta": put_delta,
-                    "recent_iv": current_iv,
-                    "rolling_avg_iv": rolling_avg_iv,
-                    "iv_change_pct": iv_change_pct,
+                    "delta_change": round(avg_put_delta, 6),
+                    "delta_change_pct": round(delta_change_pct, 4),
+                    "recent_delta": round(avg_put_delta, 6),
+                    "recent_iv": round(current_iv, 4),
+                    "rolling_avg_iv": round(rolling_avg_iv, 4),
+                    "rolling_avg_delta": round(put_rolling_avg_delta, 6) if put_delta_window is not None else 0.0,
+                    "iv_change_pct": round(iv_change_pct, 4),
                 }
                 put_divergences.append(put_div)
 
@@ -362,5 +402,11 @@ class DeltaIVDivergence(BaseStrategy):
         # 5. Net gamma context (0.0–0.10)
         gamma_conf = 0.10 if abs(net_gamma) > 500000 else 0.0
 
-        confidence = strike_conf + delta_conf + iv_conf + regime_conf + gamma_conf
+        # Normalize each component to [0,1] and average
+        norm_strike = (strike_conf - 0.20) / (0.30 - 0.20) if 0.30 != 0.20 else 1.0
+        norm_delta = (delta_conf - 0.20) / (0.25 - 0.20) if 0.25 != 0.20 else 1.0
+        norm_iv = (iv_conf - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
+        norm_regime = (regime_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
+        norm_gamma = gamma_conf / 0.10 if 0.10 != 0 else 0.0
+        confidence = (norm_strike + norm_delta + norm_iv + norm_regime + norm_gamma) / 5.0
         return min(1.0, max(0.0, confidence))

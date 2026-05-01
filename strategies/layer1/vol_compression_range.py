@@ -346,7 +346,14 @@ class VolCompressionRange(BaseStrategy):
         # Regime bonus (positive gamma regime already required)
         regime_conf = 0.1
 
-        confidence = position_conf + wall_conf + tightness_conf + strength_conf + data_conf + regime_conf
+        # Normalize each component to [0,1] and average
+        norm_pos = (position_conf - 0.2) / (0.3 - 0.2) if 0.3 != 0.2 else 1.0
+        norm_wall = (wall_conf - 0.2) / (0.3 - 0.2) if 0.3 != 0.2 else 1.0
+        norm_tight = (tightness_conf - 0.1) / (0.2 - 0.1) if 0.2 != 0.1 else 1.0
+        norm_strength = (strength_conf - 0.1) / (0.2 - 0.1) if 0.2 != 0.1 else 1.0
+        norm_data = data_conf / 0.1 if 0.1 != 0 else 0.0
+        norm_regime = regime_conf / 0.1 if 0.1 != 0 else 0.0
+        confidence = (norm_pos + norm_wall + norm_tight + norm_strength + norm_data + norm_regime) / 6.0
         return min(1.0, max(0.0, confidence))
 
     def _get_price_window(

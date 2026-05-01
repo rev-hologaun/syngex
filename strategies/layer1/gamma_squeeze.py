@@ -293,4 +293,9 @@ class GammaSqueeze(BaseStrategy):
         # Volume confirmation (0.1–0.15) — default if no volume data
         volume_conf = 0.1  # No volume data in layer 1
 
-        return min(1.0, wall_conf + gamma_conf + risk_conf + volume_conf)
+        # Normalize each component to [0,1] and average
+        norm_wall = (wall_conf - 0.2) / (0.35 - 0.2) if 0.35 != 0.2 else 1.0
+        norm_gamma = (gamma_conf - 0.2) / (0.35 - 0.2) if 0.35 != 0.2 else 1.0
+        norm_risk = (risk_conf - 0.15) / (0.25 - 0.15) if 0.25 != 0.15 else 1.0
+        norm_vol = (volume_conf - 0.1) / (0.15 - 0.1) if 0.15 != 0.1 else 1.0
+        return min(1.0, max(0.0, (norm_wall + norm_gamma + norm_risk + norm_vol) / 4.0))

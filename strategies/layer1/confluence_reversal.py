@@ -279,19 +279,18 @@ class ConfluenceReversal(BaseStrategy):
         else:
             confidence = MAX_CONFIDENCE_BASE - 0.25
 
-        # Wall strength bonus
+        # Wall strength bonus (normalize to [0,1])
         gex_bonus = min(0.15, abs(gex) / 10_000_000)
-        confidence += gex_bonus
-
-        # Technical signal bonus (rolling extreme is a nice-to-have)
-        if level.get("has_technical"):
-            confidence += 0.05
-
-        # Regime alignment bonus
-        if regime == "NEGATIVE":
-            confidence += 0.05  # Negative regime favors shorts
-
-        confidence = min(1.0, max(0.0, confidence))
+        # Technical signal bonus (normalize to [0,1])
+        tech_bonus = 0.05 if level.get("has_technical") else 0.0
+        # Regime alignment bonus (normalize to [0,1])
+        regime_bonus = 0.05 if regime == "NEGATIVE" else 0.0
+        # Normalize and average with base
+        norm_base = (confidence - 0.45) / (0.7 - 0.45) if 0.7 != 0.45 else 1.0
+        norm_gex = gex_bonus / 0.15 if 0.15 != 0 else 0.0
+        norm_tech = tech_bonus / 0.05 if 0.05 != 0 else 0.0
+        norm_regime = regime_bonus / 0.05 if 0.05 != 0 else 0.0
+        confidence = (norm_base + norm_gex + norm_tech + norm_regime) / 4.0
         if confidence < MIN_CONFIDENCE:
             return None
 
@@ -346,19 +345,18 @@ class ConfluenceReversal(BaseStrategy):
         else:
             confidence = MAX_CONFIDENCE_BASE - 0.25
 
-        # Wall strength bonus
+        # Wall strength bonus (normalize to [0,1])
         gex_bonus = min(0.15, abs(gex) / 10_000_000)
-        confidence += gex_bonus
-
-        # Technical signal bonus (rolling extreme is a nice-to-have)
-        if level.get("has_technical"):
-            confidence += 0.05
-
-        # Regime alignment bonus
-        if regime == "POSITIVE":
-            confidence += 0.05  # Positive regime favors longs
-
-        confidence = min(1.0, max(0.0, confidence))
+        # Technical signal bonus (normalize to [0,1])
+        tech_bonus = 0.05 if level.get("has_technical") else 0.0
+        # Regime alignment bonus (normalize to [0,1])
+        regime_bonus = 0.05 if regime == "POSITIVE" else 0.0
+        # Normalize and average with base
+        norm_base = (confidence - 0.45) / (0.7 - 0.45) if 0.7 != 0.45 else 1.0
+        norm_gex = gex_bonus / 0.15 if 0.15 != 0 else 0.0
+        norm_tech = tech_bonus / 0.05 if 0.05 != 0 else 0.0
+        norm_regime = regime_bonus / 0.05 if 0.05 != 0 else 0.0
+        confidence = (norm_base + norm_gex + norm_tech + norm_regime) / 4.0
         if confidence < MIN_CONFIDENCE:
             return None
 

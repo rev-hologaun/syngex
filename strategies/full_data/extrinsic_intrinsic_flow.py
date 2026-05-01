@@ -546,12 +546,12 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         gamma_scaled = min(1.0, net_gamma / (MIN_NET_GAMMA * 4))
         gamma_component = 0.15 + 0.05 * gamma_scaled
 
-        confidence = (
-            exp_component
-            + vol_component
-            + vol_dir_component
-            + gamma_component
-        )
+        # Normalize each component to [0,1] and average
+        norm_exp = (exp_component - 0.20) / (0.30 - 0.20) if 0.30 != 0.20 else 1.0
+        norm_vol = (vol_component - 0.20) / (0.25 - 0.20) if 0.25 != 0.20 else 1.0
+        norm_vol_dir = (vol_dir_component - 0.05) / (0.15 - 0.05) if 0.15 != 0.05 else 1.0
+        norm_gamma = (gamma_component - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
+        confidence = (norm_exp + norm_vol + norm_vol_dir + norm_gamma) / 4.0
 
         return min(MAX_CONFIDENCE, max(0.0, confidence))
 
@@ -588,12 +588,12 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         gamma_scaled = min(1.0, net_gamma / (MIN_NET_GAMMA * 4))
         gamma_component = 0.15 + 0.05 * gamma_scaled
 
-        confidence = (
-            exp_component
-            + vol_component
-            + vol_dir_component
-            + gamma_component
-        )
+        # Normalize each component to [0,1] and average
+        norm_exp = (exp_component - 0.20) / (0.30 - 0.20) if 0.30 != 0.20 else 1.0
+        norm_vol = (vol_component - 0.20) / (0.25 - 0.20) if 0.25 != 0.20 else 1.0
+        norm_vol_dir = (vol_dir_component - 0.05) / (0.15 - 0.05) if 0.15 != 0.05 else 1.0
+        norm_gamma = (gamma_component - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
+        confidence = (norm_exp + norm_vol + norm_vol_dir + norm_gamma) / 4.0
 
         return min(MAX_CONFIDENCE, max(0.0, confidence))
 
@@ -645,12 +645,12 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         gamma_scaled = min(1.0, net_gamma / (MIN_NET_GAMMA * 4))
         gamma_component = 0.15 + 0.05 * gamma_scaled
 
-        confidence = (
-            collapse_component
-            + vol_decline_component
-            + vol_dir_component
-            + gamma_component
-        )
+        # Normalize each component to [0,1] and average
+        norm_collapse = (collapse_component - 0.25) / (0.35 - 0.25) if 0.35 != 0.25 else 1.0
+        norm_vol_decline = (vol_decline_component - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
+        norm_vol_dir = (vol_dir_component - 0.05) / (0.15 - 0.05) if 0.15 != 0.05 else 1.0
+        norm_gamma = (gamma_component - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
+        confidence = (norm_collapse + norm_vol_decline + norm_vol_dir + norm_gamma) / 4.0
 
         return min(MAX_CONFIDENCE, max(0.0, confidence))
 

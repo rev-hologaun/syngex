@@ -296,5 +296,10 @@ class GEXImbalance(BaseStrategy):
         # VWAP confirmation bonus (0.0–0.1)
         vwap_bonus = 0.1 if vwap_confirmed else 0.0
 
-        confidence = ratio_conf + regime_bonus + msg_conf + vwap_bonus
+        # Normalize each component to [0,1] and average
+        norm_ratio = (ratio_conf - 0.4) / (0.8 - 0.4) if 0.8 != 0.4 else 1.0
+        norm_regime = regime_bonus / 0.15 if 0.15 != 0 else 0.0
+        norm_msg = msg_conf / 0.1 if 0.1 != 0 else 0.0
+        norm_vwap = vwap_bonus / 0.1 if 0.1 != 0 else 0.0
+        confidence = (norm_ratio + norm_regime + norm_msg + norm_vwap) / 4.0
         return min(1.0, max(0.0, confidence))

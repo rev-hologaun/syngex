@@ -23,9 +23,10 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
 
 from .signal import Direction, Signal, SignalStrength
 from .rolling_window import RollingWindow
@@ -257,6 +258,16 @@ class StrategyEngine:
                 logger.debug("Regime filter blocked %d signals", blocked)
             all_signals = filtered
 
+        # Phase 2.5: Inter-strategy conflict detection & resolution
+        conflicts = self._detect_conflicts(all_signals)
+        if conflicts:
+            logger.info(
+                "Conflict detection: found %d conflict group(s) among %d signals",
+                len(conflicts),
+                len(all_signals),
+            )
+            all_signals = self._filter_signals(all_signals, conflicts)
+
         # Phase 3: Cap signals per tick
         if len(all_signals) > self.config.max_signals_per_tick:
             # Keep highest confidence signals
@@ -289,6 +300,206 @@ class StrategyEngine:
             )
 
         return all_signals
+
+    # ------------------------------------------------------------------
+    # Inter-strategy conflict detection & resolution
+    # ------------------------------------------------------------------
+
+    def _detect_conflicts(
+        self, signals: List[Signal]
+    ) -> List[Tuple[List[Signal], List[Signal]]]:
+        """
+        Detect contradictory signals within 5-second windows.
+
+        Groups signals by symbol and 5-second time window. Identifies groups
+        where both LONG and SHORT signals exist — these are contradictions.
+
+        Returns:
+            List of (conflict_group, suppressed) tuples:
+            - conflict_group: the signals involved in the conflict
+            - suppressed: signals marked for suppression
+        """
+        if len(signals) < 2:
+            return []
+
+        # Group by (symbol, 5-second window)
+        windows: Dict[Tuple[str, int], List[Signal]] = defaultdict(list)
+        for sig in signals:
+            window_key = int(sig.timestamp / 5.0)
+            symbol = sig.symbol or "__global__"
+            windows[(symbol, window_key)].append(sig)
+
+        conflicts: List[Tuple[List[Signal], List[Signal]]] = []
+
+        for key, group in windows.items():
+            symbol, _ = key
+            # Quick check: does this group have both directions?
+            directions = {s.direction for s in group}
+            if Direction.LONG not in directions or Direction.SHORT not in directions:
+                continue
+
+            # Separate by direction
+            longs = [s for s in group if s.direction == Direction.LONG]
+            shorts = [s for s in group if s.direction == Direction.SHORT]
+
+            # Resolve and record
+            suppressed = self._resolve_conflicts(longs, shorts, symbol)
+            if suppressed:
+                conflict_group = longs + shorts
+                conflicts.append((conflict_group, suppressed))
+
+        return conflicts
+
+    def _resolve_conflicts(
+        self,
+        longs: List[Signal],
+        shorts: List[Signal],
+        symbol: str,
+    ) -> List[Signal]:
+        """
+        Resolve a LONG vs SHORT conflict for the same symbol/window.
+
+        Resolution rules (applied in order):
+        1. **Extreme confidence gap** — if one signal has confidence >= 0.9
+           and the other < 0.7, suppress the lower-confidence one.
+        2. **Layer priority** — if confidence is similar, Layer 2 signals
+           take priority over Layer 1 (alpha > structural).
+        3. **Same layer, keep all** — if both are same layer and similar
+           confidence, keep both (they may represent different aspects).
+
+        Returns:
+            List of signals to suppress.
+        """
+        suppressed: List[Signal] = []
+
+        # --- Rule 1: Extreme confidence gap ---
+        # Check if any signal has >= 0.9 confidence vs any < 0.7
+        high_conf = [s for s in longs + shorts if s.confidence >= 0.9]
+        low_conf = [s for s in longs + shorts if s.confidence < 0.7]
+
+        if high_conf and low_conf:
+            # Find which direction the high-confidence signal is on
+            high_directions = {s.direction for s in high_conf}
+            for lc in low_conf:
+                if lc.direction not in high_directions:
+                    suppressed.append(lc)
+                    logger.warning(
+                        "CONFLICT [%s]: suppressed %s (conf=%.2f, str=%s) "
+                        "vs %s (conf=%.2f, str=%s) — extreme confidence gap",
+                        symbol,
+                        lc.direction.value,
+                        lc.confidence,
+                        lc.strategy_id,
+                        "HIGH" if high_conf else "?",
+                        max(s.confidence for s in high_conf),
+                        ",".join(s.strategy_id for s in high_conf),
+                    )
+            return suppressed
+
+        # --- Rule 2: Layer priority (similar confidence) ---
+        # Group signals by layer (across both directions)
+        all_by_layer: Dict[str, List[Signal]] = defaultdict(list)
+        for s in longs + shorts:
+            layer = getattr(s, "_layer", "") or self._get_strategy_layer(s.strategy_id)
+            all_by_layer[layer].append(s)
+
+        all_layers = set(all_by_layer.keys())
+
+        # Check if there are signals on different layers
+        if len(all_layers) > 1:
+            # Find the highest-priority layer present
+            max_priority = max(self._layer_priority(l) for l in all_layers)
+            max_priority_layers = {l for l in all_layers if self._layer_priority(l) == max_priority}
+
+            # Find the lowest-priority layer present
+            min_priority = min(self._layer_priority(l) for l in all_layers)
+            min_priority_layers = {l for l in all_layers if self._layer_priority(l) == min_priority}
+
+            # If there's a clear layer gap (e.g., layer2 vs layer1), suppress lower-priority
+            if max_priority > min_priority:
+                for layer in min_priority_layers:
+                    for s in all_by_layer[layer]:
+                        if s not in suppressed:
+                            suppressed.append(s)
+                            logger.info(
+                                "CONFLICT [%s]: suppressed %s (conf=%.2f, str=%s, layer=%s) "
+                                "in favor of higher-layer signal",
+                                symbol,
+                                s.direction.value,
+                                s.confidence,
+                                s.strategy_id,
+                                layer,
+                            )
+        else:
+            # Same layer for all signals — check confidence spread
+            layer = list(all_layers)[0]
+            long_max = max(s.confidence for s in longs) if longs else 0.0
+            short_max = max(s.confidence for s in shorts) if shorts else 0.0
+            confidence_spread = abs(long_max - short_max)
+
+            # If confidence spread is small (<=0.15), they're "similar"
+            # Same layer + similar confidence = keep both (Rule 3)
+            # No suppression needed here
+
+        # --- Rule 3: Same layer, similar confidence — keep all ---
+        # No suppression needed; different strategies may capture different aspects
+
+        return suppressed
+
+    def _get_strategy_layer(self, strategy_id: str) -> str:
+        """Look up the layer for a strategy by scanning registered strategies."""
+        for strat in self._strategies:
+            if strat.strategy_id == strategy_id:
+                return strat.layer
+        return "layer1"  # default fallback
+
+    @staticmethod
+    def _layer_priority(layer: str) -> int:
+        """
+        Return numeric priority for a layer string.
+        Higher = more important.
+
+        Layer hierarchy:
+            layer1 (structural)  -> 1
+            layer2 (alpha)       -> 2
+            layer3 (sentiment)   -> 3
+            full_data (ML)       -> 4
+        """
+        priority_map = {
+            "layer1": 1,
+            "layer2": 2,
+            "layer3": 3,
+            "full_data": 4,
+        }
+        return priority_map.get(layer, 1)
+
+    def _filter_signals(
+        self, signals: List[Signal], conflicts: List[Tuple[List[Signal], List[Signal]]]
+    ) -> List[Signal]:
+        """
+        Remove suppressed signals from the signal list.
+
+        Args:
+            signals: All signals after regime filtering.
+            conflicts: Output from _detect_conflicts().
+
+        Returns:
+            Filtered signal list with suppressed signals removed.
+        """
+        suppressed_ids: Set[int] = set()
+        for _, suppressed in conflicts:
+            for s in suppressed:
+                suppressed_ids.add(id(s))
+
+        filtered = [s for s in signals if id(s) not in suppressed_ids]
+        total_suppressed = len(signals) - len(filtered)
+        if total_suppressed > 0:
+            logger.info(
+                "Conflict resolution: suppressed %d of %d signals",
+                total_suppressed,
+                len(signals),
+            )
+        return filtered
 
     # ------------------------------------------------------------------
     # Signal logging

@@ -277,5 +277,12 @@ class DeltaGammaSqueeze(BaseStrategy):
         # 6. Wall strength (0.0–0.05)
         wall_conf = 0.05 * min(1.0, abs(wall_gex) / 5_000_000)
 
-        confidence = proximity_conf + accel_conf + vol_conf + momentum_conf + regime_conf + wall_conf
+        # Normalize each component to [0,1] and average
+        norm_prox = (proximity_conf - 0.25) / (0.35 - 0.25) if 0.35 != 0.25 else 1.0
+        norm_accel = (accel_conf - 0.20) / (0.30 - 0.20) if 0.30 != 0.20 else 1.0
+        norm_vol = (vol_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
+        norm_mom = (momentum_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
+        norm_regime = regime_conf / 0.10 if 0.10 != 0 else 0.0
+        norm_wall = wall_conf / 0.05 if 0.05 != 0 else 0.0
+        confidence = (norm_prox + norm_accel + norm_vol + norm_mom + norm_regime + norm_wall) / 6.0
         return min(1.0, max(0.0, confidence))

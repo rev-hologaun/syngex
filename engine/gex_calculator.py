@@ -76,6 +76,30 @@ class _StrikeBucket:
         """Net delta: call_delta_sum minus put_delta_sum."""
         return self.call_delta - self.put_delta
 
+    def normalized_gamma(self) -> float:
+        """Return normalized (per-message average) net gamma.
+
+        The cumulative gamma_oi values grow linearly with message count,
+        so we divide by total messages for that strike to get a bounded
+        per-message average. This is the value used for GEX calculations.
+        """
+        total_count = self.call_count + self.put_count
+        if total_count == 0:
+            return 0.0
+        return self.net_gamma / total_count
+
+    def normalized_call_gamma(self) -> float:
+        """Return normalized (per-message average) call gamma."""
+        if self.call_count == 0:
+            return 0.0
+        return self.call_gamma_oi / self.call_count
+
+    def normalized_put_gamma(self) -> float:
+        """Return normalized (per-message average) put gamma."""
+        if self.put_count == 0:
+            return 0.0
+        return self.put_gamma_oi / self.put_count
+
 
 class GEXCalculator:
     """
@@ -209,7 +233,8 @@ class GEXCalculator:
         Identify Gamma Walls — strikes with massive GEX.
 
         A Gamma Wall is a strike where the Net GEX (in dollar terms)
-        exceeds the given threshold.
+        exceeds the given threshold. Uses normalized (per-message average)
+        gamma values to keep GEX in realistic ranges.
 
         Returns sorted list of wall dicts sorted by absolute GEX.
         """
@@ -219,13 +244,15 @@ class GEXCalculator:
             return walls
 
         for strike, bucket in self._ladder.items():
-            gex = bucket.net_gamma * 100 * price
+            # Normalize cumulative gamma by message count for bounded GEX
+            norm_net_gamma = bucket.normalized_gamma()
+            gex = norm_net_gamma * 100 * price
             if abs(gex) >= threshold:
                 walls.append({
                     "strike": strike,
-                    "net_gamma": bucket.net_gamma,
+                    "net_gamma": norm_net_gamma,
                     "gex": gex,
-                    "side": "call" if bucket.net_gamma > 0 else "put",
+                    "side": "call" if norm_net_gamma > 0 else "put",
                     "total_contracts": bucket.call_count + bucket.put_count,
                 })
 
@@ -261,6 +288,7 @@ class GEXCalculator:
         Return the full Gamma Ladder profile — the evolving state.
 
         Used by the orchestrator for logging/reports.
+        Gamma values are normalized (per-message average) for realistic display.
         """
         profile: Dict[str, Any] = {
             "symbol": self.symbol,
@@ -271,9 +299,9 @@ class GEXCalculator:
 
         for strike, bucket in sorted(self._ladder.items()):
             profile["strikes"][strike] = {
-                "call_gamma_oi": bucket.call_gamma_oi,
-                "put_gamma_oi": bucket.put_gamma_oi,
-                "net_gamma": bucket.net_gamma,
+                "call_gamma_oi": bucket.normalized_call_gamma(),
+                "put_gamma_oi": bucket.normalized_put_gamma(),
+                "net_gamma": bucket.normalized_gamma(),
                 "total_contracts": bucket.call_count + bucket.put_count,
             }
 
@@ -287,9 +315,9 @@ class GEXCalculator:
         """Return per-strike greeks summary for strategy use.
 
         Returns dict mapping strike -> {
-            'net_gamma': float,
-            'call_gamma': float,
-            'put_gamma': float,
+            'net_gamma': float,  # normalized (per-message average)
+            'call_gamma': float,  # normalized (per-message average)
+            'put_gamma': float,   # normalized (per-message average)
             'call_oi': float,
             'put_oi': float,
             'net_oi': float,
@@ -298,6 +326,10 @@ class GEXCalculator:
             'put_delta_sum': float,
         }
 
+        Gamma values are normalized (divided by message count) to produce
+        bounded, per-message averages. OI values remain cumulative as they
+        represent relative OI from the stream.
+
         Note: OI values are **relative** (not absolute contract counts).
         OI-dependent strategies use relative ratios which still work for
         detecting asymmetry direction and magnitude.
@@ -305,9 +337,9 @@ class GEXCalculator:
         summary: Dict[float, Dict[str, float]] = {}
         for strike, bucket in self._ladder.items():
             summary[strike] = {
-                "net_gamma": bucket.net_gamma,
-                "call_gamma": bucket.call_gamma,
-                "put_gamma": bucket.put_gamma,
+                "net_gamma": bucket.normalized_gamma(),
+                "call_gamma": bucket.normalized_call_gamma(),
+                "put_gamma": bucket.normalized_put_gamma(),
                 "call_oi": bucket.call_oi,
                 "put_oi": bucket.put_oi,
                 "net_oi": bucket.net_oi,

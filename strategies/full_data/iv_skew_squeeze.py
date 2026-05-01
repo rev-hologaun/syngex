@@ -457,13 +457,13 @@ class IVSkewSqueeze(BaseStrategy):
         gamma_conf = min(1.0, net_gamma / 500000.0)
         gamma_component = 0.10 + 0.10 * gamma_conf
 
-        confidence = (
-            skew_component
-            + stability_component
-            + norm_component
-            + vol_component
-            + gamma_component
-        )
+        # Normalize each component to [0,1] and average
+        norm_skew = (skew_component - 0.15) / (0.25 - 0.15) if 0.25 != 0.15 else 1.0
+        norm_stability = (stability_component - 0.15) / (0.25 - 0.15) if 0.25 != 0.15 else 1.0
+        norm_norm = (norm_component - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
+        norm_vol = (vol_component - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
+        norm_gamma = (gamma_component - 0.10) / (0.20 - 0.10) if 0.20 != 0.10 else 1.0
+        confidence = (norm_skew + norm_stability + norm_norm + norm_vol + norm_gamma) / 5.0
 
         return min(MAX_CONFIDENCE, max(0.0, confidence))
 
@@ -514,12 +514,12 @@ class IVSkewSqueeze(BaseStrategy):
         gamma_conf = min(1.0, net_gamma / 500000.0)
         gamma_component = 0.10 + 0.10 * gamma_conf
 
-        confidence = (
-            skew_component
-            + stability_component
-            + norm_component
-            + vol_component
-            + gamma_component
-        )
+        # Normalize each component to [0,1] and average
+        norm_skew = (skew_component - 0.15) / (0.25 - 0.15) if 0.25 != 0.15 else 1.0
+        norm_stability = (stability_component - 0.15) / (0.25 - 0.15) if 0.25 != 0.15 else 1.0
+        norm_norm = (norm_component - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
+        norm_vol = (vol_component - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
+        norm_gamma = (gamma_component - 0.10) / (0.20 - 0.10) if 0.20 != 0.10 else 1.0
+        confidence = (norm_skew + norm_stability + norm_norm + norm_vol + norm_gamma) / 5.0
 
         return min(MAX_CONFIDENCE, max(0.0, confidence))

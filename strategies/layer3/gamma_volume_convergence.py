@@ -500,9 +500,13 @@ class GammaVolumeConvergence(BaseStrategy):
         # 5. Proximity to gamma wall (0.05–0.10)
         wall_conf = self._wall_proximity_confidence(price, direction, gex_calc)
 
-        confidence = (
-            delta_conf + gamma_conf + vol_conf + regime_conf + wall_conf
-        )
+        # Normalize each component to [0,1] and average
+        norm_delta = (delta_conf - 0.20) / (0.30 - 0.20) if 0.30 != 0.20 else 1.0
+        norm_gamma = (gamma_conf - 0.20) / (0.30 - 0.20) if 0.30 != 0.20 else 1.0
+        norm_vol = (vol_conf - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
+        norm_regime = (regime_conf - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
+        norm_wall = (wall_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
+        confidence = (norm_delta + norm_gamma + norm_vol + norm_regime + norm_wall) / 5.0
         return min(MAX_CONFIDENCE, max(0.0, confidence))
 
     def _wall_proximity_confidence(
