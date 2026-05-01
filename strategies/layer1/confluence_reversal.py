@@ -296,8 +296,8 @@ class ConfluenceReversal(BaseStrategy):
 
         # Stop past the confluence level
         stop = strike * (1 + STOP_PCT)
-        target = price - (price - stop) * TARGET_RISK_MULT
         risk = stop - price
+        target = price - risk * TARGET_RISK_MULT
         if risk <= 0:
             return None
 
@@ -362,8 +362,8 @@ class ConfluenceReversal(BaseStrategy):
 
         # Stop past the confluence level
         stop = strike * (1 - STOP_PCT)
-        target = price + (stop - price) * (-TARGET_RISK_MULT)
         risk = price - stop
+        target = price + risk * TARGET_RISK_MULT
         if risk <= 0:
             return None
 
