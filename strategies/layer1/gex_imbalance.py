@@ -48,9 +48,9 @@ PUT_HEAVY_RATIO = 0.4        # < 0.4 → long bias
 CALL_HEAVY_RATIO = 0.6       # > 0.6 → short bias
 STRONG_PUT_RATIO = 0.25      # very strong long signal
 STRONG_CALL_RATIO = 0.75     # very strong short signal
-MIN_MESSAGES = 50            # minimum data points for signal quality
-STOP_PCT = 0.01              # 1% stop
-TARGET_RISK_MULT = 1.5       # 1.5% target (1:1.5 RR)
+MIN_MESSAGES = 20            # minimum data points for signal quality
+STOP_VOL_MULT = 2.5          # stop = 2.5x rolling price std dev
+TARGET_RISK_MULT = 1.5       # target = 1.5x stop distance
 MIN_CONFIDENCE = 0.35        # Minimum confidence to emit signal
 
 
@@ -114,15 +114,25 @@ class GEXImbalance(BaseStrategy):
         if confidence < MIN_CONFIDENCE:
             return []
 
-        # Build signal
+        # Build volatility-based stop/target
+        price_window = rolling_data.get("price_5m")
+        if price_window and price_window.count >= 10 and price_window.std() is not None:
+            vol = price_window.std()
+            if vol is not None and vol > 0:
+                stop_distance = vol * STOP_VOL_MULT
+            else:
+                stop_distance = underlying_price * 0.005  # fallback: 0.5%
+        else:
+            stop_distance = underlying_price * 0.005  # fallback: 0.5%
+
         if bias == "LONG":
-            stop = underlying_price * (1 - STOP_PCT)
-            target = underlying_price * (1 + STOP_PCT * TARGET_RISK_MULT)
+            stop = underlying_price - stop_distance
+            target = underlying_price + stop_distance * TARGET_RISK_MULT
             direction = Direction.LONG
             side_label = "put-heavy"
         else:
-            stop = underlying_price * (1 + STOP_PCT)
-            target = underlying_price * (1 - STOP_PCT * TARGET_RISK_MULT)
+            stop = underlying_price + stop_distance
+            target = underlying_price - stop_distance * TARGET_RISK_MULT
             direction = Direction.SHORT
             side_label = "call-heavy"
 
