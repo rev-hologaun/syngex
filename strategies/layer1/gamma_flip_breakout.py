@@ -36,7 +36,7 @@ logger = logging.getLogger("Syngex.Strategies.GammaFlipBreakout")
 # Constants
 # ---------------------------------------------------------------------------
 
-FLIP_PROXIMITY_PCT = 0.025      # 2.5% — price must be within this of flip
+FLIP_PROXIMITY_PCT = 0.05       # 5% — price must be within this of flip (was 2.5%, too tight)
 STOP_OTHER_SIDE_PCT = 0.01      # 1% — stop on other side of flip
 ATR_MULT = 1.5                   # 1.5× rolling range as ATR proxy
 TARGET_RR = 2.5                  # 1:2.5 risk-reward minimum
@@ -129,10 +129,10 @@ class GammaFlipBreakout(BaseStrategy):
         price_window = rolling_data.get("price_5m")
         zs = price_window.z_score if price_window else None
 
-        if zs is not None and zs > 0.5:
+        if zs is not None and zs > 0.3:
             # Price is above its rolling mean → SHORT fade
             return self._short_fade(flip_strike, price, atr, net_gamma, regime, gex_calc)
-        elif zs is not None and zs < -0.5:
+        elif zs is not None and zs < -0.3:
             # Price is below its rolling mean → LONG fade
             return self._long_fade(flip_strike, price, atr, net_gamma, regime, gex_calc)
 
@@ -263,10 +263,10 @@ class GammaFlipBreakout(BaseStrategy):
         price_window = rolling_data.get("price_5m")
         zs = price_window.z_score if price_window else None
 
-        if zs is not None and zs > 0.5:
+        if zs is not None and zs > 0.3:
             # Price trending up toward flip → LONG breakout
             return self._long_breakout(flip_strike, price, atr, net_gamma, regime, gex_calc)
-        elif zs is not None and zs < -0.5:
+        elif zs is not None and zs < -0.3:
             # Price trending down away from flip → SHORT breakout
             return self._short_breakout(flip_strike, price, atr, net_gamma, regime, gex_calc)
 
