@@ -129,7 +129,7 @@ def render_metrics(state: dict) -> None:
         delta_color = "red"
         delta_prefix = ""
     else:
-        delta_color = None
+        delta_color = "off"
         delta_prefix = ""
 
     col1, col2, col3, col4 = st.columns(4)
@@ -518,11 +518,11 @@ with col2:
 with col3:
     render_gamma_walls(state)
 
-# Bottom full-width table
-render_top_strikes(state)
-
 # Recent signals
 render_signals(signals)
+
+# Bottom full-width table
+render_top_strikes(state)
 
 # Status footer
 render_status(state, signals)
