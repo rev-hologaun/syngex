@@ -82,7 +82,6 @@ from strategies.layer2 import (
     DeltaGammaSqueeze,
     DeltaVolumeExhaustion,
     CallPutFlowAsymmetry,
-    DeltaIVDivergence,
     IVGEXDivergence,
 )
 from strategies.layer3 import (
@@ -474,7 +473,6 @@ class SyngexOrchestrator:
                 "delta_gamma_squeeze": DeltaGammaSqueeze,
                 "delta_volume_exhaustion": DeltaVolumeExhaustion,
                 "call_put_flow_asymmetry": CallPutFlowAsymmetry,
-                "delta_iv_divergence": DeltaIVDivergence,
                 "iv_gex_divergence": IVGEXDivergence,
             },
             "layer3": {
@@ -542,31 +540,7 @@ class SyngexOrchestrator:
                     if avg_iv > 0:
                         self._rolling_data[key].push(avg_iv)
 
-                # Per-strike delta windows for delta_iv_divergence
-                greeks_cache = self._calculator.get_greeks_cache()
-                for strike, bucket_data in greeks_cache.items():
-                    call_delta = bucket_data.get("call_delta", 0.0)
-                    call_count = bucket_data.get("call_count", 0)
-                    put_delta = bucket_data.get("put_delta", 0.0)
-                    put_count = bucket_data.get("put_count", 0)
 
-                    if call_count > 0:
-                        avg_call_delta = call_delta / call_count
-                        key = f"delta_call_{strike}_5m"
-                        if key not in self._rolling_data:
-                            self._rolling_data[key] = RollingWindow(
-                                window_type="time", window_size=300
-                            )
-                        self._rolling_data[key].push(avg_call_delta)
-
-                    if put_count > 0:
-                        avg_put_delta = put_delta / put_count
-                        key = f"delta_put_{strike}_5m"
-                        if key not in self._rolling_data:
-                            self._rolling_data[key] = RollingWindow(
-                                window_type="time", window_size=300
-                            )
-                        self._rolling_data[key].push(avg_put_delta)
 
         except Exception as exc:
             logger.error("Error processing message: %s", exc, exc_info=True)

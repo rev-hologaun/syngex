@@ -9,20 +9,17 @@ Strategies:
     - DeltaGammaSqueeze: Extreme momentum entry via call wall + delta acceleration
     - DeltaVolumeExhaustion: Trend reversal via weakening delta + volume conviction
     - CallPutFlowAsymmetry: Real-time call vs put flow bias detection
-    - DeltaIVDivergence: Smart money accumulation (delta up, IV down)
     - IVGEXDivergence: Volatility mean reversion at gamma extremes
 """
 
 from .delta_gamma_squeeze import DeltaGammaSqueeze
 from .delta_volume_exhaustion import DeltaVolumeExhaustion
 from .call_put_flow_asymmetry import CallPutFlowAsymmetry
-from .delta_iv_divergence import DeltaIVDivergence
 from .iv_gex_divergence import IVGEXDivergence
 
 __all__ = [
     "DeltaGammaSqueeze",
     "DeltaVolumeExhaustion",
     "CallPutFlowAsymmetry",
-    "DeltaIVDivergence",
     "IVGEXDivergence",
 ]
