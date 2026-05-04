@@ -683,12 +683,12 @@ class SyngexOrchestrator:
                 self._rolling_data[KEY_VOLUME_DOWN_5M].push(self._put_update_count)
 
                 # extrinsic_proxy_5m — aggregate extrinsic value proxy
-                extrinsic_proxy = self._calculate_extrinsic_proxy(greeks_summary)
+                extrinsic_proxy = self._calculate_extrinsic_proxy(gex_summary)
                 if extrinsic_proxy is not None:
                     self._rolling_data[KEY_EXTRINSIC_PROXY_5M].push(extrinsic_proxy)
 
                 # prob_momentum_5m — probability distribution momentum
-                prob_mom = self._calculate_prob_momentum(greeks_summary)
+                prob_mom = self._calculate_prob_momentum(gex_summary)
                 if prob_mom is not None:
                     self._rolling_data[KEY_PROB_MOMENTUM_5M].push(prob_mom)
 
