@@ -37,6 +37,7 @@ Confidence factors:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
@@ -53,7 +54,7 @@ CONFLUENCE_DISTANCE_PCT = 0.003  # 0.3% — max distance for confluence
 MIN_STRUCTURAL_SIGNALS = 2        # Must have 2+ independent structural signals
 MAX_CONFIDENCE_BASE = 0.7         # Base confidence for score 3
 MIN_CONFIDENCE = 0.40             # Minimum confidence to emit signal
-STOP_PCT = 0.004                  # 0.4% stop
+STOP_PCT = 0.008                  # 0.8% stop
 TARGET_RISK_MULT = 2.0            # 2× risk for target
 
 # Structural signals (independent sources of truth)
@@ -71,6 +72,9 @@ class ConfluenceReversal(BaseStrategy):
 
     strategy_id = "confluence_reversal"
     layer = "layer1"
+
+    # Per-symbol signal cooldown: max 1 signal per symbol per 10 minutes
+    _last_signal_time: Dict[str, float] = {}
 
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """
@@ -92,6 +96,13 @@ class ConfluenceReversal(BaseStrategy):
         # Gather structural levels
         walls = gex_calc.get_gamma_walls(threshold=500_000)
         flip = gex_calc.get_gamma_flip()
+
+        # Per-symbol cooldown: max 1 signal per symbol per 10 minutes
+        ts = data.get("timestamp", time.time())
+        symbol = data.get("symbol", "")
+        if symbol and symbol in self._last_signal_time:
+            if ts - self._last_signal_time[symbol] < 600:
+                return []  # Cooldown active
 
         # Find confluence levels
         resistance_levels = self._find_confluence_levels(
@@ -122,6 +133,10 @@ class ConfluenceReversal(BaseStrategy):
                 )
                 if sig:
                     signals.append(sig)
+
+        # Update cooldown timer
+        if symbol:
+            self._last_signal_time[symbol] = ts
 
         return signals
 
@@ -270,6 +285,10 @@ class ConfluenceReversal(BaseStrategy):
         regime: str,
     ) -> Optional[Signal]:
         """Build a SHORT signal from a resistance confluence level."""
+        # Hard regime filter — don't SHORT in POSITIVE regime
+        if regime != "NEGATIVE":
+            return None
+
         strike = level["strike"]
         structural_count = level.get("structural_count", 0)
         gex = level.get("gex", 0)
@@ -285,7 +304,7 @@ class ConfluenceReversal(BaseStrategy):
         # Technical signal bonus (normalize to [0,1])
         tech_bonus = 0.05 if level.get("has_technical") else 0.0
         # Regime alignment bonus (normalize to [0,1])
-        regime_bonus = 0.05 if regime == "NEGATIVE" else 0.0
+        regime_bonus = 0.10 if regime == "NEGATIVE" else 0.0
         # Normalize and average with base
         norm_base = (confidence - 0.45) / (0.7 - 0.45) if 0.7 != 0.45 else 1.0
         norm_gex = gex_bonus / 0.15 if 0.15 != 0 else 0.0
@@ -336,6 +355,10 @@ class ConfluenceReversal(BaseStrategy):
         regime: str,
     ) -> Optional[Signal]:
         """Build a LONG signal from a support confluence level."""
+        # Hard regime filter — don't LONG in NEGATIVE regime
+        if regime != "POSITIVE":
+            return None
+
         strike = level["strike"]
         structural_count = level.get("structural_count", 0)
         gex = level.get("gex", 0)
@@ -351,7 +374,7 @@ class ConfluenceReversal(BaseStrategy):
         # Technical signal bonus (normalize to [0,1])
         tech_bonus = 0.05 if level.get("has_technical") else 0.0
         # Regime alignment bonus (normalize to [0,1])
-        regime_bonus = 0.05 if regime == "POSITIVE" else 0.0
+        regime_bonus = 0.10 if regime == "POSITIVE" else 0.0
         # Normalize and average with base
         norm_base = (confidence - 0.45) / (0.7 - 0.45) if 0.7 != 0.45 else 1.0
         norm_gex = gex_bonus / 0.15 if 0.15 != 0 else 0.0
