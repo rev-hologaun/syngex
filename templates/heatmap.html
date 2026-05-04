@@ -41,13 +41,21 @@
             margin-bottom: var(--gap);
             padding: 0 4px;
         }
-        .header h1 {
+        .header-title {
             font-size: 1.25rem;
             font-weight: 700;
             letter-spacing: 0.05em;
             text-transform: uppercase;
         }
-        .header h1 span { color: var(--accent); }
+        .header-title span { color: var(--accent); }
+        .header-center {
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: var(--text-main);
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        }
         .header-meta {
             display: flex;
             align-items: center;
@@ -71,18 +79,6 @@
         .regime-neutral { background: #374151; color: #d1d5db; }
         .regime-unknown { background: #1e293b; color: #94a3b8; }
 
-        .price-display {
-            font-family: 'JetBrains Mono', 'Fira Code', monospace;
-            font-size: 1rem;
-            font-weight: 600;
-            color: var(--text-main);
-        }
-        .price-display .net-gamma {
-            font-size: 0.75rem;
-            color: var(--text-dim);
-            margin-left: 0.5rem;
-        }
-
         /* ── SECTION 1: Summary Stats Row ───────────────────── */
         .summary-stats-row {
             display: grid;
@@ -98,6 +94,16 @@
             display: flex;
             flex-direction: column;
             gap: 0.25rem;
+        }
+        .stat-card-inline {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
         }
         .stat-label {
             font-size: 0.6rem;
@@ -115,12 +121,31 @@
         .stat-value.accent { color: var(--accent); }
         .stat-value.positive { color: #10b981; }
         .stat-value.negative { color: #ef4444; }
-        .stat-delta {
-            font-size: 0.65rem;
+        .stat-value-inline {
             font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 1.35rem;
+            font-weight: 700;
+            color: var(--text-main);
         }
+        .stat-value-inline.positive { color: #10b981; }
+        .stat-value-inline.negative { color: #ef4444; }
+        .stat-label.centered {
+            text-align: center;
+        }
+        .stat-value.centered {
+            text-align: center;
+        }
+        .stat-delta-inline {
+            font-size: 0.75rem;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .stat-delta-inline.up { color: #10b981; }
+        .stat-delta-inline.down { color: #ef4444; }
         .stat-delta.up { color: #10b981; }
         .stat-delta.down { color: #ef4444; }
+        .stat-delta.neutral { color: var(--text-dim); }
 
         /* ── SECTION 2: Main Chart Area ─────────────────────── */
         .main-chart-area {
@@ -503,12 +528,9 @@
 
     <!-- Header -->
     <div class="header">
-        <h1>🕸️ <span>Syngex</span> Heatmap</h1>
+        <div class="header-title">🕸️ <span>Syngex</span> Heatmap</div>
+        <div class="header-center" id="symbolText">—</div>
         <div class="header-meta">
-            <span id="symbolDisplay" class="price-display">
-                <span id="symbolText">—</span>
-                <span class="net-gamma" id="netGammaDisplay"></span>
-            </span>
             <span id="regimeBadge" class="regime-badge regime-unknown">—</span>
             <span class="conn-status">
                 <span class="conn-dot disconnected" id="connDot"></span>
@@ -520,21 +542,23 @@
     <!-- SECTION 1: Summary Stats Row -->
     <div class="summary-stats-row" id="summary-stats">
         <div class="stat-card">
-            <span class="stat-label">Underlying Price</span>
-            <span class="stat-value accent" id="stat-price">—</span>
+            <span class="stat-label centered">Underlying Price</span>
+            <span class="stat-value centered accent" id="stat-price">—</span>
+        </div>
+        <div class="stat-card-inline" style="flex-direction:column; gap:0.3rem;">
+            <span class="stat-label" style="text-align:center; width:100%;">Net Gamma</span>
+            <div style="display:flex; align-items:center; justify-content:space-between; width:100%;">
+                <span class="stat-value-inline" id="stat-net-gamma">—</span>
+                <span class="stat-delta" id="stat-gamma-delta"></span>
+            </div>
         </div>
         <div class="stat-card">
-            <span class="stat-label">Net Gamma</span>
-            <span class="stat-value" id="stat-net-gamma">—</span>
-            <span class="stat-delta" id="stat-gamma-delta"></span>
+            <span class="stat-label centered">Active Strikes</span>
+            <span class="stat-value centered" id="stat-active-strikes">0</span>
         </div>
         <div class="stat-card">
-            <span class="stat-label">Active Strikes</span>
-            <span class="stat-value" id="stat-active-strikes">0</span>
-        </div>
-        <div class="stat-card">
-            <span class="stat-label">Messages</span>
-            <span class="stat-value" id="stat-messages">0</span>
+            <span class="stat-label centered">Messages</span>
+            <span class="stat-value centered" id="stat-messages">0</span>
         </div>
     </div>
 
@@ -969,7 +993,6 @@
         // ── Header ──
         document.getElementById('symbolText').textContent = data.symbol || '—';
         const ng = data.net_gamma;
-        document.getElementById('netGammaDisplay').textContent = ng ? `| γ: ${ng >= 0 ? '+' : ''}${ng.toLocaleString(undefined, {maximumFractionDigits: 0})}` : '';
 
         // Regime badge
         const regime = (data.regime || 'UNKNOWN').toUpperCase();

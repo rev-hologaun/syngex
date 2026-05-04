@@ -105,8 +105,8 @@ class ConfluenceReversal(BaseStrategy):
 
         # Best resistance level → SHORT signal
         if resistance_levels:
-            best_resist = max(resistance_levels, key=lambda x: x.get("structural_count", x.get("score", 0)))
-            if best_resist.get("structural_count", best_resist.get("score", 0)) >= MIN_STRUCTURAL_SIGNALS:
+            best_resist = max(resistance_levels, key=lambda x: x.get("structural_count", 0))
+            if best_resist.get("structural_count", 0) >= MIN_STRUCTURAL_SIGNALS:
                 sig = self._build_short_signal(
                     best_resist, underlying_price, regime
                 )
@@ -115,8 +115,8 @@ class ConfluenceReversal(BaseStrategy):
 
         # Best support level → LONG signal
         if support_levels:
-            best_support = max(support_levels, key=lambda x: x.get("structural_count", x.get("score", 0)))
-            if best_support.get("structural_count", best_support.get("score", 0)) >= MIN_STRUCTURAL_SIGNALS:
+            best_support = max(support_levels, key=lambda x: x.get("structural_count", 0))
+            if best_support.get("structural_count", 0) >= MIN_STRUCTURAL_SIGNALS:
                 sig = self._build_long_signal(
                     best_support, underlying_price, regime
                 )
@@ -271,7 +271,7 @@ class ConfluenceReversal(BaseStrategy):
     ) -> Optional[Signal]:
         """Build a SHORT signal from a resistance confluence level."""
         strike = level["strike"]
-        structural_count = level.get("structural_count", level.get("score", 0))
+        structural_count = level.get("structural_count", 0)
         gex = level.get("gex", 0)
 
         # Base confidence from structural signal count
@@ -337,7 +337,7 @@ class ConfluenceReversal(BaseStrategy):
     ) -> Optional[Signal]:
         """Build a LONG signal from a support confluence level."""
         strike = level["strike"]
-        structural_count = level.get("structural_count", level.get("score", 0))
+        structural_count = level.get("structural_count", 0)
         gex = level.get("gex", 0)
 
         # Base confidence from structural signal count
