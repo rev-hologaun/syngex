@@ -231,7 +231,18 @@ class SyngexOrchestrator:
             KEY_VOLUME_5M: RollingWindow(window_type="time", window_size=300),
             # Layer 2 rolling windows
             KEY_TOTAL_DELTA_5M: RollingWindow(window_type="time", window_size=300),
+            # Layer 3 / full_data rolling windows (missing feeds)
+            KEY_VOLUME_UP_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_VOLUME_DOWN_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_TOTAL_GAMMA_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_IV_SKEW_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_EXTRINSIC_PROXY_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_PROB_MOMENTUM_5M: RollingWindow(window_type="time", window_size=300),
         }
+
+        # Call/put update counters for volume_up/volume_down tracking
+        self._call_update_count: int = 0
+        self._put_update_count: int = 0
 
         # Per-strike IV windows (populated lazily)
         self._iv_windows: Dict[str, RollingWindow] = {}
@@ -507,6 +518,102 @@ class SyngexOrchestrator:
         return layer_map.get(name)
 
     # ------------------------------------------------------------------
+    # Helper calculations for rolling window feeds
+    # ------------------------------------------------------------------
+
+    def _calculate_extrinsic_proxy(
+        self, greeks_summary: Dict[str, Any],
+    ) -> Optional[float]:
+        """Calculate aggregate extrinsic value proxy across all strikes.
+
+        Uses abs(net_delta) * abs(net_gamma) as a proxy for extrinsic value.
+        Returns total extrinsic proxy or None if insufficient data.
+        """
+        try:
+            total_proxy = 0.0
+            strike_count = 0
+
+            for strike_str, strike_data in greeks_summary.items():
+                try:
+                    float(strike_str)
+                except (ValueError, TypeError):
+                    continue
+
+                call_delta = strike_data.get("call_delta", 0.0)
+                put_delta = strike_data.get("put_delta", 0.0)
+                call_gamma = strike_data.get("call_gamma", 0.0)
+                put_gamma = strike_data.get("put_gamma", 0.0)
+
+                if call_delta == 0 and put_delta == 0:
+                    continue
+
+                net_delta = call_delta - put_delta
+                net_gamma_val = call_gamma + put_gamma
+                proxy = abs(net_delta) * abs(net_gamma_val)
+
+                if proxy <= 0:
+                    continue
+
+                total_proxy += proxy
+                strike_count += 1
+
+            return total_proxy if strike_count >= 3 else None
+
+        except Exception:
+            return None
+
+    def _calculate_prob_momentum(
+        self, greeks_summary: Dict[str, Any],
+    ) -> Optional[float]:
+        """Calculate probability momentum across all strikes.
+
+        ProbMomentum = Σ(net_delta_i * |strike_i - ATM_strike|)
+        Positive = mass shifting right (bullish).
+        Negative = mass shifting left (bearish).
+        """
+        try:
+            atm_strike = None
+            min_distance = float("inf")
+
+            for strike_str in greeks_summary:
+                try:
+                    s = float(strike_str)
+                except (ValueError, TypeError):
+                    continue
+                dist = abs(s - self._calculator.underlying_price)
+                if dist < min_distance:
+                    min_distance = dist
+                    atm_strike = s
+
+            if atm_strike is None:
+                return None
+
+            total_momentum = 0.0
+            contributing = 0
+
+            for strike_str, strike_data in greeks_summary.items():
+                try:
+                    strike = float(strike_str)
+                except (ValueError, TypeError):
+                    continue
+
+                call_delta = strike_data.get("call_delta", 0.0)
+                put_delta = strike_data.get("put_delta", 0.0)
+                net_delta = call_delta - put_delta
+
+                if call_delta == 0 and put_delta == 0:
+                    continue
+
+                distance = strike - atm_strike
+                total_momentum += net_delta * distance
+                contributing += 1
+
+            return total_momentum if contributing >= 5 else None
+
+        except Exception:
+            return None
+
+    # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
 
@@ -529,6 +636,14 @@ class SyngexOrchestrator:
                 ng = self._calculator.get_net_gamma()
                 self._rolling_data[KEY_NET_GAMMA_5M].push(ng)
 
+            # Track call/put option update counts for volume_up/volume_down proxy
+            if data.get("type") == "option_update":
+                side = data.get("side", "")
+                if side == "call":
+                    self._call_update_count += 1
+                elif side == "put":
+                    self._put_update_count += 1
+
             # Update Layer 2 rolling windows
             gex_summary = self._calculator.get_greeks_summary()
             if gex_summary:
@@ -548,6 +663,34 @@ class SyngexOrchestrator:
                         )
                     if avg_iv > 0:
                         self._rolling_data[key].push(avg_iv)
+
+                # Push missing rolling window feeds for layer2/3/full_data strategies
+                # total_gamma_5m — from GEXCalculator net gamma
+                self._rolling_data[KEY_TOTAL_GAMMA_5M].push(
+                    self._calculator.get_net_gamma()
+                )
+
+                # iv_skew_5m — avg call IV minus avg put IV
+                try:
+                    iv_skew = self._calculator.get_iv_skew()
+                    if iv_skew is not None:
+                        self._rolling_data[KEY_IV_SKEW_5M].push(iv_skew)
+                except Exception:
+                    pass
+
+                # volume_up_5m / volume_down_5m — call/put update counts as proxy
+                self._rolling_data[KEY_VOLUME_UP_5M].push(self._call_update_count)
+                self._rolling_data[KEY_VOLUME_DOWN_5M].push(self._put_update_count)
+
+                # extrinsic_proxy_5m — aggregate extrinsic value proxy
+                extrinsic_proxy = self._calculate_extrinsic_proxy(greeks_summary)
+                if extrinsic_proxy is not None:
+                    self._rolling_data[KEY_EXTRINSIC_PROXY_5M].push(extrinsic_proxy)
+
+                # prob_momentum_5m — probability distribution momentum
+                prob_mom = self._calculate_prob_momentum(greeks_summary)
+                if prob_mom is not None:
+                    self._rolling_data[KEY_PROB_MOMENTUM_5M].push(prob_mom)
 
 
 
