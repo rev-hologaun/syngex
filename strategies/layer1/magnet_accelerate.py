@@ -29,6 +29,7 @@ Confidence factors:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
@@ -41,7 +42,7 @@ logger = logging.getLogger("Syngex.Strategies.MagnetAccelerate")
 # Constants
 # ---------------------------------------------------------------------------
 
-MIN_MAGNET_GEX = 1000         # Minimum |normalized GEX| to be a magnet (on same scale as wall threshold)
+MIN_MAGNET_GEX = 500000       # Minimum |normalized GEX| to be a magnet (on same scale as wall threshold)
 MAGNET_EXIT_PCT = 0.003       # 0.3% — exit within this % of magnet
 BREAKOUT_PCT = 0.002          # 0.2% — price must be this far past magnet to breakout
 MAX_BREAKOUT_PCT = 0.02       # 2% — max distance past magnet (no chasing)
@@ -61,6 +62,7 @@ class MagnetAccelerate(BaseStrategy):
 
     strategy_id = "magnet_accelerate"
     layer = "layer1"
+    _last_signal_time: Dict[str, float] = {}
 
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """
@@ -95,6 +97,13 @@ class MagnetAccelerate(BaseStrategy):
         if magnet_gex < MIN_MAGNET_GEX:
             return []
 
+        # Per-symbol cooldown (5 minutes)
+        ts = data.get("timestamp", time.time())
+        symbol = data.get("symbol", "")
+        if symbol and symbol in self._last_signal_time:
+            if ts - self._last_signal_time[symbol] < 300:
+                return []
+
         signals: List[Signal] = []
 
         # Phase 1: Magnet pull
@@ -105,13 +114,17 @@ class MagnetAccelerate(BaseStrategy):
             if sig:
                 signals.append(sig)
 
-        # Phase 2: Acceleration breakout
-        if regime == "NEGATIVE" or net_gamma < 0:
+        # Phase 2: Acceleration breakout (NEGATIVE regime only)
+        if regime == "NEGATIVE":
             sig = self._phase2_accelerate(
                 magnet_strike, underlying_price, net_gamma, regime, rolling_data
             )
             if sig:
                 signals.append(sig)
+
+        # Update cooldown timestamp
+        if symbol:
+            self._last_signal_time[symbol] = ts
 
         return signals
 
@@ -137,6 +150,8 @@ class MagnetAccelerate(BaseStrategy):
             return None
 
         distance_pct = (magnet_strike - price) / price
+        if distance_pct < 0.003:
+            return None  # Already at magnet — not a pull
         if distance_pct > 0.02:
             # More than 2% away — not in magnet range
             return None
@@ -212,13 +227,15 @@ class MagnetAccelerate(BaseStrategy):
         if abs(distance_from_magnet) > MAX_BREAKOUT_PCT:
             return None
 
-        # Direction depends on which side of magnet we are
-        if distance_from_magnet > 0:
-            # Price above magnet → potential LONG breakout
+        # Direction in NEGATIVE regime: opposite of Phase 1
+        # Price below magnet → oversold bounce (LONG)
+        # Price above magnet → overextended pullback (SHORT)
+        if distance_from_magnet < 0:
+            # Price below magnet in NEGATIVE regime → LONG (oversold bounce)
             direction = Direction.LONG
             stop = magnet_strike * (1 - TRAIL_STOP_PCT)
         else:
-            # Price below magnet → potential SHORT breakout
+            # Price above magnet in NEGATIVE regime → SHORT (overextended)
             direction = Direction.SHORT
             stop = magnet_strike * (1 + TRAIL_STOP_PCT)
 
