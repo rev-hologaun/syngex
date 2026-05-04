@@ -26,6 +26,7 @@ Confidence factors:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
@@ -46,6 +47,8 @@ MAX_CONFIDENCE = 0.85            # Hard cap — wall bounce alone can't be max c
 
 
 class GammaWallBounce(BaseStrategy):
+    _last_signal_time: Dict[str, float] = {}
+
     """
     Mean-reversion strategy trading bounces off gamma walls.
 
@@ -70,10 +73,19 @@ class GammaWallBounce(BaseStrategy):
         if gex_calc is None:
             return []
 
+        rolling_data = data.get("rolling_data")
+
         # Get walls above and below price
         walls = gex_calc.get_gamma_walls(threshold=MIN_WALL_GEX)
         if not walls:
             return []
+
+        # Per-symbol cooldown
+        ts = data.get("timestamp", time.time())
+        symbol = data.get("symbol", "")
+        if symbol and symbol in self._last_signal_time:
+            if ts - self._last_signal_time[symbol] < 300:
+                return []
 
         price_above_walls = [w for w in walls if w["strike"] > underlying_price]
         price_below_walls = [w for w in walls if w["strike"] < underlying_price]
@@ -82,15 +94,18 @@ class GammaWallBounce(BaseStrategy):
 
         # Check call walls above price → potential SHORT bounce
         for wall in price_above_walls:
-            sig = self._check_call_wall(wall, underlying_price, walls)
+            sig = self._check_call_wall(wall, underlying_price, walls, rolling_data, data.get("regime", ""))
             if sig:
                 signals.append(sig)
 
         # Check put walls below price → potential LONG bounce
         for wall in price_below_walls:
-            sig = self._check_put_wall(wall, underlying_price, walls)
+            sig = self._check_put_wall(wall, underlying_price, walls, rolling_data, data.get("regime", ""))
             if sig:
                 signals.append(sig)
+
+        if symbol:
+            self._last_signal_time[symbol] = ts
 
         return signals
 
@@ -103,6 +118,8 @@ class GammaWallBounce(BaseStrategy):
         wall: Dict[str, Any],
         price: float,
         all_walls: List[Dict[str, Any]],
+        rolling_data: Dict[str, Any] = None,
+        regime: str = "",
     ) -> Optional[Signal]:
         """
         Evaluate a call wall for SHORT bounce opportunity.
@@ -124,13 +141,13 @@ class GammaWallBounce(BaseStrategy):
 
         # Check rejection: price should be in lower part of recent range
         # Use rolling window if available, otherwise rely on proximity
-        rejection_score = self._rejection_score(wall, price, all_walls)
+        rejection_score = self._rejection_score(wall, price, all_walls, rolling_data)
         if rejection_score < 0.5:
             return None
 
         # Calculate confidence
         confidence = self._compute_confidence(
-            distance_pct, wall_gex, rejection_score, "call"
+            distance_pct, wall_gex, rejection_score, "call", regime
         )
         if confidence < MIN_CONFIDENCE:
             return None
@@ -172,6 +189,8 @@ class GammaWallBounce(BaseStrategy):
         wall: Dict[str, Any],
         price: float,
         all_walls: List[Dict[str, Any]],
+        rolling_data: Dict[str, Any] = None,
+        regime: str = "",
     ) -> Optional[Signal]:
         """
         Evaluate a put wall for LONG bounce opportunity.
@@ -190,12 +209,12 @@ class GammaWallBounce(BaseStrategy):
         if distance_pct > WALL_PROXIMITY_PCT:
             return None
 
-        rejection_score = self._rejection_score(wall, price, all_walls)
+        rejection_score = self._rejection_score(wall, price, all_walls, rolling_data)
         if rejection_score < 0.5:
             return None
 
         confidence = self._compute_confidence(
-            distance_pct, abs(wall_gex), rejection_score, "put"
+            distance_pct, abs(wall_gex), rejection_score, "put", regime
         )
         if confidence < MIN_CONFIDENCE:
             return None
@@ -235,26 +254,37 @@ class GammaWallBounce(BaseStrategy):
         wall: Dict[str, Any],
         price: float,
         all_walls: List[Dict[str, Any]],
+        rolling_data: Dict[str, Any] = None,
     ) -> float:
-        """
-        Score how strongly price is being rejected at a wall.
-
-        1.0 = strong rejection (price well below wall for call, above for put)
-        0.0 = no rejection (price right at wall)
-        """
+        """Score how strongly price is being rejected at a wall.
+        Uses actual price momentum: price moving AWAY from wall = strong rejection."""
         wall_strike = wall["strike"]
         distance_pct = abs(wall_strike - price) / price
-
-        # Base score from proximity: closer to wall = better rejection setup
-        # But not too close — we want some room between price and wall
         if distance_pct < 0.0005:
-            # Price essentially AT the wall — could be breakout, not bounce
-            return 0.3
+            base_score = 0.3
         elif distance_pct < WALL_PROXIMITY_PCT:
-            # In the rejection zone
-            return 0.5 + 0.5 * (1 - distance_pct / WALL_PROXIMITY_PCT)
+            base_score = 0.5 + 0.5 * (1 - distance_pct / WALL_PROXIMITY_PCT)
         else:
             return 0.0
+        if rolling_data:
+            from strategies.rolling_keys import KEY_PRICE_5M, KEY_TOTAL_GAMMA_5M
+            pw = rolling_data.get(KEY_PRICE_5M)
+            if pw and pw.count >= 3:
+                recent = pw.values[-min(3, len(pw.values)):]
+                if len(recent) >= 2:
+                    price_change = (recent[-1] - recent[0]) / abs(recent[0])
+                    if wall_strike > price:
+                        momentum_score = max(-1.0, min(0.0, price_change * 100))
+                    else:
+                        momentum_score = max(0.0, min(1.0, price_change * 100))
+                    base_score *= (1 + momentum_score)
+            gw = rolling_data.get(KEY_TOTAL_GAMMA_5M)
+            if gw and gw.count >= 3:
+                recent_g = gw.values[-3:]
+                gamma_trend = recent_g[-1] - recent_g[0]
+                if abs(gamma_trend) > 200000:
+                    base_score *= 0.7
+        return max(0.0, min(1.0, base_score))
 
     def _compute_confidence(
         self,
@@ -262,6 +292,7 @@ class GammaWallBounce(BaseStrategy):
         gex_magnitude: float,
         rejection_score: float,
         side: str,
+        regime: str = "",
     ) -> float:
         """
         Combine proximity, wall strength, and rejection into confidence.
@@ -282,7 +313,13 @@ class GammaWallBounce(BaseStrategy):
         norm_prox = (proximity_conf - 0.3) / (0.5 - 0.3) if 0.5 != 0.3 else 1.0
         norm_strength = (strength_conf - 0.2) / (0.5 - 0.2) if 0.5 != 0.2 else 1.0
         norm_reject = (rejection_conf - 0.2) / (0.3 - 0.2) if 0.3 != 0.2 else 1.0
-        confidence = (norm_prox + norm_strength + norm_reject) / 3.0
+        regime_bonus = 0.0
+        if side == "call" and regime == "POSITIVE":
+            regime_bonus = 0.1
+        elif side == "put" and regime == "NEGATIVE":
+            regime_bonus = 0.1
+        norm_regime = regime_bonus / 0.1 if regime_bonus > 0 else 0.0
+        confidence = (norm_prox + norm_strength + norm_reject + norm_regime) / 4.0
         return min(MAX_CONFIDENCE, max(0.0, confidence))
 
     def _better_target(
