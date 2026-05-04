@@ -367,6 +367,50 @@ The GEX scale fix (`get_normalized_net_gamma()`) is a safe additive change — t
 | 🔴 High | **Dual-validation: Dashboard + Heatmap** | **Monday 2026-05-04 at 6:30 AM PT** — Run all 22 strategies through a complete market day. Validate signal quality, false positive rate, and strategy behavior under real conditions. **Must validate BOTH the original Streamlit dashboard AND the new Heatmap dashboard** — each runs on a separate port and provides independent views of the same data. |
 | 🟢 Low | Future — Backtesting framework | Use signal_outcomes.jsonl for historical strategy performance analysis |
 | 🟢 Low | Future — Real execution pipeline | TradeStation API integration for automated order placement |
+| 🟢 Low | Future — Price-band signal dedup | See Future Enhancements below |
+
+---
+
+## Future Enhancements
+
+### Price-Band Signal Deduplication
+
+**Problem:** `dedup_window_seconds: 60` only deduplicates by `strategy_id`. Multiple strategies can independently fire signals for the same direction at nearly identical prices (e.g., 3 LONG signals within 2% of each other from different strategies). This creates noise on the dashboard.
+
+**Proposed solution:**
+- Add `dedup_price_band_pct` to config (default TBD — 0.5% is a starting guess)
+- After existing `strategy_id` dedup, run a second pass: group signals by `(direction, symbol)` within the time window, keep only the highest-confidence signal per price band
+- Log suppressed signals as "confluence confirmed" — multiple strategies agreeing = higher signal strength
+- This turns noise reduction into a signal-strength indicator for the heatmap
+
+**Parameters to tune post-validation:**
+- `dedup_price_band_pct` — depends on symbol price level (±0.1% for TSLA at $400 = $0.40; ±0.1% for $50 stock = $0.05 — may need adaptive banding)
+- `dedup_keep_best` — keep highest confidence, or average confidence across agreeing strategies
+- Suppression logging — how to display confluence signals on the heatmap
+
+**Status:** Deferred until after dual-validation data collection. Need to observe signal patterns in live data before choosing the right band percentage.
+
+### Other Future Enhancements
+
+- **iv_skew_squeeze inline window:** Creates `RollingWindow` on first call. Safe but could create two windows if called in parallel. Consider moving to `__init__`.
+- **VWAP confirmation buffer:** `gex_imbalance` uses binary `price > mean` pass/fail. A small buffer zone (e.g., X% above VWAP) could reduce whipsaw in choppy markets.
+
+### Config Hot-Reload (Live Parameter Tuning)
+
+**Current state:** `main.py` has a `_watch_config()` async task that polls `strategies.yaml` every 2 seconds for file modification changes. When a change is detected, it re-reads the YAML and updates `self._strategy_config`. **But this is cosmetic only** — the already-initialized strategy instances hold their original parameters from startup. They never receive the new values.
+
+**What's needed to make it real:**
+1. **Strategy parameter accessor:** Each strategy needs a `set_params(dict)` method that accepts a config dict and updates its internal thresholds/weights at runtime
+2. **Engine-level reload hook:** When `_watch_config` detects a change, it iterates over `self._strategy_engine._strategies` and calls `set_params()` on each with the matching config entry
+3. **Signal safety:** Hot-reloaded params should only apply to *new* signals, not affect signals already in-flight. The `SignalTracker` already handles this via `max_hold_seconds` — a strategy with updated hold times just won't close old signals early.
+4. **Validation warning:** Log the param change to the log stream so the operator sees what changed and when. Optionally emit a Socket.IO event to the heatmap for a "config updated" notification.
+
+**Use cases:**
+- During live validation: tune thresholds (confidence caps, proximity ranges, delta acceleration ratios) without killing the pipeline
+- Quick response to changing market conditions: a strategy that's too aggressive in high-vol regimes can be dialed back mid-session
+- A/B testing: run two different parameter sets side-by-side by temporarily editing the YAML
+
+**Status:** Deferred. The infrastructure (file watcher, YAML reload) exists. Just needs the strategy-level `set_params()` contract and the engine's reload hook. Low priority — useful for tuning, not critical for correctness.
 
 ---
 
