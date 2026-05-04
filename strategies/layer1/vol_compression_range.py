@@ -32,6 +32,7 @@ Confidence factors:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
@@ -44,11 +45,11 @@ logger = logging.getLogger("Syngex.Strategies.VolCompressionRange")
 # Constants
 # ---------------------------------------------------------------------------
 
-COMPRESSION_PCT = 0.005       # 0.5% max range for compression
+COMPRESSION_PCT = 0.003       # 0.3% max range for compression
 MIN_RANGE_BARS = 20           # Minimum data points in rolling window
 WALL_EDGE_PROXIMITY = 0.004   # 0.4% from wall for edge trade
 MIN_CONFIDENCE = 0.40         # Minimum confidence to emit signal
-STOP_PCT = 0.003              # 0.3% stop (tight for scalping)
+STOP_PCT = 0.006              # 0.6% stop (wider for scalping)
 TARGET_RISK_MULT = 1.5        # 1.5× risk for target
 STD_THRESHOLD = 0.002         # Max std of price for compression
 
@@ -64,6 +65,7 @@ class VolCompressionRange(BaseStrategy):
 
     strategy_id = "vol_compression_range"
     layer = "layer1"
+    _last_signal_time: Dict[str, float] = {}
 
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """
@@ -86,6 +88,13 @@ class VolCompressionRange(BaseStrategy):
         # Must be positive gamma regime
         if regime != "POSITIVE":
             return []
+
+        # Per-symbol cooldown
+        ts = data.get("timestamp", time.time())
+        symbol = data.get("symbol", "")
+        if symbol and symbol in self._last_signal_time:
+            if ts - self._last_signal_time[symbol] < 600:
+                return []
 
         # Get the best price rolling window
         price_window = self._get_price_window(rolling_data)
@@ -113,6 +122,9 @@ class VolCompressionRange(BaseStrategy):
             )
             if sig:
                 signals.append(sig)
+
+        if symbol:
+            self._last_signal_time[symbol] = ts
 
         return signals
 
