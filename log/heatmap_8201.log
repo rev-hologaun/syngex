@@ -1,0 +1,28 @@
+15:57:34 [INFO] Syngex Heatmap Dashboard starting on port 8201
+15:57:34 [INFO] Data file: /home/hologaun/projects/syngex/data/gex_state_TSLA.json
+15:57:34 [INFO] Symbol: TSLA
+15:57:34 [INFO] Background updater started (reading /home/hologaun/projects/syngex/data/gex_state_TSLA.json)
+Werkzeug appears to be used in a production deployment. Consider switching to a production web server instead.
+ * Serving Flask app 'app_heatmap'
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8201
+ * Running on http://192.168.50.97:8201
+[33mPress CTRL+C to quit[0m
+192.168.50.30 - - [03/May/2026 15:57:34] "GET /socket.io/?EIO=4&transport=polling&t=Ptm3x8C HTTP/1.1" 200 -
+15:57:34 [INFO] Client connected
+192.168.50.30 - - [03/May/2026 15:57:34] "POST /socket.io/?EIO=4&transport=polling&t=Ptm3xeL&sid=l8Cqk76SM1dWRP76AAAA HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 15:57:34] "GET /socket.io/?EIO=4&transport=polling&t=Ptm3xeM&sid=l8Cqk76SM1dWRP76AAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 15:57:35] "GET /socket.io/?EIO=4&transport=polling&t=Ptm3xey HTTP/1.1" 200 -
+15:57:35 [INFO] Client connected
+192.168.50.147 - - [03/May/2026 15:57:35] "POST /socket.io/?EIO=4&transport=polling&t=Ptm3xf9&sid=9XoMDn2yj1e3xcAcAAAC HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 15:57:35] "GET /socket.io/?EIO=4&transport=polling&t=Ptm3xfA&sid=9XoMDn2yj1e3xcAcAAAC HTTP/1.1" 200 -
+127.0.0.1 - - [03/May/2026 15:57:36] "GET / HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 15:57:36] "GET /socket.io/?EIO=4&transport=polling&t=Ptm3xlO HTTP/1.1" 200 -
+15:57:36 [INFO] Client connected
+192.168.50.97 - - [03/May/2026 15:57:36] "POST /socket.io/?EIO=4&transport=polling&t=Ptm3xlR&sid=mBSqcsWtxvO-sAszAAAE HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 15:57:36] "GET /socket.io/?EIO=4&transport=polling&t=Ptm3xlS&sid=mBSqcsWtxvO-sAszAAAE HTTP/1.1" 200 -
+15:58:54 [INFO] Client disconnected
+192.168.50.147 - - [03/May/2026 15:58:54] "GET /socket.io/?EIO=4&transport=websocket&sid=9XoMDn2yj1e3xcAcAAAC HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 15:58:54] "GET / HTTP/1.1" 200 -

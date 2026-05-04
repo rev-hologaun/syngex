@@ -41,6 +41,13 @@ logger = logging.getLogger("Syngex.Strategies.GammaVolumeConvergence")
 # by this ratio (15% above rolling average)
 DELTA_ACCEL_RATIO = 1.15
 
+# Delta acceleration lower bound for SHORT: current total_delta must be
+# above this ratio of rolling avg (ensures delta is declining, not negative).
+# A ratio of 0.30 means delta is still 30% of avg — declining but positive.
+# Ratios below this indicate delta has flipped negative, which is a different
+# market regime (not "declining delta" but "collapsed/negative delta").
+DELTA_ACCEL_MIN_RATIO = 0.30
+
 # Gamma spike threshold: current total_gamma must exceed rolling avg by
 # this ratio (20% above rolling average)
 GAMMA_SPIKE_RATIO = 1.20
@@ -242,7 +249,7 @@ class GammaVolumeConvergence(BaseStrategy):
 
         Conditions:
             1. Net Gamma > 0 (already checked in evaluate)
-            2. ATM delta accelerating downward (ratio < 0.85)
+            2. ATM delta declining (DELTA_ACCEL_MIN_RATIO <= ratio < 0.85)
             3. ATM gamma spiking (≥20% above rolling avg)
             4. VolumeDown spiking (≥20% above rolling avg)
             5. Price trending DOWN over 5m window
@@ -256,9 +263,10 @@ class GammaVolumeConvergence(BaseStrategy):
         delta_accel = self._check_delta_acceleration(rolling_data)
         if delta_accel is None:
             return None
-        # For SHORT, we want delta accelerating downward:
-        # ratio < 0.85 means delta dropped by 15%+ below rolling avg
-        if delta_accel >= 0.85:
+        # For SHORT, we want delta declining but still positive:
+        # DELTA_ACCEL_MIN_RATIO <= ratio < 0.85
+        # This ensures delta is actively declining (not collapsed or negative).
+        if delta_accel >= 0.85 or delta_accel < DELTA_ACCEL_MIN_RATIO:
             return None
 
         # Check gamma spike (same for both directions)
@@ -472,8 +480,12 @@ class GammaVolumeConvergence(BaseStrategy):
             delta_conf = 0.20 + 0.10 * min(1.0, (delta_accel - 1.0) / 1.0)
         else:
             # Downward acceleration (SHORT)
+            # Normalize deviation within [DELTA_ACCEL_MIN_RATIO, 1.0]
+            # so that ratio=0.85 → deviation=0.15 (low conf),
+            # ratio=0.30 → deviation=0.70 (high conf)
             deviation = 1.0 - delta_accel
-            delta_conf = 0.20 + 0.10 * min(1.0, deviation / 0.30)
+            max_deviation = 1.0 - DELTA_ACCEL_MIN_RATIO  # = 0.70
+            delta_conf = 0.20 + 0.10 * min(1.0, deviation / max_deviation)
 
         # 2. Gamma spike component (0.20–0.30)
         gamma_conf = 0.20 + 0.10 * min(1.0, (gamma_spike - 1.0) / 1.0)

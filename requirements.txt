@@ -6,3 +6,6 @@ httpx
 rich
 streamlit
 pyyaml
+flask
+flask-socketio
+python-socketio[asyncio]

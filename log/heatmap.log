@@ -1,0 +1,584 @@
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8201
+ * Running on http://192.168.50.97:8201
+[33mPress CTRL+C to quit[0m
+192.168.50.147 - - [03/May/2026 13:49:44] "GET /socket.io/?EIO=4&transport=polling&t=PtlcgNz HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:49:44] "POST /socket.io/?EIO=4&transport=polling&t=Ptlcgi8&sid=kxE85e9Eb91hpluQAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:49:44] "GET /socket.io/?EIO=4&transport=polling&t=Ptlcgi8.0&sid=kxE85e9Eb91hpluQAAAA HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 13:49:44] "GET /socket.io/?EIO=4&transport=polling&t=PtlcglB HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 13:49:44] "POST /socket.io/?EIO=4&transport=polling&t=Ptlch0P&sid=1UeY-4C1wwN5yceJAAAC HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 13:49:44] "GET /socket.io/?EIO=4&transport=polling&t=Ptlch0Q&sid=1UeY-4C1wwN5yceJAAAC HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8211
+ * Running on http://192.168.50.97:8211
+[33mPress CTRL+C to quit[0m
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8221
+ * Running on http://192.168.50.97:8221
+[33mPress CTRL+C to quit[0m
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8231
+ * Running on http://192.168.50.97:8231
+[33mPress CTRL+C to quit[0m
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8241
+ * Running on http://192.168.50.97:8241
+[33mPress CTRL+C to quit[0m
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8251
+ * Running on http://192.168.50.97:8251
+[33mPress CTRL+C to quit[0m
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8261
+ * Running on http://192.168.50.97:8261
+[33mPress CTRL+C to quit[0m
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8271
+ * Running on http://192.168.50.97:8271
+[33mPress CTRL+C to quit[0m
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8281
+ * Running on http://192.168.50.97:8281
+[33mPress CTRL+C to quit[0m
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8291
+ * Running on http://192.168.50.97:8291
+[33mPress CTRL+C to quit[0m
+192.168.50.147 - - [03/May/2026 13:53:35] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:53:35] "GET /socket.io/?EIO=4&transport=polling&t=PtldZ9K HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:53:35] "POST /socket.io/?EIO=4&transport=polling&t=PtldZA2&sid=4evNBtMBEkUpJKVnAAAE HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:53:35] "GET /socket.io/?EIO=4&transport=polling&t=PtldZA3&sid=4evNBtMBEkUpJKVnAAAE HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:53:36] "GET /socket.io/?EIO=4&transport=websocket&sid=kxE85e9Eb91hpluQAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:53:57] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:53:57] "GET /socket.io/?EIO=4&transport=polling&t=PtldeWq HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:53:57] "POST /socket.io/?EIO=4&transport=polling&t=PtldeXc&sid=7t0QM8IFbWxRzh98AAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:53:57] "GET /socket.io/?EIO=4&transport=polling&t=PtldeXc.0&sid=7t0QM8IFbWxRzh98AAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:53:57] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+192.168.50.147 - - [03/May/2026 13:54:16] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:54:16] "GET /socket.io/?EIO=4&transport=polling&t=PtldjHT HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:54:16] "POST /socket.io/?EIO=4&transport=polling&t=PtldjIE&sid=pnZ9uULuftVsQie2AAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:54:16] "GET /socket.io/?EIO=4&transport=polling&t=PtldjIF&sid=pnZ9uULuftVsQie2AAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:54:16] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+192.168.50.147 - - [03/May/2026 13:54:29] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:54:29] "GET /socket.io/?EIO=4&transport=polling&t=PtldmH_ HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:54:29] "POST /socket.io/?EIO=4&transport=polling&t=PtldmIl&sid=ucrDO61I1WfWYH-nAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:54:29] "GET /socket.io/?EIO=4&transport=polling&t=PtldmIm&sid=ucrDO61I1WfWYH-nAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:54:29] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+192.168.50.147 - - [03/May/2026 13:54:40] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:54:40] "GET /socket.io/?EIO=4&transport=polling&t=Ptldp3b HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:54:40] "POST /socket.io/?EIO=4&transport=polling&t=Ptldp4K&sid=dFlgtWdmnuB1WpXNAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:54:40] "GET /socket.io/?EIO=4&transport=polling&t=Ptldp4L&sid=dFlgtWdmnuB1WpXNAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:54:40] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+192.168.50.147 - - [03/May/2026 13:54:49] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:54:50] "GET /socket.io/?EIO=4&transport=polling&t=PtldrNg HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:54:50] "POST /socket.io/?EIO=4&transport=polling&t=PtldrOO&sid=9SbLgDBWaHAFohuoAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:54:50] "GET /socket.io/?EIO=4&transport=polling&t=PtldrOO.0&sid=9SbLgDBWaHAFohuoAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:54:50] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+192.168.50.147 - - [03/May/2026 13:55:09] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:55:09] "GET /socket.io/?EIO=4&transport=polling&t=PtldwBB HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:55:09] "POST /socket.io/?EIO=4&transport=polling&t=PtldwBx&sid=I-s-oJqKxrHDM1yPAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:55:09] "GET /socket.io/?EIO=4&transport=polling&t=PtldwBy&sid=I-s-oJqKxrHDM1yPAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:55:09] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+192.168.50.147 - - [03/May/2026 13:55:22] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:55:22] "GET /socket.io/?EIO=4&transport=polling&t=PtldzLr HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:55:22] "POST /socket.io/?EIO=4&transport=polling&t=PtldzMb&sid=wTBgy8AZqfVq8oGDAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:55:22] "GET /socket.io/?EIO=4&transport=polling&t=PtldzMc&sid=wTBgy8AZqfVq8oGDAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:55:22] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+192.168.50.147 - - [03/May/2026 13:55:33] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:55:33] "GET /socket.io/?EIO=4&transport=polling&t=Ptle06K HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:55:34] "POST /socket.io/?EIO=4&transport=polling&t=Ptle073&sid=H7wB-2UsbZAsH1a-AAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:55:34] "GET /socket.io/?EIO=4&transport=polling&t=Ptle073.0&sid=H7wB-2UsbZAsH1a-AAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:55:34] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+192.168.50.147 - - [03/May/2026 13:55:44] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:55:44] "GET /socket.io/?EIO=4&transport=polling&t=Ptle2fF HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:55:44] "POST /socket.io/?EIO=4&transport=polling&t=Ptle2f-&sid=Klz2pnlqICMAZpeiAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:55:44] "GET /socket.io/?EIO=4&transport=polling&t=Ptle2f-.0&sid=Klz2pnlqICMAZpeiAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:55:44] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+192.168.50.147 - - [03/May/2026 13:57:39] "GET /socket.io/?EIO=4&transport=websocket&sid=4evNBtMBEkUpJKVnAAAE HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:58:11] "GET /socket.io/?EIO=4&transport=polling&t=Ptleca2 HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:58:11] "POST /socket.io/?EIO=4&transport=polling&t=Ptlecam&sid=mQNg--FbkzxJrsqhAAAG HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:58:11] "GET /socket.io/?EIO=4&transport=polling&t=Ptlecam.0&sid=mQNg--FbkzxJrsqhAAAG HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:58:13] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:58:13] "GET /socket.io/?EIO=4&transport=websocket&sid=mQNg--FbkzxJrsqhAAAG HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:58:13] "GET /socket.io/?EIO=4&transport=polling&t=Ptlec-n HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:58:13] "POST /socket.io/?EIO=4&transport=polling&t=Ptlec_7&sid=V4ZeQp68mGw5OkD4AAAI HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:58:13] "GET /socket.io/?EIO=4&transport=polling&t=Ptlec_7.0&sid=V4ZeQp68mGw5OkD4AAAI HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 13:58:13] "GET /socket.io/?EIO=4&transport=polling&t=Ptled13&sid=V4ZeQp68mGw5OkD4AAAI HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 13:58:34] "GET /socket.io/?EIO=4&transport=polling&t=Ptlei5x HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 13:58:34] "POST /socket.io/?EIO=4&transport=polling&t=Ptlei6I&sid=fV9glGQluMd5seEGAAAK HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 13:58:34] "GET /socket.io/?EIO=4&transport=polling&t=Ptlei6I.0&sid=fV9glGQluMd5seEGAAAK HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 13:58:36] "GET /socket.io/?EIO=4&transport=websocket&sid=fV9glGQluMd5seEGAAAK HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 13:58:36] "GET / HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 13:58:36] "GET /socket.io/?EIO=4&transport=polling&t=PtleifG HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 13:58:36] "POST /socket.io/?EIO=4&transport=polling&t=PtleifK&sid=D5KgW7ZI9NZB3a4UAAAM HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 13:58:36] "GET /socket.io/?EIO=4&transport=polling&t=PtleifL&sid=D5KgW7ZI9NZB3a4UAAAM HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 13:58:36] "GET /socket.io/?EIO=4&transport=polling&t=PtleifO&sid=D5KgW7ZI9NZB3a4UAAAM HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 13:58:42] "GET /socket.io/?EIO=4&transport=websocket&sid=D5KgW7ZI9NZB3a4UAAAM HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 13:58:42] "GET / HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 13:58:42] "GET /socket.io/?EIO=4&transport=polling&t=PtlekEE HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 13:58:42] "POST /socket.io/?EIO=4&transport=polling&t=PtlekEI&sid=S_7spCjv0pUHI9GfAAAO HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 13:58:42] "GET /socket.io/?EIO=4&transport=polling&t=PtlekEI.0&sid=S_7spCjv0pUHI9GfAAAO HTTP/1.1" 200 -
+127.0.0.1 - - [03/May/2026 13:59:48] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 14:04:49] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 14:04:49] "GET /socket.io/?EIO=4&transport=websocket&sid=V4ZeQp68mGw5OkD4AAAI HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 14:04:49] "GET /socket.io/?EIO=4&transport=polling&t=Ptlg7ez HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 14:04:49] "POST /socket.io/?EIO=4&transport=polling&t=Ptlg7fC&sid=FVxoCie2lxgTyaTgAAAQ HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 14:04:49] "GET /socket.io/?EIO=4&transport=polling&t=Ptlg7fC.0&sid=FVxoCie2lxgTyaTgAAAQ HTTP/1.1" 200 -
+Address already in use
+Port 8201 is in use by another program. Either identify and stop that program, or start the server with a different port.
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8201
+ * Running on http://192.168.50.97:8201
+[33mPress CTRL+C to quit[0m
+192.168.50.30 - - [03/May/2026 15:59:27] "GET /socket.io/?EIO=4&transport=polling&t=Ptm4NDD HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 15:59:27] "POST /socket.io/?EIO=4&transport=polling&t=Ptm4NDW&sid=5x2vd-g4jLUHR7tjAAAA HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 15:59:27] "GET /socket.io/?EIO=4&transport=polling&t=Ptm4NDX&sid=5x2vd-g4jLUHR7tjAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 15:59:31] "GET / HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 15:59:31] "GET /socket.io/?EIO=4&transport=polling&t=Ptm4NyB HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 15:59:31] "POST /socket.io/?EIO=4&transport=polling&t=Ptm4NyE&sid=dVhZPemzmUVWefKVAAAC HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 15:59:31] "GET /socket.io/?EIO=4&transport=polling&t=Ptm4NyE.0&sid=dVhZPemzmUVWefKVAAAC HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 15:59:32] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 15:59:37] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 15:59:58] "GET / HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8291
+ * Running on http://192.168.50.97:8291
+[33mPress CTRL+C to quit[0m
+192.168.50.147 - - [03/May/2026 16:01:01] "GET /socket.io/?EIO=4&transport=polling&t=Ptm4jsK HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 16:01:01] "POST /socket.io/?EIO=4&transport=polling&t=Ptm4jsZ&sid=fgjrfxmEBMI9SoKEAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 16:01:01] "GET /socket.io/?EIO=4&transport=polling&t=Ptm4jsa&sid=fgjrfxmEBMI9SoKEAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 16:01:08] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 16:01:08] "GET /socket.io/?EIO=4&transport=websocket&sid=fgjrfxmEBMI9SoKEAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 16:01:11] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 16:01:16] "GET / HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8201
+ * Running on http://192.168.50.97:8201
+[33mPress CTRL+C to quit[0m
+192.168.50.30 - - [03/May/2026 16:01:28] "GET /socket.io/?EIO=4&transport=polling&t=Ptm4qWD HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 16:01:28] "POST /socket.io/?EIO=4&transport=polling&t=Ptm4qiq&sid=-lcQqISr8cBez1byAAAA HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 16:01:28] "GET /socket.io/?EIO=4&transport=polling&t=Ptm4qir&sid=-lcQqISr8cBez1byAAAA HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 16:01:28] "GET /socket.io/?EIO=4&transport=polling&t=Ptm4qVQ HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 16:01:28] "POST /socket.io/?EIO=4&transport=polling&t=Ptm4qVT&sid=e_SiwsuuyuZ5kqqiAAAC HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 16:01:28] "GET /socket.io/?EIO=4&transport=polling&t=Ptm4qVU&sid=e_SiwsuuyuZ5kqqiAAAC HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 16:01:28] "GET /socket.io/?EIO=4&transport=polling&t=Ptm4qVW&sid=e_SiwsuuyuZ5kqqiAAAC HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 16:01:28] "GET /socket.io/?EIO=4&transport=polling&t=Ptm4qVX&sid=e_SiwsuuyuZ5kqqiAAAC HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 16:01:34] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 16:01:34] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 16:09:38] "GET / HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8201
+ * Running on http://192.168.50.97:8201
+[33mPress CTRL+C to quit[0m
+192.168.50.30 - - [03/May/2026 16:37:59] "GET /socket.io/?EIO=4&transport=polling&t=PtmDBg9 HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 16:37:59] "POST /socket.io/?EIO=4&transport=polling&t=PtmDBgQ&sid=7GOur2e9Pkvp7_1fAAAA HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 16:37:59] "GET /socket.io/?EIO=4&transport=polling&t=PtmDBgR&sid=7GOur2e9Pkvp7_1fAAAA HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8201
+ * Running on http://192.168.50.97:8201
+[33mPress CTRL+C to quit[0m
+192.168.50.30 - - [03/May/2026 16:38:22] "GET /socket.io/?EIO=4&transport=polling&t=PtmDH1u HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 16:38:22] "POST /socket.io/?EIO=4&transport=polling&t=PtmDHEM&sid=aPUPh7d1R1jJDmMVAAAA HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 16:38:22] "GET /socket.io/?EIO=4&transport=polling&t=PtmDHEN&sid=aPUPh7d1R1jJDmMVAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 16:38:27] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 16:38:31] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 16:38:33] "GET / HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 16:39:39] "GET /socket.io/?EIO=4&transport=polling&t=PtmDZhf HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 16:39:39] "POST /socket.io/?EIO=4&transport=polling&t=PtmDZh_&sid=uY9jxcF4UkaZ7Ni7AAAC HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 16:39:39] "GET /socket.io/?EIO=4&transport=polling&t=PtmDZh_.0&sid=uY9jxcF4UkaZ7Ni7AAAC HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 16:39:39] "GET /socket.io/?EIO=4&transport=polling&t=PtmDZi5&sid=uY9jxcF4UkaZ7Ni7AAAC HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 16:39:39] "GET /socket.io/?EIO=4&transport=polling&t=PtmDZiE&sid=uY9jxcF4UkaZ7Ni7AAAC HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 16:39:41] "GET /socket.io/?EIO=4&transport=websocket&sid=uY9jxcF4UkaZ7Ni7AAAC HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 16:39:41] "GET / HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 16:39:43] "GET / HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 16:40:56] "GET / HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 16:41:07] "GET / HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 16:41:48] "GET / HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 16:41:48] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+192.168.50.97 - - [03/May/2026 16:41:53] "GET / HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 16:41:56] "GET / HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 16:43:52] "GET / HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 16:43:58] "GET / HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 16:43:58] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8201
+ * Running on http://192.168.50.97:8201
+[33mPress CTRL+C to quit[0m
+192.168.50.30 - - [03/May/2026 16:48:55] "GET /socket.io/?EIO=4&transport=polling&t=PtmFhq0 HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 16:48:55] "POST /socket.io/?EIO=4&transport=polling&t=PtmFhqN&sid=JF5IQfNgV1vbzfWMAAAA HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 16:48:55] "GET /socket.io/?EIO=4&transport=polling&t=PtmFhqO&sid=JF5IQfNgV1vbzfWMAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 16:49:01] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 16:49:02] "GET / HTTP/1.1" 200 -
+192.168.50.97 - - [03/May/2026 16:49:54] "GET / HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8201
+ * Running on http://192.168.50.97:8201
+[33mPress CTRL+C to quit[0m
+192.168.50.30 - - [03/May/2026 16:56:11] "GET /socket.io/?EIO=4&transport=polling&t=PtmHLvY HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 16:56:11] "POST /socket.io/?EIO=4&transport=polling&t=PtmHMMK&sid=MFg-ixvQR_ZgglbcAAAA HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 16:56:11] "GET /socket.io/?EIO=4&transport=polling&t=PtmHMMK.0&sid=MFg-ixvQR_ZgglbcAAAA HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 16:56:15] "GET / HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 16:56:15] "GET /socket.io/?EIO=4&transport=websocket&sid=MFg-ixvQR_ZgglbcAAAA HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 16:56:24] "GET / HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 16:56:24] "[35m[1mGET /socket.io/?EIO=4&transport=websocket HTTP/1.1[0m" 500 -
+Error on request:
+Traceback (most recent call last):
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 337, in execute
+    write(b"")
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 262, in write
+    assert status_set is not None, "write() before start_response"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: write() before start_response
+192.168.50.30 - - [03/May/2026 16:56:31] "[35m[1mGET /socket.io/?EIO=4&transport=websocket HTTP/1.1[0m" 500 -
+Error on request:
+Traceback (most recent call last):
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 337, in execute
+    write(b"")
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 262, in write
+    assert status_set is not None, "write() before start_response"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: write() before start_response
+192.168.50.30 - - [03/May/2026 16:56:35] "GET / HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 16:58:19] "GET / HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 16:58:19] "[35m[1mGET /socket.io/?EIO=4&transport=websocket HTTP/1.1[0m" 500 -
+Error on request:
+Traceback (most recent call last):
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 337, in execute
+    write(b"")
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 262, in write
+    assert status_set is not None, "write() before start_response"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: write() before start_response
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8201
+ * Running on http://192.168.50.97:8201
+[33mPress CTRL+C to quit[0m
+192.168.50.30 - - [03/May/2026 16:58:31] "GET / HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 16:58:32] "[35m[1mGET /socket.io/?EIO=4&transport=websocket HTTP/1.1[0m" 500 -
+Error on request:
+Traceback (most recent call last):
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 337, in execute
+    write(b"")
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 262, in write
+    assert status_set is not None, "write() before start_response"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: write() before start_response
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8201
+ * Running on http://192.168.50.97:8201
+[33mPress CTRL+C to quit[0m
+192.168.50.147 - - [03/May/2026 17:08:27] "GET / HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8221
+ * Running on http://192.168.50.97:8221
+[33mPress CTRL+C to quit[0m
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8211
+ * Running on http://192.168.50.97:8211
+[33mPress CTRL+C to quit[0m
+192.168.50.147 - - [03/May/2026 17:09:37] "GET /socket.io/?EIO=4&transport=polling&t=PtmKQZ0 HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:09:37] "POST /socket.io/?EIO=4&transport=polling&t=PtmKQZG&sid=SMymGrmjkVJczoh2AAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:09:37] "GET /socket.io/?EIO=4&transport=polling&t=PtmKQZH&sid=SMymGrmjkVJczoh2AAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:09:39] "GET /socket.io/?EIO=4&transport=polling&t=PtmKRAO HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:09:39] "POST /socket.io/?EIO=4&transport=polling&t=PtmKRAc&sid=5cPqPBD9S7vtOMtDAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:09:39] "GET /socket.io/?EIO=4&transport=polling&t=PtmKRAd&sid=5cPqPBD9S7vtOMtDAAAA HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8231
+ * Running on http://192.168.50.97:8231
+[33mPress CTRL+C to quit[0m
+192.168.50.147 - - [03/May/2026 17:09:47] "GET /socket.io/?EIO=4&transport=polling&t=PtmKTBq HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:09:47] "POST /socket.io/?EIO=4&transport=polling&t=PtmKTC2&sid=OiMPnWni2_2cg9ziAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:09:47] "GET /socket.io/?EIO=4&transport=polling&t=PtmKTC3&sid=OiMPnWni2_2cg9ziAAAA HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8241
+ * Running on http://192.168.50.97:8241
+[33mPress CTRL+C to quit[0m
+192.168.50.147 - - [03/May/2026 17:09:53] "GET /socket.io/?EIO=4&transport=polling&t=PtmKUYb HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:09:53] "POST /socket.io/?EIO=4&transport=polling&t=PtmKUYp&sid=VNZptCqPZKQjRfX8AAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:09:53] "GET /socket.io/?EIO=4&transport=polling&t=PtmKUYq&sid=VNZptCqPZKQjRfX8AAAA HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8251
+ * Running on http://192.168.50.97:8251
+[33mPress CTRL+C to quit[0m
+192.168.50.147 - - [03/May/2026 17:09:56] "GET /socket.io/?EIO=4&transport=polling&t=PtmKVLW HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:09:56] "POST /socket.io/?EIO=4&transport=polling&t=PtmKVLk&sid=9KxjMdxlpivRsQS-AAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:09:56] "GET /socket.io/?EIO=4&transport=polling&t=PtmKVLl&sid=9KxjMdxlpivRsQS-AAAA HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8261
+ * Running on http://192.168.50.97:8261
+[33mPress CTRL+C to quit[0m
+192.168.50.147 - - [03/May/2026 17:10:02] "GET /socket.io/?EIO=4&transport=polling&t=PtmKWqy HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:10:02] "POST /socket.io/?EIO=4&transport=polling&t=PtmKWr9&sid=-b2JU2RbOwIEkv_1AAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:10:02] "GET /socket.io/?EIO=4&transport=polling&t=PtmKWrA&sid=-b2JU2RbOwIEkv_1AAAA HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8271
+ * Running on http://192.168.50.97:8271
+[33mPress CTRL+C to quit[0m
+192.168.50.147 - - [03/May/2026 17:10:09] "GET /socket.io/?EIO=4&transport=polling&t=PtmKYMm HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:10:09] "POST /socket.io/?EIO=4&transport=polling&t=PtmKYYu&sid=RGfBwh50gmrVP9uaAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:10:09] "GET /socket.io/?EIO=4&transport=polling&t=PtmKYYv&sid=RGfBwh50gmrVP9uaAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:10:33] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:10:33] "GET /socket.io/?EIO=4&transport=websocket&sid=5cPqPBD9S7vtOMtDAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:10:35] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:10:35] "GET /socket.io/?EIO=4&transport=websocket&sid=OiMPnWni2_2cg9ziAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:10:36] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:10:36] "GET /socket.io/?EIO=4&transport=websocket&sid=9KxjMdxlpivRsQS-AAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:10:42] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:10:42] "GET /socket.io/?EIO=4&transport=websocket&sid=SMymGrmjkVJczoh2AAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:10:44] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:10:44] "GET /socket.io/?EIO=4&transport=websocket&sid=VNZptCqPZKQjRfX8AAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:10:47] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:10:47] "GET /socket.io/?EIO=4&transport=websocket&sid=-b2JU2RbOwIEkv_1AAAA HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:10:48] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:10:48] "GET /socket.io/?EIO=4&transport=websocket&sid=RGfBwh50gmrVP9uaAAAA HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8211
+ * Running on http://192.168.50.97:8211
+[33mPress CTRL+C to quit[0m
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8221
+ * Running on http://192.168.50.97:8221
+[33mPress CTRL+C to quit[0m
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8231
+ * Running on http://192.168.50.97:8231
+[33mPress CTRL+C to quit[0m
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8241
+ * Running on http://192.168.50.97:8241
+[33mPress CTRL+C to quit[0m
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8251
+ * Running on http://192.168.50.97:8251
+[33mPress CTRL+C to quit[0m
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8261
+ * Running on http://192.168.50.97:8261
+[33mPress CTRL+C to quit[0m
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8271
+ * Running on http://192.168.50.97:8271
+[33mPress CTRL+C to quit[0m
+192.168.50.147 - - [03/May/2026 17:16:19] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:16:20] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:16:22] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:16:22] "[35m[1mGET /socket.io/?EIO=4&transport=websocket HTTP/1.1[0m" 500 -
+Error on request:
+Traceback (most recent call last):
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 337, in execute
+    write(b"")
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 262, in write
+    assert status_set is not None, "write() before start_response"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: write() before start_response
+192.168.50.147 - - [03/May/2026 17:16:24] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:16:24] "[35m[1mGET /socket.io/?EIO=4&transport=websocket HTTP/1.1[0m" 500 -
+Error on request:
+Traceback (most recent call last):
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 337, in execute
+    write(b"")
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 262, in write
+    assert status_set is not None, "write() before start_response"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: write() before start_response
+192.168.50.147 - - [03/May/2026 17:16:27] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:16:27] "[35m[1mGET /socket.io/?EIO=4&transport=websocket HTTP/1.1[0m" 500 -
+Error on request:
+Traceback (most recent call last):
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 337, in execute
+    write(b"")
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 262, in write
+    assert status_set is not None, "write() before start_response"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: write() before start_response
+192.168.50.147 - - [03/May/2026 17:16:28] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:16:28] "[35m[1mGET /socket.io/?EIO=4&transport=websocket HTTP/1.1[0m" 500 -
+Error on request:
+Traceback (most recent call last):
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 337, in execute
+    write(b"")
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 262, in write
+    assert status_set is not None, "write() before start_response"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: write() before start_response
+192.168.50.147 - - [03/May/2026 17:16:36] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:16:36] "[35m[1mGET /socket.io/?EIO=4&transport=websocket HTTP/1.1[0m" 500 -
+Error on request:
+Traceback (most recent call last):
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 337, in execute
+    write(b"")
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 262, in write
+    assert status_set is not None, "write() before start_response"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: write() before start_response
+192.168.50.147 - - [03/May/2026 17:16:40] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [03/May/2026 17:16:40] "[35m[1mGET /socket.io/?EIO=4&transport=websocket HTTP/1.1[0m" 500 -
+Error on request:
+Traceback (most recent call last):
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 337, in execute
+    write(b"")
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 262, in write
+    assert status_set is not None, "write() before start_response"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: write() before start_response
+192.168.50.30 - - [03/May/2026 17:34:05] "GET / HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 17:34:05] "[35m[1mGET /socket.io/?EIO=4&transport=websocket HTTP/1.1[0m" 500 -
+Error on request:
+Traceback (most recent call last):
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 337, in execute
+    write(b"")
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 262, in write
+    assert status_set is not None, "write() before start_response"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: write() before start_response
+192.168.50.30 - - [03/May/2026 17:34:05] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+192.168.50.30 - - [03/May/2026 17:34:14] "GET / HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 17:34:14] "[35m[1mGET /socket.io/?EIO=4&transport=websocket HTTP/1.1[0m" 500 -
+Error on request:
+Traceback (most recent call last):
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 337, in execute
+    write(b"")
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 262, in write
+    assert status_set is not None, "write() before start_response"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: write() before start_response
+192.168.50.30 - - [03/May/2026 17:34:14] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+192.168.50.30 - - [03/May/2026 17:34:20] "GET / HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 17:34:20] "[35m[1mGET /socket.io/?EIO=4&transport=websocket HTTP/1.1[0m" 500 -
+Error on request:
+Traceback (most recent call last):
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 337, in execute
+    write(b"")
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 262, in write
+    assert status_set is not None, "write() before start_response"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: write() before start_response
+192.168.50.30 - - [03/May/2026 17:38:13] "GET / HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 17:38:13] "[35m[1mGET /socket.io/?EIO=4&transport=websocket HTTP/1.1[0m" 500 -
+Error on request:
+Traceback (most recent call last):
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 337, in execute
+    write(b"")
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 262, in write
+    assert status_set is not None, "write() before start_response"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: write() before start_response
+192.168.50.30 - - [03/May/2026 17:47:13] "GET / HTTP/1.1" 200 -
+192.168.50.30 - - [03/May/2026 17:47:13] "[35m[1mGET /socket.io/?EIO=4&transport=websocket HTTP/1.1[0m" 500 -
+Error on request:
+Traceback (most recent call last):
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 337, in execute
+    write(b"")
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 262, in write
+    assert status_set is not None, "write() before start_response"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: write() before start_response
+192.168.50.30 - - [03/May/2026 17:47:19] "[35m[1mGET /socket.io/?EIO=4&transport=websocket HTTP/1.1[0m" 500 -
+Error on request:
+Traceback (most recent call last):
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 337, in execute
+    write(b"")
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 262, in write
+    assert status_set is not None, "write() before start_response"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: write() before start_response
+192.168.50.30 - - [03/May/2026 17:50:01] "[35m[1mGET /socket.io/?EIO=4&transport=websocket HTTP/1.1[0m" 500 -
+Error on request:
+Traceback (most recent call last):
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 337, in execute
+    write(b"")
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 262, in write
+    assert status_set is not None, "write() before start_response"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: write() before start_response
+192.168.50.30 - - [03/May/2026 23:19:57] "GET / HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8201
+ * Running on http://192.168.50.97:8201
+[33mPress CTRL+C to quit[0m
+192.168.50.147 - - [04/May/2026 00:18:09] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [04/May/2026 00:18:09] "[35m[1mGET /socket.io/?EIO=4&transport=websocket HTTP/1.1[0m" 500 -
+Error on request:
+Traceback (most recent call last):
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 371, in run_wsgi
+    execute(self.server.app)
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 337, in execute
+    write(b"")
+  File "/home/hologaun/projects/syngex/venv/lib/python3.12/site-packages/werkzeug/serving.py", line 262, in write
+    assert status_set is not None, "write() before start_response"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: write() before start_response
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8201
+ * Running on http://192.168.50.97:8201
+[33mPress CTRL+C to quit[0m
+192.168.50.30 - - [04/May/2026 00:42:40] "GET / HTTP/1.1" 200 -

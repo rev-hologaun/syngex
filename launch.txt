@@ -1,13 +1,13 @@
 cd ~/projects/syngex
 source venv/bin/activate
 python3 main.py --port 8200 tsla dashboard
-python3 main.py --port 8201 tsll dashboard
-python3 main.py --port 8202 intc dashboard
-python3 main.py --port 8203 amzn dashboard
-python3 main.py --port 8204 nvda dashboard
-python3 main.py --port 8205 meta dashboard
-python3 main.py --port 8206 pltr dashboard
-python3 main.py --port 8207 sofi dashboard
-python3 main.py --port 8208 spy dashboard
-python3 main.py --port 8209 qqq dashboard
+python3 main.py --port 8210 tsll dashboard
+python3 main.py --port 8220 intc dashboard
+python3 main.py --port 8230 amzn dashboard
+python3 main.py --port 8240 nvda dashboard
+python3 main.py --port 8250 meta dashboard
+python3 main.py --port 8260 pltr dashboard
+python3 main.py --port 8270 sofi dashboard
+python3 main.py --port 8280 spy dashboard
+python3 main.py --port 8290 qqq dashboard
 

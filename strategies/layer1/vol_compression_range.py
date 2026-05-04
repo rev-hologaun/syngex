@@ -36,7 +36,7 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
-from strategies.rolling_keys import KEY_PRICE, KEY_PRICE_5M, KEY_PRICE_30M, KEY_VOLUME_5M
+from strategies.rolling_keys import KEY_PRICE_5M, KEY_PRICE_30M, KEY_VOLUME_5M
 
 logger = logging.getLogger("Syngex.Strategies.VolCompressionRange")
 
@@ -361,7 +361,7 @@ class VolCompressionRange(BaseStrategy):
         self, rolling_data: Dict[str, Any]
     ) -> Optional[Any]:
         """Get the best available price rolling window."""
-        for key in (KEY_PRICE, KEY_PRICE_5M, KEY_PRICE_30M):
+        for key in (KEY_PRICE_5M, KEY_PRICE_30M):
             rw = rolling_data.get(key)
             if rw is not None and rw.count >= MIN_RANGE_BARS:
                 return rw

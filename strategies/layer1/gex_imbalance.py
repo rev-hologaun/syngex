@@ -25,7 +25,8 @@ Exit:
     - Target: 1.5% from entry (1:1.5 RR)
 
 Confidence factors:
-    - How extreme the ratio is (closer to 0 or 1 = higher confidence)
+    - How extreme the ratio is (closer to 0 = higher long confidence;
+      higher values beyond 1.0 = higher short confidence)
     - Regime alignment (positive regime + put-heavy = stronger long signal)
     - Data freshness (more messages = higher confidence)
 """
@@ -37,7 +38,7 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
-from strategies.rolling_keys import KEY_PRICE, KEY_PRICE_5M, KEY_PRICE_30M
+from strategies.rolling_keys import KEY_PRICE_5M, KEY_PRICE_30M
 
 logger = logging.getLogger("Syngex.Strategies.GEXImbalance")
 
@@ -217,7 +218,8 @@ class GEXImbalance(BaseStrategy):
 
         # Call-heavy → SHORT bias
         if ratio > CALL_HEAVY_RATIO:
-            strength = min(1.0, (ratio - CALL_HEAVY_RATIO) / (1 - CALL_HEAVY_RATIO))
+            # Normalize against realistic upper bound (3.0 = calls 3x puts)
+            strength = min(1.0, (ratio - CALL_HEAVY_RATIO) / (3.0 - CALL_HEAVY_RATIO))
             return ("SHORT", strength)
 
         # Neutral zone
@@ -240,7 +242,7 @@ class GEXImbalance(BaseStrategy):
         """
         # Check "price" window (generic) or "price_5m" / "price_30m"
         price_window = None
-        for key in (KEY_PRICE, KEY_PRICE_5M, KEY_PRICE_30M):
+        for key in (KEY_PRICE_5M, KEY_PRICE_30M):
             rw = rolling_data.get(key)
             if rw and rw.count >= 5:
                 price_window = rw
@@ -286,11 +288,11 @@ class GEXImbalance(BaseStrategy):
             else:
                 ratio_conf = 0.4 + 0.4 * (1 - ratio / PUT_HEAVY_RATIO)
         elif ratio > CALL_HEAVY_RATIO:
-            # Call-heavy: closer to 1 = stronger
-            if ratio >= STRONG_CALL_RATIO:
+            # Call-heavy: higher ratio = stronger (normalize against 3.0 upper bound)
+            if ratio >= STRONG_CALL_RATIO * 3:  # ~2.25 → strong
                 ratio_conf = 0.8
             else:
-                ratio_conf = 0.4 + 0.4 * ((ratio - CALL_HEAVY_RATIO) / (1 - CALL_HEAVY_RATIO))
+                ratio_conf = 0.4 + 0.4 * min(1.0, (ratio - CALL_HEAVY_RATIO) / (3.0 - CALL_HEAVY_RATIO))
         else:
             ratio_conf = 0.0
 

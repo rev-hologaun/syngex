@@ -131,6 +131,8 @@ class SyngexOrchestrator:
         self._profile_timer: float = 0.0
         self._signal_timer: float = 0.0
         self._dashboard_process: subprocess.Popen | None = None
+        self._heatmap_process: subprocess.Popen | None = None
+        self._heatmap_stderr: Any = None  # file handle for heatmap stderr
         self._state_export_timer: float = 0.0
 
         # Shared data file for Streamlit dashboard (symbol-specific)
@@ -221,16 +223,12 @@ class SyngexOrchestrator:
 
         # Rolling windows for key metrics
         self._rolling_data = {
-            KEY_PRICE: RollingWindow(window_type="time", window_size=300),
             KEY_PRICE_5M: RollingWindow(window_type="time", window_size=300),
             KEY_PRICE_30M: RollingWindow(window_type="time", window_size=1800),
-            KEY_NET_GAMMA: RollingWindow(window_type="time", window_size=300),
             KEY_NET_GAMMA_5M: RollingWindow(window_type="time", window_size=300),
             KEY_VOLUME_5M: RollingWindow(window_type="time", window_size=300),
             # Layer 2 rolling windows
             KEY_TOTAL_DELTA_5M: RollingWindow(window_type="time", window_size=300),
-            KEY_DELTA: RollingWindow(window_type="time", window_size=300),
-            KEY_VOLUME: RollingWindow(window_type="time", window_size=300),
         }
 
         # Per-strike IV windows (populated lazily)
@@ -272,9 +270,10 @@ class SyngexOrchestrator:
         logger.info("Pipeline running. Ctrl+C to stop.  Mode: %s", self.mode)
         logger.info("Strategy engine: %d strategies registered, filter active", len(self._strategy_engine._strategies))
 
-        # Start the Streamlit dashboard as a background subprocess (dashboard mode only)
+        # Start the Streamlit dashboard and heatmap as background subprocesses (dashboard mode only)
         if self.mode == "dashboard":
             self._start_dashboard()
+            self._start_heatmap()
 
         try:
             # Start config watcher task
@@ -323,6 +322,7 @@ class SyngexOrchestrator:
         finally:
             config_task.cancel()
             self._stop_dashboard()
+            self._stop_heatmap()
 
     async def shutdown(self) -> None:
         """Graceful shutdown."""
@@ -336,6 +336,8 @@ class SyngexOrchestrator:
 
         # Stop dashboard subprocess
         self._stop_dashboard()
+        # Stop heatmap subprocess
+        self._stop_heatmap()
 
         if self._client:
             await self._client.stop()
@@ -517,25 +519,19 @@ class SyngexOrchestrator:
                 price = data.get("price")
                 if price and price > 0:
                     ts = time.time()
-                    self._rolling_data[KEY_PRICE].push(price, ts)
                     self._rolling_data[KEY_PRICE_5M].push(price, ts)
                     self._rolling_data[KEY_PRICE_30M].push(price, ts)
 
             # Periodically update net_gamma rolling window
             if self._calculator._msg_count % 20 == 0:
                 ng = self._calculator.get_net_gamma()
-                self._rolling_data[KEY_NET_GAMMA].push(ng)
                 self._rolling_data[KEY_NET_GAMMA_5M].push(ng)
 
             # Update Layer 2 rolling windows
             gex_summary = self._calculator.get_greeks_summary()
             if gex_summary:
                 net_delta = gex_summary.get("net_delta", 0.0)
-                if KEY_DELTA in self._rolling_data:
-                    self._rolling_data[KEY_DELTA].push(net_delta)
-                if KEY_VOLUME in self._rolling_data:
-                    total_vol = gex_summary.get("total_volume", 0)
-                    self._rolling_data[KEY_VOLUME].push(total_vol)
+                total_vol = gex_summary.get("total_volume", 0)
                 # Track total_delta_5m for delta_volume_exhaustion
                 if KEY_TOTAL_DELTA_5M in self._rolling_data:
                     self._rolling_data[KEY_TOTAL_DELTA_5M].push(net_delta)
@@ -659,6 +655,88 @@ class SyngexOrchestrator:
             logger.info("  TOP_STRIKES:  %s", "  |  ".join(parts))
 
     # ------------------------------------------------------------------
+    # Per-strategy health data
+    # ------------------------------------------------------------------
+
+    def _build_strategy_health(self) -> Dict[str, Dict[str, Any]]:
+        """Build per-strategy health data for the heatmap JSON export."""
+        if not self._strategy_engine or not self._signal_tracker:
+            return {}
+
+        health: Dict[str, Dict[str, Any]] = {}
+        now = time.time()
+
+        # Get strategy stats from signal tracker
+        strat_stats = self._signal_tracker.get_strategy_stats()
+
+        for strat in self._strategy_engine._strategies:
+            sid = strat.strategy_id
+            stats = strat_stats.get(sid, {})
+
+            # Count signals from recent signals buffer
+            signal_count = 0
+            last_signal_ts = 0.0
+            sparkline_values: list = []
+
+            # Get resolved signals for this strategy
+            resolved = self._signal_tracker.get_resolved()
+            strategy_resolved = [r for r in resolved if r.open_signal.strategy_id == sid]
+
+            # Build sparkline from cumulative PnL over resolved signals
+            cumulative = 0.0
+            for r in strategy_resolved[-8:]:
+                cumulative += r.pnl
+                sparkline_values.append(round(cumulative, 2))
+
+            # If not enough resolved signals, pad with zeros
+            while len(sparkline_values) < 8:
+                sparkline_values.insert(0, 0.0)
+
+            # Count total signals for this strategy
+            total_signals = stats.get("total_signals", 0)
+            wins = stats.get("wins", 0)
+            losses = stats.get("losses", 0)
+            closed = stats.get("closed", 0)
+            resolved_count = wins + losses + closed
+
+            # Win rate from resolved signals
+            win_rate = wins / resolved_count if resolved_count > 0 else 0.0
+
+            # PnL
+            pnl = stats.get("total_pnl", 0.0)
+
+            # Status: active if has resolved signals, idle otherwise
+            if total_signals > 0:
+                status = "active"
+            else:
+                status = "idle"
+
+            # Check if any open signals exist for this strategy
+            open_signals = self._signal_tracker.get_open_signals()
+            has_open = any(s.strategy_id == sid for s in open_signals)
+            if has_open and status == "idle":
+                status = "active"
+
+            # Track the most recent signal timestamp (open or resolved)
+            for s in open_signals:
+                if s.strategy_id == sid and s.timestamp > last_signal_ts:
+                    last_signal_ts = s.timestamp
+            for r in strategy_resolved:
+                if r.resolution_time > last_signal_ts:
+                    last_signal_ts = r.resolution_time
+
+            health[sid] = {
+                "status": status,
+                "signal_count": total_signals,
+                "last_signal_ts": last_signal_ts,
+                "win_rate": round(win_rate, 4),
+                "pnl": round(pnl, 2),
+                "sparkline": sparkline_values[-8:],
+            }
+
+        return health
+
+    # ------------------------------------------------------------------
     # Dashboard (Streamlit)
     # ------------------------------------------------------------------
 
@@ -728,6 +806,92 @@ class SyngexOrchestrator:
             self._dashboard_process = None
 
     # ------------------------------------------------------------------
+    # Heatmap (Flask + SocketIO)
+    # ------------------------------------------------------------------
+
+    def _start_heatmap(self) -> None:
+        """Spawn the Heatmap Dashboard as a background subprocess on port self._port + 1."""
+        if self._heatmap_process is not None:
+            return  # already running
+
+        heatmap_port = self._port + 1
+
+        env = os.environ.copy()
+        env["SYNGEX_SYMBOL"] = self.symbol
+        env["HEATMAP_PORT"] = str(heatmap_port)
+
+        script_path = Path(__file__).parent / "app_heatmap.py"
+        venv_python = Path(__file__).parent / "venv" / "bin" / "python"
+        log_path = self._data_dir.parent / "log" / "heatmap.log"
+
+        logger.info("Starting Heatmap Dashboard…")
+
+        try:
+            self._heatmap_stderr = open(log_path, "a")  # append mode — avoids PIPE buffer deadlock
+            self._heatmap_process = subprocess.Popen(
+                [
+                    str(venv_python),
+                    str(script_path),
+                ],
+                cwd=str(Path(__file__).parent),
+                stdout=subprocess.DEVNULL,
+                stderr=self._heatmap_stderr,
+                env=env,
+            )
+            # Check for immediate startup failures
+            ret = self._heatmap_process.poll()
+            if ret is not None:
+                self._heatmap_process.wait()
+                try:
+                    with open(log_path, "r") as f:
+                        err_msg = f.read().strip()
+                except OSError:
+                    err_msg = "unknown"
+                logger.warning(
+                    "Heatmap Dashboard failed to start (exit %d): %s",
+                    ret, err_msg[:500],
+                )
+                self._heatmap_process = None
+                return
+            logger.info(
+                "Heatmap Dashboard started (PID %d, port %d).  "
+                "Open http://localhost:%d in a browser.",
+                self._heatmap_process.pid,
+                heatmap_port,
+                heatmap_port,
+            )
+        except FileNotFoundError:
+            logger.warning(
+                "app_heatmap.py not found — Heatmap Dashboard will not start.  "
+                "Ensure flask and flask-socketio are installed.",
+            )
+        except Exception as exc:
+            logger.warning("Failed to start Heatmap Dashboard: %s", exc)
+
+    def _stop_heatmap(self) -> None:
+        """Terminate the Heatmap Dashboard subprocess."""
+        if self._heatmap_process is None:
+            return
+
+        logger.info("Stopping Heatmap Dashboard (PID %d)…", self._heatmap_process.pid)
+        try:
+            self._heatmap_process.terminate()
+            self._heatmap_process.wait(timeout=5)
+        except Exception:
+            try:
+                self._heatmap_process.kill()
+            except Exception:
+                pass
+        finally:
+            if self._heatmap_stderr is not None:
+                try:
+                    self._heatmap_stderr.close()
+                except Exception:
+                    pass
+                self._heatmap_stderr = None
+            self._heatmap_process = None
+
+    # ------------------------------------------------------------------
     # GEX State Export (shared file for Streamlit)
     # ------------------------------------------------------------------
 
@@ -751,6 +915,8 @@ class SyngexOrchestrator:
         # Add strategy engine status
         if self._strategy_engine:
             export["strategy_engine"] = self._strategy_engine.get_status()
+            # Per-strategy health data for heatmap
+            export["strategy_health"] = self._build_strategy_health()
             # Micro-signal confidence overlay for dashboard
             recent = self._strategy_engine.get_recent_signals(20)
             micro_signals: Dict[str, Dict[str, Any]] = {}

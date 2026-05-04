@@ -299,6 +299,37 @@ main.py (orchestrator) → gex_state_{SYMBOL}.json (shared file)
 
 ---
 
+## v1.6 Fixes (2026-05-04)
+
+| Fix | File | Impact |
+|-----|------|--------|
+| **GEX scale unification** | `engine/gex_calculator.py`, `layer1/magnet_accelerate.py` | `get_normalized_net_gamma()` added as canonical scale for magnitude comparisons. `MagnetAccelerate._find_magnet()` now uses normalized gamma. `MIN_MAGNET_GEX` dropped from 500,000 → 1,000. Walls and magnets now on the same scale. |
+| **NetGammaFilter directional split** | `filters/net_gamma_filter.py` | Positive regime: LONG when price < flip (buy dip), SHORT when price > flip (sell rally) — fade extremes. Negative regime: LONG when price > flip (breakout), SHORT when price < flip (breakdown) — trend-follow. Previously both regimes used identical logic (inverted for positive). |
+
+### Revert: NetGammaFilter Directional Split
+
+If the inverted positive-regime filtering causes issues during live validation:
+
+1. **Quick revert** — replace the two methods in `filters/net_gamma_filter.py` with identical logic (restore original behavior):
+   ```python
+   def _evaluate_positive(self, signal: Signal) -> bool:
+       if self._flip_strike is None: return True
+       if signal.direction == Direction.LONG:
+           return self._underlying_price > self._flip_strike
+       elif signal.direction == Direction.SHORT:
+           return self._underlying_price < self._flip_strike
+       return True
+
+   def _evaluate_negative(self, signal: Signal) -> bool:
+       # Identical to _evaluate_positive (restore original)
+       return self._evaluate_positive(signal)
+   ```
+2. **Or git revert** — `git checkout HEAD -- strategies/filters/net_gamma_filter.py`
+
+The GEX scale fix (`get_normalized_net_gamma()`) is a safe additive change — the new methods don't break anything and can be left in place regardless of the filter decision.
+
+---
+
 ## v1.3–v1.4 Fixes (2026-05-01)
 
 | Fix | File | Impact |

@@ -1,0 +1,145 @@
+# Heatmap Dashboard Layout & Threshold Configuration
+
+grid:
+  columns: 6
+  rows: 4
+
+# Strategy placement in the 6×4 grid
+# Each strategy maps to its YAML config key → grid position
+strategies:
+  gamma_wall_bounce:
+    row: 1
+    col: 1
+    span_cols: 1
+    span_rows: 1
+  magnet_accelerate:
+    row: 1
+    col: 2
+    span_cols: 1
+    span_rows: 1
+  gamma_flip_breakout:
+    row: 1
+    col: 3
+    span_cols: 1
+    span_rows: 1
+  gamma_squeeze:
+    row: 1
+    col: 4
+    span_cols: 1
+    span_rows: 1
+  gex_imbalance:
+    row: 1
+    col: 5
+    span_cols: 1
+    span_rows: 1
+  confluence_reversal:
+    row: 1
+    col: 6
+    span_cols: 1
+    span_rows: 1
+  vol_compression_range:
+    row: 2
+    col: 1
+    span_cols: 1
+    span_rows: 1
+  gex_divergence:
+    row: 2
+    col: 2
+    span_cols: 1
+    span_rows: 1
+  delta_gamma_squeeze:
+    row: 2
+    col: 5
+    span_cols: 1
+    span_rows: 1
+  delta_volume_exhaustion:
+    row: 2
+    col: 6
+    span_cols: 1
+    span_rows: 1
+  call_put_flow_asymmetry:
+    row: 3
+    col: 1
+    span_cols: 1
+    span_rows: 1
+  iv_gex_divergence:
+    row: 3
+    col: 2
+    span_cols: 1
+    span_rows: 1
+  gamma_volume_convergence:
+    row: 3
+    col: 3
+    span_cols: 1
+    span_rows: 1
+  iv_band_breakout:
+    row: 3
+    col: 4
+    span_cols: 1
+    span_rows: 1
+  strike_concentration:
+    row: 3
+    col: 5
+    span_cols: 1
+    span_rows: 1
+  theta_burn:
+    row: 3
+    col: 6
+    span_cols: 1
+    span_rows: 1
+  iv_skew_squeeze:
+    row: 4
+    col: 1
+    span_cols: 1
+    span_rows: 1
+  prob_weighted_magnet:
+    row: 4
+    col: 2
+    span_cols: 1
+    span_rows: 1
+  prob_distribution_shift:
+    row: 4
+    col: 3
+    span_cols: 1
+    span_rows: 1
+  extrinsic_intrinsic_flow:
+    row: 4
+    col: 4
+    span_cols: 1
+    span_rows: 1
+
+# System widgets (non-strategy cells)
+widgets:
+  regime_status:
+    row: 1
+    col: 1
+    span_cols: 1
+    span_rows: 1
+    type: regime
+  system_log:
+    row: 5
+    col: 1
+    span_cols: 6
+    span_rows: 1
+    type: log
+
+# Color health thresholds
+thresholds:
+  profitable_win_rate: 0.60
+  profitable_pnl: 0.0
+  idle_threshold_seconds: 300
+  bleeding_pnl: -100.0
+  bleeding_win_rate: 0.35
+  near_zero_pnl: 10.0  # absolute value
+
+# Color palette
+colors:
+  profitable: "#065f46"
+  amber: "#92400e"
+  idle: "#1f2937"
+  bleeding: "#7f1d1d"
+  card_bg: "#1e293b"
+  background: "#0f172a"
+  text_main: "#f8fafc"
+  text_dim: "#94a3b8"
+  accent: "#38bdf8"

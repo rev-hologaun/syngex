@@ -74,7 +74,7 @@ class TradeStationClient:
             self._quote_symbols.append(symbol)
             logger.info("Queued quote subscription for %s", symbol)
 
-    def subscribe_to_option_chain(self, symbol: str, strike_proximity: int = 24) -> None:
+    def subscribe_to_option_chain(self, symbol: str, strike_proximity: int = 16) -> None:
         """Register a symbol for option-chain data."""
         if symbol not in self._option_chain_symbols:
             self._option_chain_symbols.append(symbol)
@@ -248,7 +248,7 @@ class TradeStationClient:
                     await self._refresh_token_if_needed()
 
                 session = await self._ensure_session()
-                params = {"strikeProximity": 24}
+                params = {"strikeProximity": 16}
 
                 async with session.get(url, headers=self._headers, params=params) as resp:
                     if resp.status == 401:

@@ -29,6 +29,16 @@ class NetGammaFilter:
     """
     Master regime filter.
 
+    Rules:
+        POSITIVE regime (fade extremes):
+            - LONG signals allowed when price < flip (buy dip)
+            - SHORT signals allowed when price > flip (sell rally)
+        NEGATIVE regime (trend-follow):
+            - LONG signals allowed when price > flip (breakout)
+            - SHORT signals allowed when price < flip (breakdown)
+        Transitioning:
+            - All signals blocked
+
     Usage:
         filter = NetGammaFilter()
         engine.register_filter(filter.evaluate_signal)
@@ -106,12 +116,12 @@ class NetGammaFilter:
         Determine if a signal should pass the regime filter.
 
         Rules:
-            POSITIVE regime:
-                - LONG signals allowed when price > flip
-                - SHORT signals allowed when price < flip (fade)
-            NEGATIVE regime:
-                - LONG signals allowed when price > flip (trend)
-                - SHORT signals allowed when price < flip (trend)
+            POSITIVE regime (fade extremes):
+                - LONG signals allowed when price < flip (buy dip)
+                - SHORT signals allowed when price > flip (sell rally)
+            NEGATIVE regime (trend-follow):
+                - LONG signals allowed when price > flip (breakout)
+                - SHORT signals allowed when price < flip (breakdown)
             Transitioning:
                 - All signals blocked
 
@@ -129,34 +139,32 @@ class NetGammaFilter:
     def _evaluate_positive(self, signal: Signal) -> bool:
         """
         Positive gamma regime: dealers stabilize.
-        Fade extremes, range-bound strategies.
+        Fade extremes — buy dips, sell rallies.
         """
-        # No flip data yet — allow signal through
         if self._flip_strike is None:
             return True
 
         if signal.direction == Direction.LONG:
-            # Longs allowed when price is above flip (momentum with dealer support)
-            return self._underlying_price > self._flip_strike
-        elif signal.direction == Direction.SHORT:
-            # Shorts allowed as fade (deals sell rallies)
+            # Longs allowed when price is BELOW flip (buy the dip)
             return self._underlying_price < self._flip_strike
+        elif signal.direction == Direction.SHORT:
+            # Shorts allowed when price is ABOVE flip (sell the rally)
+            return self._underlying_price > self._flip_strike
         return True
 
     def _evaluate_negative(self, signal: Signal) -> bool:
         """
         Negative gamma regime: dealers accelerate.
-        Trend-follow, breakout-biased.
+        Trend-follow — breakouts and breakdowns.
         """
-        # No flip data yet — allow signal through
         if self._flip_strike is None:
             return True
 
         if signal.direction == Direction.LONG:
-            # Longs allowed when price is above flip (breakout momentum)
+            # Longs allowed when price is ABOVE flip (breakout momentum)
             return self._underlying_price > self._flip_strike
         elif signal.direction == Direction.SHORT:
-            # Shorts allowed when price is below flip (breakdown momentum)
+            # Shorts allowed when price is BELOW flip (breakdown momentum)
             return self._underlying_price < self._flip_strike
         return True
 

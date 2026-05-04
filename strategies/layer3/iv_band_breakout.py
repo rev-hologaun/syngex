@@ -191,7 +191,7 @@ class IVBandBreakout(BaseStrategy):
             return None
 
         # 6. Delta at ATM turning positive
-        if not self._check_atm_delta_positive(gex_calc):
+        if not self._check_atm_delta_positive(gex_calc, atm_strike):
             return None
 
         # All conditions met — compute confidence and build signal
@@ -291,7 +291,7 @@ class IVBandBreakout(BaseStrategy):
             return None
 
         # 6. Delta at ATM turning negative
-        if not self._check_atm_delta_negative(gex_calc):
+        if not self._check_atm_delta_negative(gex_calc, atm_strike):
             return None
 
         # All conditions met — compute confidence and build signal
@@ -503,17 +503,14 @@ class IVBandBreakout(BaseStrategy):
         return window.trend
 
     @staticmethod
-    def _check_atm_delta_positive(gex_calc: Any) -> bool:
+    def _check_atm_delta_positive(gex_calc: Any, atm_strike: float) -> bool:
         """
         Check if net delta at the ATM strike is positive.
 
         Net delta > 0 means delta is turning positive.
         """
         try:
-            atm = gex_calc.get_atm_strike(0)
-            if atm is None:
-                return False
-            delta_data = gex_calc.get_delta_by_strike(atm)
+            delta_data = gex_calc.get_delta_by_strike(atm_strike)
             net_delta = delta_data.get("net_delta", 0)
             return net_delta > 0
         except Exception as exc:
@@ -521,17 +518,14 @@ class IVBandBreakout(BaseStrategy):
             return False
 
     @staticmethod
-    def _check_atm_delta_negative(gex_calc: Any) -> bool:
+    def _check_atm_delta_negative(gex_calc: Any, atm_strike: float) -> bool:
         """
         Check if net delta at the ATM strike is negative.
 
         Net delta < 0 means delta is turning negative.
         """
         try:
-            atm = gex_calc.get_atm_strike(0)
-            if atm is None:
-                return False
-            delta_data = gex_calc.get_delta_by_strike(atm)
+            delta_data = gex_calc.get_delta_by_strike(atm_strike)
             net_delta = delta_data.get("net_delta", 0)
             return net_delta < 0
         except Exception as exc:

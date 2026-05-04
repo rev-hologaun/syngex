@@ -41,7 +41,7 @@ logger = logging.getLogger("Syngex.Strategies.MagnetAccelerate")
 # Constants
 # ---------------------------------------------------------------------------
 
-MIN_MAGNET_GEX = 500000       # Minimum |net_gamma| to be a magnet
+MIN_MAGNET_GEX = 1000         # Minimum |normalized GEX| to be a magnet (on same scale as wall threshold)
 MAGNET_EXIT_PCT = 0.003       # 0.3% — exit within this % of magnet
 BREAKOUT_PCT = 0.002          # 0.2% — price must be this far past magnet to breakout
 MAX_BREAKOUT_PCT = 0.02       # 2% — max distance past magnet (no chasing)
@@ -90,7 +90,8 @@ class MagnetAccelerate(BaseStrategy):
         if magnet_bucket is None:
             return []
 
-        magnet_gex = abs(magnet_bucket.net_gamma * 100 * underlying_price)
+        # Use normalized GEX for consistent scale with get_gamma_walls()
+        magnet_gex = abs(magnet_bucket.normalized_gamma() * 100 * underlying_price)
         if magnet_gex < MIN_MAGNET_GEX:
             return []
 
@@ -270,16 +271,23 @@ class MagnetAccelerate(BaseStrategy):
     # ------------------------------------------------------------------
 
     def _find_magnet(self, gex_calc: Any) -> Optional[float]:
-        """Find the strike with the highest |net_gamma|."""
+        """Find the strike with the highest |normalized net gamma|.
+
+        Uses normalized (per-message average) gamma for consistent scale
+        with get_gamma_walls() and other GEX comparisons.
+        """
         ladder = gex_calc._ladder
         if not ladder:
             return None
 
         best_strike = None
         best_gex = 0.0
+        price = gex_calc.underlying_price
 
         for strike, bucket in ladder.items():
-            gex = abs(bucket.net_gamma * 100 * gex_calc.underlying_price)
+            # Use normalized gamma for consistent scale
+            norm_net_gamma = bucket.normalized_gamma()
+            gex = abs(norm_net_gamma * 100 * price)
             if gex > best_gex:
                 best_gex = gex
                 best_strike = strike

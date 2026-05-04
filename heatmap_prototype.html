@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Grid Prototype</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-main: #f8fafc;
+            --text-dim: #94a3b8;
+            --accent: #38bdf8;
+            --gap: 1rem;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: 'Inter', system-ui, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+
+        /* THE GRID ENGINE */
+        .dashboard-grid {
+            display: grid;
+            /* Defines 4 equal columns */
+            grid-template-columns: repeat(4, 1fr); 
+            /* Defines rows with auto-height based on content */
+            grid-auto-rows: minmax(150px, auto);
+            gap: var(--gap);
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        /* WIDGET STYLING */
+        .widget {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 1.5rem;
+            border: 1px solid #334155;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            transition: transform 0.2s ease;
+        }
+
+        .widget:hover {
+            transform: translateY(-4px);
+            border-color: var(--accent);
+        }
+
+        .widget h3 {
+            margin: 0;
+            font-size: 0.875rem;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .widget .value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-top: 0.5rem;
+            color: var(--accent);
+        }
+
+        /* GRID SPANNING RULES (The "Magic") */
+        .span-2-cols { grid-column: span 2; }
+        .span-2-rows { grid-row: span 2; }
+        .span-full { grid-column: 1 / -1; }
+
+        /* RESPONSIVENESS */
+        @media (max-width: 1024px) {
+            .dashboard-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        @media (max-width: 640px) {
+            .dashboard-grid { grid-template-columns: 1fr; }
+            .span-2-cols { grid-column: span 1; }
+        }
+    </style>
+</head>
+<body>
+
+    <h1 style="text-align: center; color: var(--text-dim);">System Intelligence Dashboard</h1>
+
+    <div class="dashboard-grid">
+        <!-- Small Metric Widgets -->
+        <div class="widget">
+            <h3>CPU Load</h3>
+            <div class="value">12%</div>
+        </div>
+
+        <div class="widget">
+            <h3>Memory</h3>
+            <div class="value">4.2GB</div>
+        </div>
+
+        <!-- Wide Widget (Spans 2 Columns) -->
+        <div class="widget span-2-cols">
+            <h3>Network Traffic (Real-time)</h3>
+            <div class="value" style="font-size: 1rem; color: #10b981;">[ Graph Placeholder ]</div>
+        </div>
+
+        <!-- Tall Widget (Spans 2 Rows) -->
+        <div class="widget span-2-rows">
+            <h3>Active Processes</h3>
+            <div class="value" style="font-size: 0.9rem; text-align: left; width: 100%; color: var(--text-dim);">
+                • python3 (main)<br>
+                • nginx<br>
+                • docker<br>
+                • redis
+            </div>
+        </div>
+
+        <div class="widget">
+            <h3>Uptime</h3>
+            <div class="value">14d</div>
+        </div>
+
+        <div class="widget">
+            <h3>Alerts</h3>
+            <div class="value" style="color: #ef4444;">0</div>
+        </div>
+
+        <!-- Large Feature Widget (Spans Full Width) -->
+        <div class="widget span-full">
+            <h3>System Log Stream</h3>
+            <div class="value" style="font-size: 0.8rem; font-family: monospace; color: #64748b; text-align: left;">
+                [10:14:01] INFO: System heartbeat OK<br>
+                [10:14:05] WARN: High latency detected on node-02<br>
+                [10:14:10] INFO: User 'Hologaun' logged in
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>

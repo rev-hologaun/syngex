@@ -56,7 +56,7 @@ MIN_TREND_DURATION = 3                # At least 3 candles in trend (was 4)
 STOP_PCT = 0.008                      # 0.8% beyond swing
 
 # Target: mean reversion to rolling average
-TARGET_RISK_MULT = 1.5                # 1.5× risk toward mean
+MEAN_REVERSION_MULT = 1.0             # 1.0× distance — target is the rolling mean
 
 
 class DeltaVolumeExhaustion(BaseStrategy):
@@ -168,7 +168,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
 
         # Target: toward rolling mean
         rolling_mean = price_window.mean or entry
-        target = entry + (rolling_mean - entry) * TARGET_RISK_MULT
+        target = entry + (rolling_mean - entry) * MEAN_REVERSION_MULT
         target = max(target, stop + risk * 0.1)  # At least a little room
 
         direction = Direction.SHORT if trend_direction == "UP" else Direction.LONG

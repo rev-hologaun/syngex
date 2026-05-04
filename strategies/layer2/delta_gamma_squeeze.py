@@ -1,23 +1,32 @@
 """
 strategies/layer2/delta_gamma_squeeze.py — Delta-Gamma Squeeze
 
-Extreme momentum entry strategy. Detects when price is being pushed toward
-a Call Wall while delta at that strike accelerates non-linearly — a classic
-gamma squeeze setup where dealers must buy the underlying to hedge.
+Extreme momentum entry strategy (bidirectional).
+Detects when price is being pushed toward a gamma wall while delta
+at that strike accelerates — a classic gamma squeeze setup.
+
+LONG: Price approaching a Call Wall above with accelerating delta
+SHORT: Price approaching a Put Wall below with accelerating delta
 
 Logic:
-    1. Find nearest Call Wall above price
-    2. Check if delta at that strike is accelerating (current > rolling avg)
-    3. Check for volume spike on the breakout candle
-    4. Enter LONG when all conditions align
+    LONG:
+        1. Find nearest Call Wall above price
+        2. Check if call delta at that strike is accelerating
+        3. Check for volume spike on the breakout candle
+        4. Enter LONG when all conditions align
+    SHORT:
+        1. Find nearest Put Wall below price
+        2. Check if put delta at that strike is accelerating
+        3. Check for volume spike on the breakdown candle
+        4. Enter SHORT when all conditions align
 
 Exit: When delta plateaus or IV spikes (overextended squeeze)
 
 Confidence factors:
-    - Proximity to call wall (closer = stronger squeeze)
+    - Proximity to wall (closer = stronger squeeze)
     - Delta acceleration rate (faster = more urgency)
     - Volume spike magnitude
-    - Regime alignment (POSITIVE regime amplifies squeeze)
+    - Regime alignment (POSITIVE amplifies LONG, NEGATIVE amplifies SHORT)
 """
 
 from __future__ import annotations
@@ -60,12 +69,14 @@ TARGET_RISK_MULT = 2.0                # 2× risk for target
 
 class DeltaGammaSqueeze(BaseStrategy):
     """
-    Detects gamma squeeze setups: price approaching a Call Wall
-    with accelerating delta and volume spike.
+    Detects gamma squeeze setups bidirectionally.
 
-    A gamma squeeze occurs when dealers selling calls must buy the
-    underlying to hedge, pushing price higher, which forces more
-    hedging — a self-reinforcing loop.
+    LONG: Price approaching a Call Wall above with accelerating delta
+    SHORT: Price approaching a Put Wall below with accelerating delta
+
+    A gamma squeeze occurs when dealers must hedge their options positions,
+    pushing price toward the wall and forcing more hedging — a
+    self-reinforcing loop.
     """
 
     strategy_id = "delta_gamma_squeeze"
@@ -73,9 +84,10 @@ class DeltaGammaSqueeze(BaseStrategy):
 
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """
-        Evaluate current state for gamma squeeze setup.
+        Evaluate current state for gamma squeeze setup (bidirectional).
 
-        Returns empty list when conditions not met.
+        Returns signals for both LONG (call wall above) and SHORT
+        (put wall below) when conditions are met.
         """
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
@@ -89,26 +101,44 @@ class DeltaGammaSqueeze(BaseStrategy):
         net_gamma = data.get("net_gamma", 0)
         regime = data.get("regime", "")
 
-        # Get call walls above price
+        signals: List[Signal] = []
+
+        # Get walls above and below price
         walls = gex_calc.get_gamma_walls(threshold=MIN_WALL_GEX)
         call_walls_above = [
             w for w in walls
             if w["side"] == "call" and w["strike"] > underlying_price
         ]
+        put_walls_below = [
+            w for w in walls
+            if w["side"] == "put" and w["strike"] < underlying_price
+        ]
 
-        if not call_walls_above:
-            return []
+        # Check LONG setup (call wall above)
+        if call_walls_above:
+            call_walls_above.sort(
+                key=lambda w: (w["strike"] - underlying_price) / underlying_price
+            )
+            sig = self._evaluate_squeeze(
+                call_walls_above[0], underlying_price, gex_calc,
+                rolling_data, net_gamma, regime, "LONG",
+            )
+            if sig:
+                signals.append(sig)
 
-        # Sort by proximity — nearest wall first
-        call_walls_above.sort(
-            key=lambda w: (w["strike"] - underlying_price) / underlying_price
-        )
+        # Check SHORT setup (put wall below)
+        if put_walls_below:
+            put_walls_below.sort(
+                key=lambda w: (underlying_price - w["strike"]) / underlying_price
+            )
+            sig = self._evaluate_squeeze(
+                put_walls_below[0], underlying_price, gex_calc,
+                rolling_data, net_gamma, regime, "SHORT",
+            )
+            if sig:
+                signals.append(sig)
 
-        nearest_wall = call_walls_above[0]
-        return self._evaluate_squeeze(
-            nearest_wall, underlying_price, gex_calc,
-            rolling_data, net_gamma, regime,
-        )
+        return signals
 
     def _evaluate_squeeze(
         self,
@@ -118,67 +148,84 @@ class DeltaGammaSqueeze(BaseStrategy):
         rolling_data: Dict[str, Any],
         net_gamma: float,
         regime: str,
-    ) -> List[Signal]:
-        """Evaluate a specific call wall for squeeze setup."""
+        direction: str,  # "LONG" or "SHORT"
+    ) -> Optional[Signal]:
+        """Evaluate a specific wall for squeeze setup."""
         wall_strike = wall["strike"]
         wall_gex = wall["gex"]
 
-        # Check proximity to wall
-        distance_pct = (wall_strike - price) / price
-        if distance_pct > CALL_WALL_PROXIMITY_PCT:
-            logger.debug(
-                "Squeeze: price %.2f too far from wall %.2f (dist=%.2f%%)",
-                price, wall_strike, distance_pct * 100,
-            )
-            return []
-        if distance_pct < 0:
-            # Price already above wall — squeeze may have already fired
-            return []
+        # Direction-specific proximity check
+        if direction == "LONG":
+            distance_pct = (wall_strike - price) / price
+            if distance_pct > CALL_WALL_PROXIMITY_PCT:
+                logger.debug(
+                    "Squeeze: price %.2f too far from wall %.2f (dist=%.2f%%)",
+                    price, wall_strike, distance_pct * 100,
+                )
+                return None
+            if distance_pct < 0:
+                # Price already above wall — squeeze may have already fired
+                return None
+        else:  # SHORT
+            distance_pct = (price - wall_strike) / price
+            if distance_pct > CALL_WALL_PROXIMITY_PCT:
+                logger.debug(
+                    "Squeeze: price %.2f too far from wall %.2f (dist=%.2f%%)",
+                    price, wall_strike, distance_pct * 100,
+                )
+                return None
+            if distance_pct < 0:
+                # Price already below wall — squeeze may have already fired
+                return None
 
-        # Check delta acceleration at wall strike
+        # Delta acceleration — use call_delta for LONG, put_delta for SHORT
         delta_data = gex_calc.get_delta_by_strike(wall_strike)
-        call_delta = delta_data.get("call_delta", 0)
+        if direction == "LONG":
+            accel_delta = delta_data.get("call_delta", 0)
+            accel_side = "calls"
+        else:
+            accel_delta = delta_data.get("put_delta", 0)
+            accel_side = "puts"
 
         accel_ratio = self._check_delta_acceleration(
-            call_delta, rolling_data, wall_strike, "calls",
+            accel_delta, rolling_data, wall_strike, accel_side,
         )
         if accel_ratio is None or accel_ratio < DELTA_ACCEL_RATIO:
             logger.debug(
                 "Squeeze: no delta acceleration at %.2f (ratio=%.2f)",
                 wall_strike, accel_ratio or 0,
             )
-            return []
+            return None
 
-        # Check volume spike
+        # Volume spike and price momentum checks are direction-agnostic
         vol_spike = self._check_volume_spike(rolling_data)
-
-        # Check price momentum — price should be rising
         price_trend = self._check_price_momentum(rolling_data)
 
-        # Combine confidence factors
+        # Compute confidence
         confidence = self._compute_confidence(
             distance_pct, accel_ratio, vol_spike, price_trend,
-            wall_gex, regime, net_gamma,
+            wall_gex, regime, net_gamma, direction,
         )
         if confidence < 0.35:
-            return []
+            return None
 
-        # Build signal
+        # Build signal with direction-specific entry/stop/target
         entry = price
-        stop = entry * (1 - STOP_BELOW_WALL_PCT)
-        risk = entry - stop
-        target = entry + (risk * TARGET_RISK_MULT)
+        stop = entry * (1 - STOP_BELOW_WALL_PCT) if direction == "LONG" else entry * (1 + STOP_BELOW_WALL_PCT)
+        risk = abs(entry - stop)
+        target = entry + (risk * TARGET_RISK_MULT) if direction == "LONG" else entry - (risk * TARGET_RISK_MULT)
+        direction_enum = Direction.LONG if direction == "LONG" else Direction.SHORT
 
-        return [Signal(
-            direction=Direction.LONG,
+        return Signal(
+            direction=direction_enum,
             confidence=round(confidence, 3),
             entry=round(entry, 2),
             stop=round(stop, 2),
             target=round(target, 2),
             strategy_id=self.strategy_id,
             reason=(
-                f"Gamma squeeze: price approaching call wall at {wall_strike} "
-                f"with accelerating delta (x{accel_ratio:.1f}) and "
+                f"Gamma squeeze: price approaching {'call' if direction == 'LONG' else 'put'} "
+                f"wall at {wall_strike} with accelerating delta (x{accel_ratio:.1f}) and "
                 f"{'volume spike' if vol_spike else 'strong momentum'}"
             ),
             metadata={
@@ -186,15 +233,16 @@ class DeltaGammaSqueeze(BaseStrategy):
                 "wall_gex": wall_gex,
                 "distance_to_wall_pct": round(distance_pct, 4),
                 "delta_acceleration_ratio": round(accel_ratio, 3),
-                "current_call_delta": round(call_delta, 2),
+                "direction": direction,
+                "current_delta": round(accel_delta, 2),
                 "volume_spike": vol_spike,
                 "price_momentum": price_trend,
                 "regime": regime,
                 "net_gamma": round(net_gamma, 2),
                 "risk": round(risk, 2),
-                "risk_reward_ratio": round((target - entry) / risk, 2) if risk > 0 else 0,
+                "risk_reward_ratio": round(abs(target - entry) / risk, 2) if risk > 0 else 0,
             },
-        )]
+        )
 
     def _check_delta_acceleration(
         self,
@@ -252,6 +300,7 @@ class DeltaGammaSqueeze(BaseStrategy):
         wall_gex: float,
         regime: str,
         net_gamma: float,
+        direction: str,  # "LONG" or "SHORT"
     ) -> float:
         """
         Combine all factors into a single confidence score.
@@ -270,10 +319,18 @@ class DeltaGammaSqueeze(BaseStrategy):
         vol_conf = 0.10 if vol_spike else 0.05
 
         # 4. Price momentum (0.05–0.10)
-        momentum_conf = 0.10 if price_trend == "UP" else 0.05
+        # LONG needs UP, SHORT needs DOWN
+        if direction == "LONG":
+            momentum_conf = 0.10 if price_trend == "UP" else 0.05
+        else:
+            momentum_conf = 0.10 if price_trend == "DOWN" else 0.05
 
         # 5. Regime alignment (0.0–0.10)
-        regime_conf = 0.10 if regime == "POSITIVE" else 0.0
+        # LONG prefers POSITIVE, SHORT prefers NEGATIVE
+        if direction == "LONG":
+            regime_conf = 0.10 if regime == "POSITIVE" else 0.0
+        else:
+            regime_conf = 0.10 if regime == "NEGATIVE" else 0.0
 
         # 6. Wall strength (0.0–0.05)
         wall_conf = 0.05 * min(1.0, abs(wall_gex) / 5_000_000)

@@ -195,11 +195,39 @@ class GEXCalculator:
         self._update_underlying_price(price)
 
     def get_net_gamma(self) -> float:
-        """Return the total Net Gamma across all strikes."""
+        """Return the total Net Gamma across all strikes (cumulative).
+
+        This returns cumulative values that grow with message count.
+        Use for sign detection (regime filtering). For magnitude
+        comparisons, use get_normalized_net_gamma() instead.
+        """
         if self._net_gamma_dirty:
             self._net_gamma = sum(b.net_gamma for b in self._ladder.values())
             self._net_gamma_dirty = False
         return self._net_gamma
+
+    def get_normalized_net_gamma(self) -> float:
+        """Return the total normalized (per-message average) net gamma across all strikes.
+
+        Unlike get_net_gamma() which returns cumulative values that grow with
+        message count, this returns bounded per-message averages — the canonical
+        scale for GEX comparisons (walls, magnets, etc.).
+
+        Computed as: sum over all strikes of (net_gamma / total_messages_at_strike)
+        """
+        total = 0.0
+        for bucket in self._ladder.values():
+            total_count = bucket.call_count + bucket.put_count
+            if total_count > 0:
+                total += bucket.net_gamma / total_count
+        return total
+
+    def get_normalized_strike_net_gamma(self, strike: float) -> float:
+        """Return normalized (per-message average) net gamma for a specific strike."""
+        bucket = self._ladder.get(strike)
+        if bucket is None:
+            return 0.0
+        return bucket.normalized_gamma()
 
     def get_strike_net_gamma(self, strike: float) -> float:
         """Return the Net Gamma for a specific strike."""
@@ -232,9 +260,12 @@ class GEXCalculator:
         """
         Identify Gamma Walls — strikes with massive GEX.
 
-        A Gamma Wall is a strike where the Net GEX (in dollar terms)
-        exceeds the given threshold. Uses normalized (per-message average)
-        gamma values to keep GEX in realistic ranges.
+        A Gamma Wall is a strike where the normalized Net GEX (in dollar terms)
+        exceeds the given threshold. Uses normalized (per-message average) gamma
+        values so GEX stays bounded regardless of message count.
+
+        The threshold is on the normalized GEX scale (e.g. 1e6).
+        For total GEX magnitude across all strikes, use get_normalized_net_gamma().
 
         Returns sorted list of wall dicts sorted by absolute GEX.
         """
