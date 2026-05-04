@@ -25,6 +25,7 @@ Confidence factors:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
@@ -37,7 +38,7 @@ logger = logging.getLogger("Syngex.Strategies.GammaFlipBreakout")
 # Constants
 # ---------------------------------------------------------------------------
 
-FLIP_PROXIMITY_PCT = 0.05       # 5% — price must be within this of flip (was 2.5%, too tight)
+FLIP_PROXIMITY_PCT = 0.025      # 2.5% — price must be within this of flip
 STOP_OTHER_SIDE_PCT = 0.01      # 1% — stop on other side of flip
 ATR_MULT = 1.5                   # 1.5× rolling range as ATR proxy
 TARGET_RR = 2.5                  # 1:2.5 risk-reward minimum
@@ -55,6 +56,7 @@ class GammaFlipBreakout(BaseStrategy):
 
     strategy_id = "gamma_flip_breakout"
     layer = "layer1"
+    _last_signal_time: Dict[str, float] = {}
 
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """
@@ -75,10 +77,21 @@ class GammaFlipBreakout(BaseStrategy):
         net_gamma = data.get("net_gamma", 0)
         regime = data.get("regime", "")
 
+        # Require sufficient gamma strength for meaningful regime
+        if abs(net_gamma) < 200000:
+            return []
+
         # Get the gamma flip point
         flip_strike = gex_calc.get_gamma_flip()
         if flip_strike is None:
             return []
+
+        # Per-symbol cooldown (10 minutes)
+        ts = data.get("timestamp", time.time())
+        symbol = data.get("symbol", "")
+        if symbol and symbol in self._last_signal_time:
+            if ts - self._last_signal_time[symbol] < 600:
+                return []
 
         signals: List[Signal] = []
 
@@ -96,6 +109,9 @@ class GammaFlipBreakout(BaseStrategy):
             )
             if sig:
                 signals.append(sig)
+
+        if symbol:
+            self._last_signal_time[symbol] = ts
 
         return signals
 
