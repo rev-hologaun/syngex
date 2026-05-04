@@ -1073,10 +1073,10 @@
             const gexClass = dominant.net_gamma >= 0 ? 'positive' : 'negative';
             document.getElementById('wall-dominant-meta').innerHTML = `<span class="gex-val ${gexClass}">GEX: ${gexVal}</span>  ·  ${distStr}`;
 
-            // Walls table — top 5
+            // Walls table — top 10
             const tbody = document.getElementById('wall-table-body');
             tbody.innerHTML = '';
-            walls.slice(0, 5).forEach(wall => {
+            walls.slice(0, 10).forEach(wall => {
                 const wIsCall = wall.net_gamma >= 0;
                 const contracts = Math.abs(wall.net_gamma) / 100; // rough estimate
                 const tr = document.createElement('tr');
