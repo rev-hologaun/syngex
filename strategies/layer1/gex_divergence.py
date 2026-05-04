@@ -37,6 +37,7 @@ Confidence factors:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
@@ -49,13 +50,15 @@ logger = logging.getLogger("Syngex.Strategies.GEXDivergence")
 # Constants
 # ---------------------------------------------------------------------------
 
-DIVERGENCE_MIN_SLOPE = 0.0001   # Minimum slope magnitude to consider
+DIVERGENCE_MIN_SLOPE = 0.001     # Minimum slope magnitude (0.1% — filters noise)
 DIVERGENCE_WINDOW = 30           # Number of points for slope calculation
 CONFIRMATION_CANDLE_PCT = 0.002  # 0.2% candle for confirmation
 MIN_CONFIDENCE = 0.45            # Minimum confidence to emit signal
 STOP_PCT = 0.005                 # 0.5% stop
 TARGET_RISK_MULT = 1.5           # 1.5× risk for target
 MIN_DATA_POINTS = 15             # Minimum data points for slope calculation
+MIN_TOTAL_GEX = 1000000.0        # 1M — minimum GEX wall strength
+SIGNAL_COOLDOWN = 300            # 5-minute per-symbol cooldown
 
 
 class GEXDivergence(BaseStrategy):
@@ -70,6 +73,7 @@ class GEXDivergence(BaseStrategy):
 
     strategy_id = "gex_divergence"
     layer = "layer1"
+    _last_signal_time: Dict[str, float] = {}
 
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """
@@ -125,6 +129,12 @@ class GEXDivergence(BaseStrategy):
             # Bullish divergence: price down, GEX up → LONG
             divergence_type = "bullish"
 
+        # Regime alignment: only fire in matching regime
+        if divergence_type == "bullish" and regime != "POSITIVE":
+            return []  # Bullish divergence outside positive regime = weak signal
+        if divergence_type == "bearish" and regime != "NEGATIVE":
+            return []  # Bearish divergence outside negative regime = weak signal
+
         # Get confirmation from last price movement
         price_change = self._get_price_change(price_window)
         confirmed = self._check_confirmation(price_change, divergence_type)
@@ -138,6 +148,24 @@ class GEXDivergence(BaseStrategy):
         )
         if confidence < MIN_CONFIDENCE:
             return []
+
+        # GEX wall strength gate: divergence on thin walls is worthless
+        try:
+            summary = gex_calc.get_summary()
+            net_gex = summary.get("net_gex", 0.0)
+            total_gex = summary.get("total_gex", 0.0)
+            if abs(net_gex) < MIN_TOTAL_GEX and abs(total_gex) < MIN_TOTAL_GEX:
+                return []  # GEX walls too weak for a reliable signal
+        except Exception:
+            return []  # Can't assess GEX strength — skip
+
+        # Per-symbol frequency cap (cooldown)
+        symbol = data.get("symbol", "UNKNOWN")
+        ts = data.get("timestamp", time.time())
+        last = self._last_signal_time.get(symbol, 0)
+        if ts - last < SIGNAL_COOLDOWN:
+            return []  # Signal for this symbol too recent
+        self._last_signal_time[symbol] = ts
 
         # Build signal
         if divergence_type == "bearish":
