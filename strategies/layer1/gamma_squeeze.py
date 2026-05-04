@@ -33,7 +33,11 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
-from strategies.rolling_keys import KEY_PRICE_5M
+from strategies.rolling_keys import (
+    KEY_PRICE_5M,
+    KEY_VOLUME_DOWN_5M,
+    KEY_VOLUME_UP_5M,
+)
 
 logger = logging.getLogger("Syngex.Strategies.GammaSqueeze")
 
@@ -176,6 +180,14 @@ class GammaSqueeze(BaseStrategy):
             # Determine breakout direction
             if wall_side == "call" and price >= wall_strike:
                 # Breaking above call wall → LONG squeeze
+                # Volume surge confirmation for LONG
+                vol_window = rolling_data.get(KEY_VOLUME_UP_5M)
+                if vol_window is not None:
+                    current_vol = vol_window.latest
+                    rolling_avg = vol_window.mean
+                    if current_vol is not None and rolling_avg is not None and rolling_avg > 0:
+                        if current_vol / rolling_avg < VOLUME_SURGE_MULT:
+                            continue  # insufficient volume surge
                 return {
                     "direction": Direction.LONG,
                     "wall_strike": wall_strike,
@@ -185,6 +197,14 @@ class GammaSqueeze(BaseStrategy):
                 }
             elif wall_side == "put" and price <= wall_strike:
                 # Breaking below put wall → SHORT squeeze
+                # Volume surge confirmation for SHORT
+                vol_window = rolling_data.get(KEY_VOLUME_DOWN_5M)
+                if vol_window is not None:
+                    current_vol = vol_window.latest
+                    rolling_avg = vol_window.mean
+                    if current_vol is not None and rolling_avg is not None and rolling_avg > 0:
+                        if current_vol / rolling_avg < VOLUME_SURGE_MULT:
+                            continue  # insufficient volume surge
                 return {
                     "direction": Direction.SHORT,
                     "wall_strike": wall_strike,
@@ -217,13 +237,19 @@ class GammaSqueeze(BaseStrategy):
         wall_gex = breakout["wall_gex"]
         wall_side = breakout["wall_side"]
 
+        # Net gamma direction alignment
+        if direction == Direction.LONG and net_gamma <= 0:
+            return None  # Long signal but dealers not buying
+        if direction == Direction.SHORT and net_gamma >= 0:
+            return None  # Short signal but dealers not selling
+
         if direction == Direction.LONG:
-            stop = wall_strike * 0.995  # Just below the wall
-            risk = price - stop
+            stop = price * 0.99  # 1% below entry
+            risk = abs(price - stop)
             target = price + (risk * TARGET_RISK_MULT)
         else:
-            stop = wall_strike * 1.005  # Just above the wall
-            risk = stop - price
+            stop = price * 1.01  # 1% above entry
+            risk = abs(price - stop)
             target = price - (risk * TARGET_RISK_MULT)
 
         if risk <= 0:
