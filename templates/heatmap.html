@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Syngex Heatmap Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.4/dist/socket.io.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-main: #f8fafc;
+            --text-dim: #94a3b8;
+            --accent: #38bdf8;
+            --gap: 0.75rem;
+            --border: #334155;
+
+            /* Health colors */
+            --color-profitable: #065f46;
+            --color-amber: #92400e;
+            --color-idle: #1f2937;
+            --color-bleeding: #7f1d1d;
+            --color-void: #111827;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            padding: 16px;
+            min-height: 100vh;
+        }
+
+        /* ── Header ─────────────────────────────────────────── */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: var(--gap);
+            padding: 0 4px;
+        }
+        .header h1 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+        .header h1 span { color: var(--accent); }
+        .header-meta {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            font-size: 0.8rem;
+            color: var(--text-dim);
+        }
+        .regime-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.25rem 0.75rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .regime-pos-gamma { background: #065f46; color: #a7f3d0; }
+        .regime-neg-gamma { background: #7f1d1d; color: #fca5a5; }
+        .regime-neutral { background: #374151; color: #d1d5db; }
+        .regime-unknown { background: #1e293b; color: #94a3b8; }
+
+        .price-display {
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+        .price-display .net-gamma {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            margin-left: 0.5rem;
+        }
+
+        /* ── Grid ───────────────────────────────────────────── */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            grid-auto-rows: minmax(120px, auto);
+            gap: var(--gap);
+        }
+
+        /* ── Card ────────────────────────────────────────────── */
+        .card {
+            background: var(--card-bg);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+            transition: border-color 0.3s ease;
+            min-height: 140px;
+        }
+        .card:hover {
+            border-color: var(--accent);
+        }
+
+        /* Health pulse overlay */
+        .card::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 8px;
+            opacity: 0.15;
+            z-index: 0;
+            transition: background 0.5s ease;
+        }
+        .card.health-profitable::before { background: var(--color-profitable); }
+        .card.health-amber::before { background: var(--color-amber); }
+        .card.health-bleeding::before { background: var(--color-bleeding); }
+        .card.health-idle::before { background: var(--color-idle); }
+        .card.health-void::before { background: var(--color-void); }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.5rem 0.65rem 0.3rem;
+            position: relative;
+            z-index: 1;
+        }
+        .card-name {
+            font-size: 0.65rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-dim);
+            line-height: 1.2;
+        }
+        .card-layer {
+            font-size: 0.55rem;
+            color: #475569;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-right: 0.4rem;
+        }
+
+        /* Status LED */
+        .led {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .led-active {
+            background: #10b981;
+            animation: pulse-green 2s ease-in-out infinite;
+        }
+        .led-idle {
+            background: #64748b;
+        }
+        .led-void {
+            background: #374151;
+        }
+        .led-error {
+            background: #ef4444;
+            animation: pulse-red 1s ease-in-out infinite;
+        }
+
+        @keyframes pulse-green {
+            0%, 100% { opacity: 1; box-shadow: 0 0 4px #10b981; }
+            50% { opacity: 0.5; box-shadow: 0 0 8px #10b981; }
+        }
+        @keyframes pulse-red {
+            0%, 100% { opacity: 1; box-shadow: 0 0 4px #ef4444; }
+            50% { opacity: 0.4; box-shadow: 0 0 10px #ef4444; }
+        }
+
+        /* Sparkline area */
+        .card-sparkline {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.25rem;
+            position: relative;
+            z-index: 1;
+        }
+        .card-sparkline canvas {
+            width: 100%;
+            height: 40px;
+        }
+
+        /* Card footer */
+        .card-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.3rem 0.65rem;
+            font-size: 0.6rem;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            position: relative;
+            z-index: 1;
+        }
+        .card-last {
+            color: var(--text-dim);
+        }
+        .card-pnl {
+            font-weight: 600;
+        }
+        .card-pnl.positive { color: #10b981; }
+        .card-pnl.negative { color: #ef4444; }
+        .card-pnl.neutral { color: var(--text-dim); }
+
+        /* Confidence bar */
+        .confidence-bar {
+            height: 2px;
+            width: 100%;
+            background: #334155;
+            position: relative;
+            z-index: 1;
+        }
+        .confidence-bar-fill {
+            height: 100%;
+            transition: width 0.5s ease, background 0.5s ease;
+        }
+
+        /* ── Layer 2 Overview Card ──────────────────────────── */
+        .card-l2-overview {
+            grid-column: span 2;
+        }
+        .l2-overview-content {
+            display: flex;
+            gap: 1rem;
+            padding: 0.5rem 0.75rem;
+            position: relative;
+            z-index: 1;
+            align-items: center;
+        }
+        .l2-metric {
+            text-align: center;
+            flex: 1;
+        }
+        .l2-metric-label {
+            font-size: 0.55rem;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+        .l2-metric-value {
+            font-size: 1rem;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            margin-top: 0.15rem;
+        }
+
+        /* ── System Log ─────────────────────────────────────── */
+        .card-log {
+            grid-column: 1 / -1;
+            min-height: 100px;
+        }
+        .log-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0.4rem 0.65rem;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 0.65rem;
+            line-height: 1.6;
+            position: relative;
+            z-index: 1;
+            scrollbar-width: thin;
+            scrollbar-color: #334155 transparent;
+        }
+        .log-container::-webkit-scrollbar { width: 4px; }
+        .log-container::-webkit-scrollbar-track { background: transparent; }
+        .log-container::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+        .log-entry { white-space: nowrap; }
+        .log-entry .ts { color: #475569; }
+        .log-entry.signal { color: #38bdf8; }
+        .log-entry.resolved { color: #10b981; }
+        .log-entry.error { color: #ef4444; }
+        .log-entry.info { color: #94a3b8; }
+
+        /* ── Extra Cell ─────────────────────────────────────── */
+        .card-extra {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 0.4rem;
+        }
+        .extra-label {
+            font-size: 0.6rem;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+        .extra-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+        }
+
+        /* ── Responsive ─────────────────────────────────────── */
+        @media (max-width: 1200px) {
+            .dashboard-grid { grid-template-columns: repeat(4, 1fr); }
+        }
+        @media (max-width: 900px) {
+            .dashboard-grid { grid-template-columns: repeat(2, 1fr); }
+            .card-l2-overview { grid-column: span 2; }
+        }
+        @media (max-width: 600px) {
+            .dashboard-grid { grid-template-columns: 1fr; }
+            .card-l2-overview { grid-column: span 1; }
+        }
+
+        /* ── Connection status ──────────────────────────────── */
+        .conn-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            font-size: 0.65rem;
+            color: var(--text-dim);
+        }
+        .conn-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+        }
+        .conn-dot.connected { background: #10b981; }
+        .conn-dot.disconnected { background: #ef4444; }
+
+        /* ── Sparkline color themes ─────────────────────────── */
+        .sparkline-profitable .sparkline-line { stroke: #10b981; }
+        .sparkline-amber .sparkline-line { stroke: #f59e0b; }
+        .sparkline-bleeding .sparkline-line { stroke: #ef4444; }
+        .sparkline-idle .sparkline-line { stroke: #475569; }
+        .sparkline-void .sparkline-line { stroke: #1f2937; }
+    </style>
+</head>
+<body>
+
+    <!-- Header -->
+    <div class="header">
+        <h1>🕸️ <span>Syngex</span> Heatmap</h1>
+        <div class="header-meta">
+            <span id="symbolDisplay" class="price-display">
+                <span id="symbolText">—</span>
+                <span class="net-gamma" id="netGammaDisplay"></span>
+            </span>
+            <span id="regimeBadge" class="regime-badge regime-unknown">—</span>
+            <span class="conn-status">
+                <span class="conn-dot disconnected" id="connDot"></span>
+                <span id="connText">disconnected</span>
+            </span>
+        </div>
+    </div>
+
+    <!-- Strategy Grid -->
+    <div class="dashboard-grid" id="grid"></div>
+
+    <script>
+    // ── Strategy card definitions ──────────────────────────────────
+    const STRATEGIES = [
+        // Row 1: Layer 1
+        { id: 'gamma_wall_bounce',     label: 'GEX_WALL_BOUNCE',   layer: 'L1', row: 1, col: 1 },
+        { id: 'magnet_accelerate',     label: 'MAGNET_ACCEL',      layer: 'L1', row: 1, col: 2 },
+        { id: 'gamma_flip_breakout',   label: 'FLIP_BREAKOUT',     layer: 'L1', row: 1, col: 3 },
+        { id: 'gamma_squeeze',         label: 'GAMMA_SQUEEZE',     layer: 'L1', row: 1, col: 4 },
+        { id: 'gex_imbalance',         label: 'GEX_IMBALANCE',     layer: 'L1', row: 1, col: 5 },
+        { id: 'confluence_reversal',   label: 'CONFLUENCE',        layer: 'L1', row: 1, col: 6 },
+        // Row 2: Layer 1 + Layer 2
+        { id: 'vol_compression_range', label: 'VOL_COMPRESSION',   layer: 'L1', row: 2, col: 1 },
+        { id: 'gex_divergence',        label: 'GEX_DIVERGENCE',    layer: 'L1', row: 2, col: 2 },
+        { id: 'delta_gamma_squeeze',   label: 'DELTA_GAMMA',       layer: 'L2', row: 2, col: 5 },
+        { id: 'delta_volume_exhaustion', label: 'DELTA_VOLUME',     layer: 'L2', row: 2, col: 6 },
+        // Row 3: Layer 2 + Layer 3
+        { id: 'call_put_flow_asymmetry', label: 'CALL_PUT_FLOW',   layer: 'L2', row: 3, col: 1 },
+        { id: 'iv_gex_divergence',     label: 'IV_GEX_DIV',        layer: 'L2', row: 3, col: 2 },
+        { id: 'gamma_volume_convergence', label: 'GAMMA_VOL_CONV', layer: 'L3', row: 3, col: 3 },
+        { id: 'iv_band_breakout',      label: 'IV_BAND_BREAK',     layer: 'L3', row: 3, col: 4 },
+        { id: 'strike_concentration',  label: 'STRIKE_CONC',       layer: 'L3', row: 3, col: 5 },
+        { id: 'theta_burn',            label: 'THETA_BURN',        layer: 'L3', row: 3, col: 6 },
+        // Row 4: Full Data
+        { id: 'iv_skew_squeeze',       label: 'IV_SKEW',           layer: 'FULL', row: 4, col: 1 },
+        { id: 'prob_weighted_magnet',  label: 'PROB_MAGNET',       layer: 'FULL', row: 4, col: 2 },
+        { id: 'prob_distribution_shift', label: 'PROB_DIST',       layer: 'FULL', row: 4, col: 3 },
+        { id: 'extrinsic_intrinsic_flow', label: 'EXTRINSIC',      layer: 'FULL', row: 4, col: 4 },
+    ];
+
+    // ── Health classification ──────────────────────────────────────
+    function classifyHealth(strat, dataValid) {
+        if (!dataValid) return 'void';
+        const { status, win_rate, pnl } = strat;
+        if (status === 'error') return 'bleeding';
+        if (status === 'idle') return 'idle';
+        if (win_rate < 0.35 || pnl < -100) return 'bleeding';
+        if (win_rate >= 0.60 && pnl > 0) return 'profitable';
+        return 'amber';
+    }
+
+    // ── Sparkline rendering ────────────────────────────────────────
+    function drawSparkline(canvas, data, colorClass) {
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width = canvas.offsetWidth * 2;
+        const h = canvas.height = canvas.offsetHeight * 2;
+        ctx.clearRect(0, 0, w, h);
+
+        // Void state: draw a faint flat line to indicate missing data
+        if (colorClass === 'sparkline-void') {
+            ctx.beginPath();
+            ctx.moveTo(0, h / 2);
+            ctx.lineTo(w, h / 2);
+            ctx.strokeStyle = '#1f2937';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            return;
+        }
+
+        if (!data || data.length < 2) {
+            // Draw flat line
+            ctx.beginPath();
+            ctx.moveTo(0, h / 2);
+            ctx.lineTo(w, h / 2);
+            ctx.strokeStyle = '#475569';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            return;
+        }
+
+        const min = Math.min(...data);
+        const max = Math.max(...data);
+        const range = max - min || 1;
+        const step = w / (data.length - 1);
+
+        // Gradient fill
+        const gradient = ctx.createLinearGradient(0, 0, 0, h);
+        const isPositive = data[data.length - 1] >= data[0];
+        if (colorClass === 'sparkline-profitable') {
+            gradient.addColorStop(0, 'rgba(16, 185, 129, 0.15)');
+            gradient.addColorStop(1, 'rgba(16, 185, 129, 0)');
+        } else if (colorClass === 'sparkline-bleeding') {
+            gradient.addColorStop(0, 'rgba(239, 68, 68, 0.15)');
+            gradient.addColorStop(1, 'rgba(239, 68, 68, 0)');
+        } else {
+            gradient.addColorStop(0, 'rgba(148, 163, 184, 0.1)');
+            gradient.addColorStop(1, 'rgba(148, 163, 184, 0)');
+        }
+
+        ctx.beginPath();
+        ctx.moveTo(0, h - ((data[0] - min) / range) * (h - 4) - 2);
+        for (let i = 1; i < data.length; i++) {
+            const x = i * step;
+            const y = h - ((data[i] - min) / range) * (h - 4) - 2;
+            ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = isPositive ? '#10b981' : (colorClass === 'sparkline-bleeding' ? '#ef4444' : '#64748b');
+        ctx.lineWidth = 2;
+        ctx.lineJoin = 'round';
+        ctx.stroke();
+
+        // Fill area
+        ctx.lineTo(w, h);
+        ctx.lineTo(0, h);
+        ctx.closePath();
+        ctx.fillStyle = gradient;
+        ctx.fill();
+    }
+
+    // ── Format helpers ─────────────────────────────────────────────
+    function formatPnL(pnl) {
+        const sign = pnl >= 0 ? '+' : '';
+        return `${sign}$${Math.round(pnl).toLocaleString()}`;
+    }
+
+    function formatTime(ts) {
+        if (!ts || ts === 0) return '--:--';
+        const d = new Date(ts * 1000);
+        return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+    }
+
+    // ── Build the grid ─────────────────────────────────────────────
+    const grid = document.getElementById('grid');
+    const cardElements = {}; // id -> { card, canvas, sparklineDiv }
+
+    // Create strategy cards
+    STRATEGIES.forEach(s => {
+        const card = document.createElement('div');
+        card.className = 'card health-idle';
+        card.id = `card-${s.id}`;
+
+        card.innerHTML = `
+            <div class="card-header">
+                <div class="card-name">
+                    <span class="card-layer">${s.layer}</span>${s.label}
+                </div>
+                <div class="led led-idle" id="led-${s.id}"></div>
+            </div>
+            <div class="card-sparkline">
+                <canvas id="spark-${s.id}"></canvas>
+            </div>
+            <div class="card-footer">
+                <span class="card-last" id="last-${s.id}">Last: --:--</span>
+                <span class="card-pnl neutral" id="pnl-${s.id}">$0</span>
+            </div>
+            <div class="confidence-bar">
+                <div class="confidence-bar-fill" id="conf-${s.id}" style="width:0%;background:#475569;"></div>
+            </div>
+        `;
+        grid.appendChild(card);
+        cardElements[s.id] = { card, canvas: document.getElementById(`spark-${s.id}`) };
+    });
+
+    // Create Layer 2 Overview card (span 2 cols)
+    const l2Card = document.createElement('div');
+    l2Card.className = 'card card-l2-overview health-idle';
+    l2Card.id = 'card-l2-overview';
+    l2Card.innerHTML = `
+        <div class="card-header">
+            <div class="card-name">
+                <span class="card-layer">L2</span>LAYER 2 OVERVIEW
+            </div>
+            <div class="led led-idle"></div>
+        </div>
+        <div class="l2-overview-content" id="l2-content">
+            <div class="l2-metric">
+                <div class="l2-metric-label">Signals</div>
+                <div class="l2-metric-value" id="l2-signals">0</div>
+            </div>
+            <div class="l2-metric">
+                <div class="l2-metric-label">Avg Confidence</div>
+                <div class="l2-metric-value" id="l2-confidence">—</div>
+            </div>
+            <div class="l2-metric">
+                <div class="l2-metric-label">Active</div>
+                <div class="l2-metric-value" id="l2-active">0</div>
+            </div>
+        </div>
+        <div class="confidence-bar">
+            <div class="confidence-bar-fill" style="width:0%;background:#475569;"></div>
+        </div>
+    `;
+    grid.appendChild(l2Card);
+
+    // Create System Log card (full width)
+    const logCard = document.createElement('div');
+    logCard.className = 'card card-log health-idle';
+    logCard.innerHTML = `
+        <div class="card-header">
+            <div class="card-name">📋 SYSTEM LOG STREAM</div>
+        </div>
+        <div class="log-container" id="log-container"></div>
+    `;
+    grid.appendChild(logCard);
+
+    // Create extra cell (Regime status / stats)
+    const extraCard = document.createElement('div');
+    extraCard.className = 'card card-extra health-idle';
+    extraCard.innerHTML = `
+        <div class="extra-label">Total Signals</div>
+        <div class="extra-value" id="extra-signals">0</div>
+        <div class="extra-label">Last Update</div>
+        <div class="extra-value" id="extra-time" style="font-size:0.9rem;color:#94a3b8;">—</div>
+    `;
+    grid.appendChild(extraCard);
+
+    // ── Socket.IO connection ───────────────────────────────────────
+    const socket = io({ transports: ['websocket', 'polling'] });
+
+    // Set connected state immediately — socket may connect before event listeners attach
+    document.getElementById('connDot').className = 'conn-dot connected';
+    document.getElementById('connText').textContent = 'connected';
+
+    socket.on('connect', () => {
+        document.getElementById('connDot').className = 'conn-dot connected';
+        document.getElementById('connText').textContent = 'connected';
+    });
+
+    socket.on('disconnect', () => {
+        document.getElementById('connDot').className = 'conn-dot disconnected';
+        document.getElementById('connText').textContent = 'disconnected';
+    });
+
+    socket.on('strategy_update', (data) => {
+        updateDashboard(data);
+    });
+
+    // ── Dashboard update ───────────────────────────────────────────
+    let logEntries = [];
+    let logSeen = new Set();          // dedup: signal signature → true
+    let prevMicroSignals = null;      // throttle: skip if unchanged
+    const LOG_MAX = 10;               // keep only last 10 log lines
+
+    function updateDashboard(data) {
+        const dataValid = data.data_valid !== false;
+
+        // Header
+        document.getElementById('symbolText').textContent = data.symbol || '—';
+        const ng = data.net_gamma;
+        document.getElementById('netGammaDisplay').textContent = ng ? `| γ: ${ng >= 0 ? '+' : ''}${ng.toLocaleString(undefined, {maximumFractionDigits: 0})}` : '';
+
+        // Regime badge
+        const regime = (data.regime || 'UNKNOWN').toUpperCase();
+        const badge = document.getElementById('regimeBadge');
+        badge.className = 'regime-badge';
+        if (regime === 'POS_GAMMA' || regime === 'POSITIVE') {
+            badge.classList.add('regime-pos-gamma');
+            badge.textContent = '📈 POS_GAMMA';
+        } else if (regime === 'NEG_GAMMA' || regime === 'NEGATIVE') {
+            badge.classList.add('regime-neg-gamma');
+            badge.textContent = '📉 NEG_GAMMA';
+        } else if (regime === 'NEUTRAL') {
+            badge.classList.add('regime-neutral');
+            badge.textContent = '⚖️ NEUTRAL';
+        } else {
+            badge.classList.add('regime-unknown');
+            badge.textContent = `🔮 ${regime}`;
+        }
+
+        // Extra cell
+        document.getElementById('extra-signals').textContent = data.strategies ? Object.keys(data.strategies).length : 0;
+        document.getElementById('extra-time').textContent = data.last_updated || new Date().toLocaleTimeString();
+
+        // Strategy cards
+        const strategies = data.strategies || {};
+        let l2Active = 0;
+        let l2Confidence = 0;
+        let l2Count = 0;
+
+        Object.entries(strategies).forEach(([id, strat]) => {
+            const el = cardElements[id];
+            if (!el) return;
+
+            const health = classifyHealth(strat, dataValid);
+            const sparkClass = `sparkline-${health}`;
+
+            // Card class
+            el.card.className = `card health-${health}`;
+
+            // LED
+            const led = document.getElementById(`led-${id}`);
+            if (health === 'void') {
+                led.className = 'led led-void';
+            } else {
+                led.className = `led led-${strat.status === 'error' ? 'error' : (strat.status === 'idle' ? 'idle' : 'active')}`;
+            }
+
+            // Sparkline
+            drawSparkline(el.canvas, strat.sparkline, sparkClass);
+
+            // Footer
+            if (health === 'void') {
+                document.getElementById(`last-${id}`).textContent = 'Last: —';
+                const pnlEl = document.getElementById(`pnl-${id}`);
+                pnlEl.textContent = '—';
+                pnlEl.className = 'card-pnl neutral';
+            } else {
+                document.getElementById(`last-${id}`).textContent = `Last: ${formatTime(strat.last_signal_ts)}`;
+                const pnlEl = document.getElementById(`pnl-${id}`);
+                const pnlVal = strat.pnl || 0;
+                pnlEl.textContent = formatPnL(pnlVal);
+                pnlEl.className = `card-pnl ${pnlVal > 0 ? 'positive' : (pnlVal < 0 ? 'negative' : 'neutral')}`;
+            }
+
+            // Confidence bar
+            const conf = strat.win_rate || 0;
+            const confEl = document.getElementById(`conf-${id}`);
+            if (health === 'void') {
+                confEl.style.width = '0%';
+                confEl.style.background = '#1f2937';
+            } else {
+                confEl.style.width = `${conf * 100}%`;
+                confEl.style.background = pnlVal > 0 ? '#10b981' : (pnlVal < 0 ? '#ef4444' : '#475569');
+            }
+
+            // L2 overview aggregation (layer 2 strategies)
+            if (id.startsWith('delta_') || id.startsWith('call_put') || id.startsWith('iv_gex')) {
+                l2Active++;
+                l2Confidence += strat.win_rate || 0;
+                l2Count++;
+            }
+        });
+
+        // L2 overview
+        if (l2Count > 0) {
+            document.getElementById('l2-signals').textContent = l2Count;
+            document.getElementById('l2-confidence').textContent = (l2Confidence / l2Count).toFixed(2);
+            document.getElementById('l2-active').textContent = l2Active;
+        }
+
+        // Log entries from micro_signals (deduped, limited, throttled)
+        const microSignals = data.micro_signals;
+        if (microSignals) {
+            // Throttle: skip entirely if signals haven't changed
+            const sigKey = JSON.stringify(microSignals);
+            if (sigKey === prevMicroSignals) return;
+            prevMicroSignals = sigKey;
+
+            const logContainer = document.getElementById('log-container');
+
+            Object.entries(microSignals).forEach(([strike, sig]) => {
+                // Build a dedup key from the signal content (ignoring timestamp)
+                const sigText = `SIGNAL:${sig.strategy}:${sig.direction}:conf=${sig.confidence.toFixed(2)}:K${strike}`;
+                if (logSeen.has(sigText)) return;       // already logged this signal
+                logSeen.add(sigText);
+
+                const ts = sig.timestamp
+                    ? new Date(sig.timestamp * 1000).toLocaleTimeString('en-US', { hour12: false })
+                    : '';
+                const entry = document.createElement('div');
+                entry.className = 'log-entry signal';
+                entry.innerHTML = `<span class="ts">[${ts}]</span> SIGNAL: ${sig.strategy} ${sig.direction} conf=${sig.confidence.toFixed(2)} K${strike}`;
+                logContainer.appendChild(entry);
+                logEntries.push(entry);
+            });
+
+            // Trim to last LOG_MAX entries
+            while (logEntries.length > LOG_MAX) {
+                logContainer.removeChild(logEntries.shift());
+            }
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+    }
+
+    // ── Initial empty state ────────────────────────────────────────
+    // Cards show idle state until first data arrives
+    </script>
+</body>
+</html>

@@ -255,8 +255,47 @@ syngex/
 | 5 | ✅ | 2026-04-30 | 2026-04-30 | Micro-signal (1Hz) — Gamma-Volume Convergence, IV Band Breakout, Strike Concentration Scalp, Theta-Burn Scalp (all Layer 3) |
 | 6 | ✅ | 2026-04-30 | 2026-04-30 | Full-data (v2) — IV Skew Squeeze, Prob-Weighted Magnet, Prob Distribution Shift, Extrinsic/Intrinsic Flow (all full_data) |
 | 7 | ✅ | 2026-04-30 | 2026-05-01 | 7.1–7.6 complete (overlay, outcome tracking, toggles, hot-reload, docs, per-strategy hold times) |
+| **Phase A** | ✅ | 2026-05-03 | 2026-05-03 | **Heatmap Dashboard** — `app_heatmap.py` (Flask+SocketIO), `heatmap.html` (6-col grid, status LEDs, sparklines), file-based decoupling, SignalTracker stats, health classification, connection status. v1.5. |
 
-**Total: 22/22 strategies complete (100%) | v1.4 tagged and pushed**
+**Total: 22/22 strategies complete (100%) | v1.5 with Heatmap dashboard**
+
+---
+
+### Phase A: Heatmap Dashboard (v1.5) (Estimated: 0.5 days) ✅ DONE
+
+*Real-time WebSocket-powered strategy health grid — a compact, glanceable alternative to the Streamlit dashboard.*
+
+| # | Task | Description | Depends On |
+|---|------|-------------|------------|
+| A.1 | **`app_heatmap.py`** | Standalone Flask + Flask-SocketIO server on configurable port (default 8502). Reads `data/gex_state_{SYMBOL}.json` every 1s, transforms data, emits via WebSocket `strategy_update` event. Background thread handles JSON polling; no blocking the server. | — |
+| A.2 | **`templates/heatmap.html`** | Dark-themed 6-column strategy grid. Each card shows: strategy name, status LED (green=pulse active, gray=idle, red=pulse bleeding, off=void), sparkline chart, last signal time, PnL, confidence bar. Layer 2 overview card aggregates signals/confidence/active count. System log stream at bottom. | A.1 |
+| A.3 | **Data pipeline integration** | `main.py` orchestrator exports `strategy_health` dict per tick into `gex_state_{SYMBOL}.json`. Each strategy health entry: `status`, `signal_count`, `last_signal_ts`, `confidence`, `win_rate`, `pnl`, `sparkline`. Heatmap reads this file independently — zero coupling to the orchestrator. | main.py |
+| A.4 | **Signal outcome stats** | `app_heatmap.py` parses `log/signal_outcomes_{SYMBOL}.jsonl` to compute per-strategy `win_rate` and `pnl`. Merges into strategy health payload for accurate card classification. | signal_tracker |
+| A.5 | **Health classification** | Cards classified as: `profitable` (win_rate ≥ 60% + positive PnL), `amber` (active but mixed), `bleeding` (error or win_rate < 35% / PnL < -$100), `idle` (>5 min since last signal), `void` (no data). Color-coded overlays per state. | A.2 |
+| A.6 | **Connection status** | Socket.IO 4.7.4 client with WebSocket + polling transport fallback. Connection indicator in header (green dot + "connected" / red dot + "disconnected"). | A.2 |
+
+**Deliverable:** A standalone heatmap dashboard that runs independently of the Streamlit dashboard, showing real-time strategy health in a compact grid format. Accessible at `http://{host}:{PORT}/`.
+
+**Usage:**
+```
+SYNGEX_SYMBOL=TSLA python3 app_heatmap.py    # runs on port 8502
+SYNGEX_SYMBOL=TSLA HEATMAP_PORT=8201 python3 app_heatmap.py  # custom port
+```
+
+**Architecture:**
+```
+main.py (orchestrator) → gex_state_{SYMBOL}.json (shared file)
+                                        ↓
+                          app_heatmap.py (Flask + SocketIO)
+                                        ↓
+                          heatmap.html (WebSocket client)
+```
+
+**Key design decisions:**
+- **File-based decoupling:** Heatmap reads JSON file, no direct import of orchestrator modules. Each runs independently.
+- **Background polling:** JSON file read happens in a background thread, 1s interval. Socket.IO emits to all connected clients.
+- **Config-driven port:** `HEATMAP_PORT` env var (default 8502), `SYNGEX_SYMBOL` env var (default "UNKNOWN").
+- **Socket.IO v4.7.4:** Downgraded from v5.1.0 for flask-socketio compatibility. CDN via jsdelivr (reliable) instead of cdn.socket.io (flaky).
 
 ---
 
@@ -294,10 +333,10 @@ syngex/
 
 | Priority | Task | Notes |
 |----------|------|-------|
-| 🔴 High | **Full-market validation** | **Monday 2026-05-04 at 6:30 AM PT** — Run all 21 strategies through a complete market day. Validate signal quality, false positive rate, and strategy behavior under real conditions. |
+| 🔴 High | **Dual-validation: Dashboard + Heatmap** | **Monday 2026-05-04 at 6:30 AM PT** — Run all 22 strategies through a complete market day. Validate signal quality, false positive rate, and strategy behavior under real conditions. **Must validate BOTH the original Streamlit dashboard AND the new Heatmap dashboard** — each runs on a separate port and provides independent views of the same data. |
 | 🟢 Low | Future — Backtesting framework | Use signal_outcomes.jsonl for historical strategy performance analysis |
 | 🟢 Low | Future — Real execution pipeline | TradeStation API integration for automated order placement |
 
 ---
 
-*Last updated: 2026-05-01 — v1.4 — All 21 tradable strategies live, Phase 7.1–7.6 complete, NetGammaFilter now actually filters, per-strategy hold times via YAML. Next: Full-market validation Monday 6:30 AM PT.*
+*Last updated: 2026-05-03 — v1.5 — Heatmap dashboard (Phase A) complete. 22/22 strategies live. Dual-validation required: both Streamlit dashboard AND Heatmap must be validated during full-market runs. Next: Full-market validation Monday 6:30 AM PT.*
