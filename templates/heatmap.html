@@ -192,11 +192,13 @@
         .wall-dominant-value.call { color: #10b981; }
         .wall-dominant-value.put { color: #ef4444; }
         .wall-dominant-meta {
-            font-size: 0.75rem;
-            color: var(--text-dim);
+            font-size: 1.375rem;
             font-family: 'JetBrains Mono', 'Fira Code', monospace;
             margin-top: 0.15rem;
+            line-height: 1.3;
         }
+        .wall-dominant-meta .gex-val.positive { color: #10b981; }
+        .wall-dominant-meta .gex-val.negative { color: #ef4444; }
         .wall-table-title {
             font-size: 0.75rem;
             font-weight: 700;
@@ -206,7 +208,7 @@
         }
         .wall-table {
             width: 100%;
-            font-size: 0.75rem;
+            font-size: 0.9375rem;
             font-family: 'JetBrains Mono', 'Fira Code', monospace;
             border-collapse: collapse;
         }
@@ -220,7 +222,7 @@
             border-bottom: 1px solid var(--border);
         }
         .wall-table td {
-            font-size: 0.75rem;
+            font-size: 0.9375rem;
             padding: 0.2rem 0.3rem;
             color: var(--text-main);
             border-bottom: 1px solid #1e293b;
@@ -1044,7 +1046,9 @@
 
             const dist = underlyingPrice ? (dominant.strike - underlyingPrice) : 0;
             const distStr = underlyingPrice ? `${dist >= 0 ? '+' : ''}${dist.toFixed(2)} (${((dist / underlyingPrice) * 100).toFixed(2)}%)` : '';
-            document.getElementById('wall-dominant-meta').textContent = `GEX: ${formatGEX(dominant.net_gamma)}  ·  ${distStr}`;
+            const gexVal = formatGEX(dominant.net_gamma);
+            const gexClass = dominant.net_gamma >= 0 ? 'positive' : 'negative';
+            document.getElementById('wall-dominant-meta').innerHTML = `<span class="gex-val ${gexClass}">GEX: ${gexVal}</span>  ·  ${distStr}`;
 
             // Walls table — top 5
             const tbody = document.getElementById('wall-table-body');
@@ -1058,7 +1062,7 @@
                     <td>$${wall.strike}</td>
                     <td style="color:${wIsCall ? '#10b981' : '#ef4444'}">${wIsCall ? 'Call' : 'Put'}</td>
                     <td>${wall.net_gamma >= 0 ? '+' : ''}${wall.net_gamma.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
-                    <td>${formatGEX(wall.net_gamma)}</td>
+                    <td style="color:${wall.net_gamma >= 0 ? '#10b981' : '#ef4444'}">${formatGEX(wall.net_gamma)}</td>
                     <td>${Math.round(contracts).toLocaleString()}</td>
                 `;
                 tbody.appendChild(tr);
