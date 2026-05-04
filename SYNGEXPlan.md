@@ -360,11 +360,93 @@ The GEX scale fix (`get_normalized_net_gamma()`) is a safe additive change — t
 
 ---
 
+## 📊 First Validation Run Results (2026-05-04, 02:00–13:25 PDT)
+
+**8 symbols monitored, 12,018 signals generated, 19,424 outcomes recorded**
+**Overall resolved win rate: 33.7% | Total P&L: -$3,568.45 | 4,389 unresolved (22.6%)**
+
+### Per-Symbol Performance
+
+| Symbol | Signals | Outcomes | WR | P&L | Assessment |
+|--------|---------|----------|-----|-----|------------|
+| **NVDA** | 1,131 | 2,240 | 37.7% | **+$43.89** ✅ | Only profitable symbol |
+| AMZN | 2,375 | 3,700 | 38.9% | -$10.42 | Near breakeven |
+| SOFI | 1,790 | 2,701 | 39.3% | -$23.10 | Near breakeven |
+| INTC | 1,795 | 3,491 | 33.5% | -$181.13 | Moderate loss |
+| AMD | 1,095 | 1,853 | 35.2% | -$267.18 | Moderate loss |
+| TSLL | 387 | 656 | 30.7% | -$9.27 | Small sample |
+| META | 1,148 | 1,520 | 14.9% | **-$1,280.61** 🔴 | Black hole |
+| **TSLA** | 2,297 | 3,263 | 26.3% | **-$1,840.63** 🔴 | Biggest drain (87% of losses with META) |
+
+**TSLA + META = 87% of total losses.** These two symbols need symbol-specific tuning or exclusion.
+
+### Strategy Performance (All Symbols Aggregated)
+
+| Strategy | Total Signals | Resolved WR | P&L | Assessment |
+|----------|--------------|-------------|-----|------------|
+| **gamma_wall_bounce** | 3,037 | 39.8% | **+$188** | **Only profitable strategy** — NVDA 65.6%, AMZN 60.1%, INTC 50.2% |
+| vol_compression_range | 817 | 47.5% | -$110 | High WR but low signal count, TSLA 8.5% bleed |
+| gamma_flip_breakout | 109 | 44.4% | -$86 | Only META+NVDA fired (6/8 symbols zero signals) |
+| magnet_accelerate | 2,799 | 36.0% | -$800 | 100% LONG, Phase 2 never fired, META 0% WR |
+| gex_imbalance | 5,257 | 36.3% | -$546 | 100% SHORT on 7/8 symbols, VWAP logic inverted |
+| confluence_reversal | 1,744 | 31.6% | -$67 | TSLA hemorrhaging (-$450), regime filter weak |
+| gex_divergence | 4,231 | 26.9% | -$961 | Over-trading, noise generator, 9,687 signals |
+| gamma_squeeze | 1,430 | 15.4% | -$533 | Worst WR, fragile signals, 0% on AMD/NVDA/META |
+
+### Critical Findings
+
+1. **12 strategies NEVER FIRED** — layer2, layer3, full_data had no rolling window data feeds (volume_up/down, total_gamma, iv_skew, extrinsic, prob_momentum). Fixed by wiring 7 new keys in main.py.
+2. **gamma_wall_bounce is the only profitable strategy** — its mean-reversion logic at gamma walls works when walls are strong (NVDA $200 call wall, AMZN $270). Fails on TSLA/META where walls are absorbed.
+3. **TSLA is a structural problem** — not just one strategy, but ALL strategies bleed on TSLA. The options structure behaves differently from other names.
+4. **META is a structural problem too** — 14.9% WR overall, 0% on 5 of 8 strategies.
+5. **Signal volume is excessive** — 5,257 gex_imbalance signals, 4,231 gex_divergence signals. Most are marginal/false signals.
+6. **All 8 L1 strategies fired** — no dormant L1 strategies. The issue was layer2/3/full_data data feeds.
+
+### Optimizations Applied (2026-05-04 Afternoon Session)
+
+All 8 L1 strategies optimized. Sequential task ordering (MOE routing best practice) used for reliability:
+
+| Strategy | Fixes Applied | Key Change |
+|----------|--------------|------------|
+| gex_divergence | Slope threshold ↑, GEX wall gate, regime alignment, 5min cooldown | Cuts noise signals, requires strong GEX |
+| gamma_squeeze | Volume confirmation, net gamma alignment, wider stop | Stops fighting dealer positioning |
+| confluence_reversal | 10min cooldown, hard regime filter, wider stop | Stops TSLA spam, cross-regime filtering |
+| gex_imbalance | VWAP LONG logic fix, regime filter, 5min cooldown, ratio threshold ↑ | Unlocks dead LONG side |
+| magnet_accelerate | Phase 2 bidirectional, min distance filter, 5min cooldown, magnet GEX ↑ | Lights up SHORT side |
+| gamma_wall_bounce | 5min cooldown, momentum rejection, regime bonus, wall strength check | Best performer gets quality filter |
+| gamma_flip_breakout | 10min cooldown, min gamma strength, tighter proximity | Filters weak regimes |
+| vol_compression_range | 10min cooldown, tighter compression, wider stop | Only genuine ranges trade |
+
+### Rolling Window Data Pipeline Fix (v1.66)
+
+7 new rolling window keys wired up in `main.py`:
+- `volume_up_5m` / `volume_down_5m` — call/put update counts
+- `total_gamma_5m` — from GEXCalculator net_gamma
+- `iv_skew_5m` — from GEXCalculator get_iv_skew
+- `extrinsic_proxy_5m` — ∑\|net_delta\|×\|net_gamma\|
+- `prob_momentum_5m` — Σ(net_delta×|strike-ATM|)
+
+All 12 dormant layer2/3/full_data strategies should now fire on next run.
+
+### MOE Multitasking Lesson
+
+- Both Archon and Forge run Qwen3.6 MOE mode
+- True multitasking (parallel file edits) causes routing noise and stalled tasks
+- **Sequential task ordering** (one file, one logical sequence) gives highest coding win rate
+- When Forge stalls on multi-edit tasks, re-spawn with step-by-step approach works
+
+---
+
 ## Next Steps
 
 | Priority | Task | Notes |
 |----------|------|-------|
-| 🔴 High | **Dual-validation: Dashboard + Heatmap** | **Monday 2026-05-04 at 6:30 AM PT** — Run all 22 strategies through a complete market day. Validate signal quality, false positive rate, and strategy behavior under real conditions. **Must validate BOTH the original Streamlit dashboard AND the new Heatmap dashboard** — each runs on a separate port and provides independent views of the same data. |
+| 🔴 High | **Tuesday Validation Run** | Run all 22 strategies (8 L1 + 12 layer2/3/full_data) through complete market day. Analyze full signal results. | Tuesday 2026-05-05 |
+| 🔴 High | **Commit as rev 1.7** | Include all optimizations, rolling window fixes, validation results | After Tuesday run |
+| 🟡 Medium | **Optimize layer2/3/full_data** | Analyze signal data from these 12 strategies once they start firing | Post-validation |
+| 🟡 Medium | **TSLA/META symbol-specific tuning** | Either exclude or create symbol-specific parameter sets | Post-validation |
+| 🟢 Low | **Future — Backtesting framework** | Use signal_outcomes.jsonl for historical strategy performance analysis |
+| 🟢 Low | **Future — Real execution pipeline** | TradeStation API integration for automated order placement |
 | 🟢 Low | Future — Backtesting framework | Use signal_outcomes.jsonl for historical strategy performance analysis |
 | 🟢 Low | Future — Real execution pipeline | TradeStation API integration for automated order placement |
 | 🟢 Low | Future — Price-band signal dedup | See Future Enhancements below |
