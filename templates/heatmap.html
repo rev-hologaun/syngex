@@ -83,12 +83,166 @@
             margin-left: 0.5rem;
         }
 
-        /* ── Grid ───────────────────────────────────────────── */
+        /* ── SECTION 1: Summary Stats Row ───────────────────── */
+        .summary-stats-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: var(--gap);
+            margin-bottom: var(--gap);
+        }
+        .stat-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+        .stat-label {
+            font-size: 0.6rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-dim);
+        }
+        .stat-value {
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 1.35rem;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+        .stat-value.accent { color: var(--accent); }
+        .stat-value.positive { color: #10b981; }
+        .stat-value.negative { color: #ef4444; }
+        .stat-delta {
+            font-size: 0.65rem;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+        }
+        .stat-delta.up { color: #10b981; }
+        .stat-delta.down { color: #ef4444; }
+
+        /* ── SECTION 2: Main Chart Area ─────────────────────── */
+        .main-chart-area {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: var(--gap);
+            margin-bottom: var(--gap);
+        }
+
+        /* Gamma Profile Chart */
+        .gamma-profile-chart {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            display: flex;
+            flex-direction: column;
+            min-height: 280px;
+        }
+        .chart-title {
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-dim);
+            margin-bottom: 0.5rem;
+        }
+        .chart-canvas-wrap {
+            flex: 1;
+            position: relative;
+            min-height: 0;
+        }
+        .chart-canvas-wrap canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* Gamma Wall Info */
+        .gamma-wall-info {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            min-height: 280px;
+        }
+        .wall-dominant {
+            background: #0f172a;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.6rem 0.75rem;
+        }
+        .wall-dominant-label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-dim);
+            margin-bottom: 0.3rem;
+        }
+        .wall-dominant-value {
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 1.375rem;
+            font-weight: 700;
+        }
+        .wall-dominant-value.call { color: #10b981; }
+        .wall-dominant-value.put { color: #ef4444; }
+        .wall-dominant-meta {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            margin-top: 0.15rem;
+        }
+        .wall-table-title {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-dim);
+        }
+        .wall-table {
+            width: 100%;
+            font-size: 0.75rem;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            border-collapse: collapse;
+        }
+        .wall-table th {
+            text-align: left;
+            color: var(--text-dim);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            padding: 0.2rem 0.3rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .wall-table td {
+            font-size: 0.75rem;
+            padding: 0.2rem 0.3rem;
+            color: var(--text-main);
+            border-bottom: 1px solid #1e293b;
+        }
+        .wall-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 0.3rem;
+            vertical-align: middle;
+        }
+        .wall-dot.call { background: #10b981; }
+        .wall-dot.put { background: #ef4444; }
+
+        /* ── SECTION 3: Strategy Grid ───────────────────────── */
         .dashboard-grid {
             display: grid;
             grid-template-columns: repeat(6, 1fr);
             grid-auto-rows: minmax(120px, auto);
             gap: var(--gap);
+            margin-bottom: var(--gap);
         }
 
         /* ── Card ────────────────────────────────────────────── */
@@ -227,7 +381,7 @@
             transition: width 0.5s ease, background 0.5s ease;
         }
 
-        /* ── Layer 2 Overview Card ──────────────────────────── */
+        /* ── SECTION 4: Layer 2 Overview Card ───────────────── */
         .card-l2-overview {
             grid-column: span 2;
         }
@@ -256,7 +410,7 @@
             margin-top: 0.15rem;
         }
 
-        /* ── System Log ─────────────────────────────────────── */
+        /* ── SECTION 5: System Log ──────────────────────────── */
         .card-log {
             grid-column: 1 / -1;
             min-height: 100px;
@@ -283,7 +437,7 @@
         .log-entry.error { color: #ef4444; }
         .log-entry.info { color: #94a3b8; }
 
-        /* ── Extra Cell ─────────────────────────────────────── */
+        /* ── SECTION 6: Total Signals (Extra) ───────────────── */
         .card-extra {
             display: flex;
             flex-direction: column;
@@ -301,19 +455,6 @@
             font-size: 1.5rem;
             font-weight: 700;
             font-family: 'JetBrains Mono', 'Fira Code', monospace;
-        }
-
-        /* ── Responsive ─────────────────────────────────────── */
-        @media (max-width: 1200px) {
-            .dashboard-grid { grid-template-columns: repeat(4, 1fr); }
-        }
-        @media (max-width: 900px) {
-            .dashboard-grid { grid-template-columns: repeat(2, 1fr); }
-            .card-l2-overview { grid-column: span 2; }
-        }
-        @media (max-width: 600px) {
-            .dashboard-grid { grid-template-columns: 1fr; }
-            .card-l2-overview { grid-column: span 1; }
         }
 
         /* ── Connection status ──────────────────────────────── */
@@ -338,6 +479,22 @@
         .sparkline-bleeding .sparkline-line { stroke: #ef4444; }
         .sparkline-idle .sparkline-line { stroke: #475569; }
         .sparkline-void .sparkline-line { stroke: #1f2937; }
+
+        /* ── Responsive ─────────────────────────────────────── */
+        @media (max-width: 1200px) {
+            .dashboard-grid { grid-template-columns: repeat(4, 1fr); }
+            .summary-stats-row { grid-template-columns: repeat(2, 1fr); }
+            .main-chart-area { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 900px) {
+            .dashboard-grid { grid-template-columns: repeat(2, 1fr); }
+            .card-l2-overview { grid-column: span 2; }
+        }
+        @media (max-width: 600px) {
+            .dashboard-grid { grid-template-columns: 1fr; }
+            .card-l2-overview { grid-column: span 1; }
+            .summary-stats-row { grid-template-columns: 1fr; }
+        }
     </style>
 </head>
 <body>
@@ -358,7 +515,65 @@
         </div>
     </div>
 
-    <!-- Strategy Grid -->
+    <!-- SECTION 1: Summary Stats Row -->
+    <div class="summary-stats-row" id="summary-stats">
+        <div class="stat-card">
+            <span class="stat-label">Underlying Price</span>
+            <span class="stat-value accent" id="stat-price">—</span>
+        </div>
+        <div class="stat-card">
+            <span class="stat-label">Net Gamma</span>
+            <span class="stat-value" id="stat-net-gamma">—</span>
+            <span class="stat-delta" id="stat-gamma-delta"></span>
+        </div>
+        <div class="stat-card">
+            <span class="stat-label">Active Strikes</span>
+            <span class="stat-value" id="stat-active-strikes">0</span>
+        </div>
+        <div class="stat-card">
+            <span class="stat-label">Messages</span>
+            <span class="stat-value" id="stat-messages">0</span>
+        </div>
+    </div>
+
+    <!-- SECTION 2: Main Chart Area -->
+    <div class="main-chart-area">
+        <!-- LEFT: Gamma Profile Chart -->
+        <div class="gamma-profile-chart">
+            <div class="chart-title">Gamma Profile</div>
+            <div class="chart-canvas-wrap">
+                <canvas id="gamma-chart"></canvas>
+            </div>
+        </div>
+        <!-- RIGHT: Gamma Wall Info -->
+        <div class="gamma-wall-info">
+            <div>
+                <div class="wall-dominant-label">Dominant Gamma Wall</div>
+                <div class="wall-dominant-value" id="wall-dominant-value">—</div>
+                <div class="wall-dominant-meta" id="wall-dominant-meta"></div>
+            </div>
+            <div>
+                <div class="wall-table-title">Gamma Walls</div>
+                <table class="wall-table" id="wall-table">
+                    <thead>
+                        <tr>
+                            <th></th>
+                            <th>Strike</th>
+                            <th>Side</th>
+                            <th>Net Gamma</th>
+                            <th>GEX</th>
+                            <th>Contracts</th>
+                        </tr>
+                    </thead>
+                    <tbody id="wall-table-body">
+                        <tr><td colspan="6" style="color:#475569;text-align:center;">—</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- SECTION 3: Strategy Grid -->
     <div class="dashboard-grid" id="grid"></div>
 
     <script>
@@ -420,7 +635,6 @@
         }
 
         if (!data || data.length < 2) {
-            // Draw flat line
             ctx.beginPath();
             ctx.moveTo(0, h / 2);
             ctx.lineTo(w, h / 2);
@@ -435,7 +649,6 @@
         const range = max - min || 1;
         const step = w / (data.length - 1);
 
-        // Gradient fill
         const gradient = ctx.createLinearGradient(0, 0, 0, h);
         const isPositive = data[data.length - 1] >= data[0];
         if (colorClass === 'sparkline-profitable') {
@@ -461,12 +674,165 @@
         ctx.lineJoin = 'round';
         ctx.stroke();
 
-        // Fill area
         ctx.lineTo(w, h);
         ctx.lineTo(0, h);
         ctx.closePath();
         ctx.fillStyle = gradient;
         ctx.fill();
+    }
+
+    // ── Gamma Profile Chart rendering ──────────────────────────────
+    function drawGammaChart(canvas, gammaData, underlyingPrice) {
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        canvas.style.width = rect.width + 'px';
+        canvas.style.height = rect.height + 'px';
+        ctx.scale(dpr, dpr);
+
+        const W = rect.width;
+        const H = rect.height;
+        const pad = { top: 10, right: 16, bottom: 32, left: 56 };
+        const chartW = W - pad.left - pad.right;
+        const chartH = H - pad.top - pad.bottom;
+
+        ctx.clearRect(0, 0, W, H);
+
+        // If no data, draw placeholder
+        if (!gammaData || gammaData.length === 0) {
+            ctx.fillStyle = '#334155';
+            ctx.font = '12px system-ui';
+            ctx.textAlign = 'center';
+            ctx.fillText('Gamma Profile — awaiting data', W / 2, H / 2);
+            return;
+        }
+
+        // Sort by strike
+        const sorted = gammaData.slice().sort((a, b) => a.strike - b.strike);
+        const strikes = sorted.map(d => d.strike);
+        const gammas = sorted.map(d => d.net_gamma);
+
+        const minGamma = Math.min(...gammas);
+        const maxGamma = Math.max(...gammas);
+        const gammaRange = (maxGamma - minGamma) || 1;
+        const minStrike = strikes[0];
+        const maxStrike = strikes[strikes.length - 1];
+        const strikeRange = (maxStrike - minStrike) || 1;
+
+        // Zero line
+        const zeroY = pad.top + chartH * (1 - (0 - minGamma) / gammaRange);
+        ctx.beginPath();
+        ctx.moveTo(pad.left, zeroY);
+        ctx.lineTo(W - pad.right, zeroY);
+        ctx.strokeStyle = '#475569';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Y-axis labels
+        ctx.fillStyle = '#64748b';
+        ctx.font = '10px "JetBrains Mono", monospace';
+        ctx.textAlign = 'right';
+        const yTicks = 5;
+        for (let i = 0; i <= yTicks; i++) {
+            const val = minGamma + (gammaRange * i / yTicks);
+            const y = pad.top + chartH * (1 - i / yTicks);
+            ctx.fillText(val >= 0 ? `+${val.toFixed(0)}` : val.toFixed(0), pad.left - 6, y + 3);
+        }
+
+        // X-axis labels (strike)
+        ctx.textAlign = 'center';
+        const xTickCount = Math.min(6, strikes.length);
+        const xStep = Math.max(1, Math.floor(strikes.length / xTickCount));
+        for (let i = 0; i < strikes.length; i += xStep) {
+            const x = pad.left + ((strikes[i] - minStrike) / strikeRange) * chartW;
+            ctx.fillText(strikes[i].toFixed(0), x, H - pad.bottom + 16);
+        }
+
+        // Area fill (positive = green, negative = red)
+        function xForStrike(s) { return pad.left + ((s - minStrike) / strikeRange) * chartW; }
+        function yForGamma(g) { return pad.top + chartH * (1 - (g - minGamma) / gammaRange); }
+
+        // Positive area
+        ctx.beginPath();
+        let started = false;
+        for (let i = 0; i < sorted.length; i++) {
+            const x = xForStrike(sorted[i].strike);
+            const y = yForGamma(sorted[i].net_gamma);
+            if (!started) { ctx.moveTo(x, y); started = true; }
+            else ctx.lineTo(x, y);
+        }
+        ctx.lineTo(xForStrike(sorted[sorted.length - 1].strike), zeroY);
+        ctx.lineTo(xForStrike(sorted[0].strike), zeroY);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(16, 185, 129, 0.08)';
+        ctx.fill();
+
+        // Negative area
+        ctx.beginPath();
+        started = false;
+        for (let i = 0; i < sorted.length; i++) {
+            const x = xForStrike(sorted[i].strike);
+            const y = yForGamma(sorted[i].net_gamma);
+            if (!started) { ctx.moveTo(x, y); started = true; }
+            else ctx.lineTo(x, y);
+        }
+        ctx.lineTo(xForStrike(sorted[sorted.length - 1].strike), zeroY);
+        ctx.lineTo(xForStrike(sorted[0].strike), zeroY);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.08)';
+        ctx.fill();
+
+        // Line
+        ctx.beginPath();
+        for (let i = 0; i < sorted.length; i++) {
+            const x = xForStrike(sorted[i].strike);
+            const y = yForGamma(sorted[i].net_gamma);
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 2;
+        ctx.lineJoin = 'round';
+        ctx.stroke();
+
+        // Current price line
+        if (underlyingPrice) {
+            const px = xForStrike(underlyingPrice);
+            if (px >= pad.left && px <= W - pad.right) {
+                ctx.beginPath();
+                ctx.moveTo(px, pad.top);
+                ctx.lineTo(px, pad.top + chartH);
+                ctx.strokeStyle = '#f59e0b';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([3, 3]);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillStyle = '#f59e0b';
+                ctx.font = 'bold 9px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(`$${underlyingPrice.toFixed(0)}`, px, pad.top - 2);
+            }
+        }
+    }
+
+    // ── Gamma Wall computation ─────────────────────────────────────
+    function computeGammaWalls(gammaData) {
+        if (!gammaData || gammaData.length === 0) return [];
+        // Sort by absolute net_gamma descending
+        return gammaData
+            .map(d => ({ ...d }))
+            .sort((a, b) => Math.abs(b.net_gamma) - Math.abs(a.net_gamma));
+    }
+
+    function formatGEX(val) {
+        if (val === undefined || val === null) return '—';
+        if (Math.abs(val) >= 1e6) return (val / 1e6).toFixed(1) + 'M';
+        if (Math.abs(val) >= 1e3) return (val / 1e3).toFixed(1) + 'K';
+        return val.toFixed(0);
     }
 
     // ── Format helpers ─────────────────────────────────────────────
@@ -483,7 +849,7 @@
 
     // ── Build the grid ─────────────────────────────────────────────
     const grid = document.getElementById('grid');
-    const cardElements = {}; // id -> { card, canvas, sparklineDiv }
+    const cardElements = {};
 
     // Create strategy cards
     STRATEGIES.forEach(s => {
@@ -513,7 +879,7 @@
         cardElements[s.id] = { card, canvas: document.getElementById(`spark-${s.id}`) };
     });
 
-    // Create Layer 2 Overview card (span 2 cols)
+    // Create Layer 2 Overview card
     const l2Card = document.createElement('div');
     l2Card.className = 'card card-l2-overview health-idle';
     l2Card.id = 'card-l2-overview';
@@ -544,7 +910,7 @@
     `;
     grid.appendChild(l2Card);
 
-    // Create System Log card (full width)
+    // Create System Log card
     const logCard = document.createElement('div');
     logCard.className = 'card card-log health-idle';
     logCard.innerHTML = `
@@ -555,7 +921,7 @@
     `;
     grid.appendChild(logCard);
 
-    // Create extra cell (Regime status / stats)
+    // Create extra cell
     const extraCard = document.createElement('div');
     extraCard.className = 'card card-extra health-idle';
     extraCard.innerHTML = `
@@ -569,7 +935,6 @@
     // ── Socket.IO connection ───────────────────────────────────────
     const socket = io({ transports: ['polling', 'websocket'] });
 
-    // Set connected state immediately — socket may connect before event listeners attach
     document.getElementById('connDot').className = 'conn-dot connected';
     document.getElementById('connText').textContent = 'connected';
 
@@ -589,14 +954,17 @@
 
     // ── Dashboard update ───────────────────────────────────────────
     let logEntries = [];
-    let logSeen = new Set();          // dedup: signal signature → true
-    let prevMicroSignals = null;      // throttle: skip if unchanged
-    const LOG_MAX = 10;               // keep only last 10 log lines
+    let logSeen = new Set();
+    let prevMicroSignals = null;
+    const LOG_MAX = 10;
+
+    // Gamma data accumulator for chart
+    let prevGammaData = null;
 
     function updateDashboard(data) {
         const dataValid = data.data_valid !== false;
 
-        // Header
+        // ── Header ──
         document.getElementById('symbolText').textContent = data.symbol || '—';
         const ng = data.net_gamma;
         document.getElementById('netGammaDisplay').textContent = ng ? `| γ: ${ng >= 0 ? '+' : ''}${ng.toLocaleString(undefined, {maximumFractionDigits: 0})}` : '';
@@ -619,13 +987,85 @@
             badge.textContent = `🔮 ${regime}`;
         }
 
-        // Extra cell — sum actual signal counts from all strategies
-        document.getElementById('extra-signals').textContent = data.strategies
-            ? Object.values(data.strategies).reduce((sum, s) => sum + (s.signal_count || 0), 0)
-            : 0;
-        document.getElementById('extra-time').textContent = data.last_updated || new Date().toLocaleTimeString();
+        // ── SECTION 1: Summary Stats ──
+        const underlyingPrice = data.underlying_price;
+        document.getElementById('stat-price').textContent = underlyingPrice ? `$${underlyingPrice.toFixed(2)}` : '—';
 
-        // Strategy cards
+        const netGammaEl = document.getElementById('stat-net-gamma');
+        if (ng !== undefined && ng !== null) {
+            const formatted = ng >= 0 ? `+${ng.toLocaleString(undefined, {maximumFractionDigits: 0})}` : ng.toLocaleString(undefined, {maximumFractionDigits: 0});
+            netGammaEl.textContent = formatted;
+            netGammaEl.className = `stat-value ${ng >= 0 ? 'positive' : 'negative'}`;
+        } else {
+            netGammaEl.textContent = '—';
+            netGammaEl.className = 'stat-value';
+        }
+
+        // Gamma delta indicator
+        if (prevGammaData !== null && ng !== undefined) {
+            const delta = ng - prevGammaData;
+            const deltaEl = document.getElementById('stat-gamma-delta');
+            if (delta > 0) {
+                deltaEl.textContent = `▲ +${delta.toLocaleString(undefined, {maximumFractionDigits: 0})}`;
+                deltaEl.className = 'stat-delta up';
+            } else if (delta < 0) {
+                deltaEl.textContent = `▼ ${delta.toLocaleString(undefined, {maximumFractionDigits: 0})}`;
+                deltaEl.className = 'stat-delta down';
+            } else {
+                deltaEl.textContent = '—';
+                deltaEl.className = 'stat-delta';
+            }
+        }
+
+        // Active strikes
+        const gammaData = data.gamma_data || [];
+        const activeStrikes = gammaData.length;
+        document.getElementById('stat-active-strikes').textContent = activeStrikes;
+
+        // Messages
+        const msgCount = data.strategies ? Object.keys(data.strategies).length : 0;
+        document.getElementById('stat-messages').textContent = msgCount;
+
+        // ── SECTION 2: Gamma Profile Chart ──
+        if (gammaData.length > 0) {
+            prevGammaData = ng;
+        }
+        const gammaCanvas = document.getElementById('gamma-chart');
+        drawGammaChart(gammaCanvas, gammaData, underlyingPrice);
+
+        // Gamma Wall info
+        const walls = computeGammaWalls(gammaData);
+        if (walls.length > 0) {
+            const dominant = walls[0];
+            const isCall = dominant.net_gamma >= 0;
+            const wallValEl = document.getElementById('wall-dominant-value');
+            wallValEl.textContent = `${isCall ? 'CALL' : 'PUT'} Wall @ $${dominant.strike}`;
+            wallValEl.className = `wall-dominant-value ${isCall ? 'call' : 'put'}`;
+
+            const dist = underlyingPrice ? (dominant.strike - underlyingPrice) : 0;
+            const distStr = underlyingPrice ? `${dist >= 0 ? '+' : ''}${dist.toFixed(2)} (${((dist / underlyingPrice) * 100).toFixed(2)}%)` : '';
+            document.getElementById('wall-dominant-meta').textContent = `GEX: ${formatGEX(dominant.net_gamma)}  ·  ${distStr}`;
+
+            // Walls table — top 5
+            const tbody = document.getElementById('wall-table-body');
+            tbody.innerHTML = '';
+            walls.slice(0, 5).forEach(wall => {
+                const wIsCall = wall.net_gamma >= 0;
+                const contracts = Math.abs(wall.net_gamma) / 100; // rough estimate
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><span class="wall-dot ${wIsCall ? 'call' : 'put'}"></span></td>
+                    <td>$${wall.strike}</td>
+                    <td style="color:${wIsCall ? '#10b981' : '#ef4444'}">${wIsCall ? 'Call' : 'Put'}</td>
+                    <td>${wall.net_gamma >= 0 ? '+' : ''}${wall.net_gamma.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
+                    <td>${formatGEX(wall.net_gamma)}</td>
+                    <td>${Math.round(contracts).toLocaleString()}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // ── Strategy cards ──
         const strategies = data.strategies || {};
         let l2Active = 0;
         let l2Confidence = 0;
@@ -638,10 +1078,8 @@
             const health = classifyHealth(strat, dataValid);
             const sparkClass = `sparkline-${health}`;
 
-            // Card class
             el.card.className = `card health-${health}`;
 
-            // LED
             const led = document.getElementById(`led-${id}`);
             if (health === 'void') {
                 led.className = 'led led-void';
@@ -649,10 +1087,8 @@
                 led.className = `led led-${strat.status === 'error' ? 'error' : (strat.status === 'idle' ? 'idle' : 'active')}`;
             }
 
-            // Sparkline
             drawSparkline(el.canvas, strat.sparkline, sparkClass);
 
-            // Footer
             if (health === 'void') {
                 document.getElementById(`last-${id}`).textContent = 'Last: —';
                 const pnlEl = document.getElementById(`pnl-${id}`);
@@ -666,7 +1102,6 @@
                 pnlEl.className = `card-pnl ${pnlVal > 0 ? 'positive' : (pnlVal < 0 ? 'negative' : 'neutral')}`;
             }
 
-            // Confidence bar
             const conf = strat.win_rate || 0;
             const confEl = document.getElementById(`conf-${id}`);
             if (health === 'void') {
@@ -677,7 +1112,6 @@
                 confEl.style.background = strat.pnl > 0 ? '#10b981' : (strat.pnl < 0 ? '#ef4444' : '#475569');
             }
 
-            // L2 overview aggregation (layer 2 strategies)
             if (id.startsWith('delta_') || id.startsWith('call_put') || id.startsWith('iv_gex')) {
                 l2Active++;
                 l2Confidence += strat.win_rate || 0;
@@ -692,10 +1126,9 @@
             document.getElementById('l2-active').textContent = l2Active;
         }
 
-        // Log entries from micro_signals (deduped, limited, throttled)
+        // Log entries
         const microSignals = data.micro_signals;
         if (microSignals) {
-            // Throttle: skip entirely if signals haven't changed
             const sigKey = JSON.stringify(microSignals);
             if (sigKey === prevMicroSignals) return;
             prevMicroSignals = sigKey;
@@ -703,9 +1136,8 @@
             const logContainer = document.getElementById('log-container');
 
             Object.entries(microSignals).forEach(([strike, sig]) => {
-                // Build a dedup key from the signal content (ignoring timestamp)
                 const sigText = `SIGNAL:${sig.strategy}:${sig.direction}:conf=${sig.confidence.toFixed(2)}:K${strike}`;
-                if (logSeen.has(sigText)) return;       // already logged this signal
+                if (logSeen.has(sigText)) return;
                 logSeen.add(sigText);
 
                 const ts = sig.timestamp
@@ -718,16 +1150,20 @@
                 logEntries.push(entry);
             });
 
-            // Trim to last LOG_MAX entries
             while (logEntries.length > LOG_MAX) {
                 logContainer.removeChild(logEntries.shift());
             }
             logContainer.scrollTop = logContainer.scrollHeight;
         }
+
+        // Extra cell
+        document.getElementById('extra-signals').textContent = data.strategies
+            ? Object.values(data.strategies).reduce((sum, s) => sum + (s.signal_count || 0), 0)
+            : 0;
+        document.getElementById('extra-time').textContent = data.last_updated || new Date().toLocaleTimeString();
     }
 
     // ── Initial empty state ────────────────────────────────────────
-    // Cards show idle state until first data arrives
     </script>
 </body>
 </html>

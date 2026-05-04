@@ -172,6 +172,23 @@ def _transform_for_socket(data: dict) -> dict:
             "confidence": health.get("confidence", 0.0),
         }
 
+    # Transform per-strike gamma data for the chart and wall panel
+    gamma_data = []
+    strikes_raw = data.get("strikes", {})
+    for strike_str, bucket in strikes_raw.items():
+        try:
+            strike = float(strike_str)
+        except (ValueError, TypeError):
+            continue
+        gamma_data.append({
+            "strike": strike,
+            "net_gamma": bucket.get("net_gamma", 0.0),
+            "call_gamma_oi": bucket.get("call_gamma_oi", 0.0),
+            "put_gamma_oi": bucket.get("put_gamma_oi", 0.0),
+            "total_contracts": bucket.get("total_contracts", 0),
+        })
+    gamma_data.sort(key=lambda x: x["strike"])
+
     return {
         "symbol": data.get("symbol", SYMBOL),
         "underlying_price": data.get("underlying_price", 0.0),
@@ -181,6 +198,7 @@ def _transform_for_socket(data: dict) -> dict:
         "strategies": strategies,
         "last_updated": data.get("last_updated", ""),
         "micro_signals": data.get("micro_signals", {}),
+        "gamma_data": gamma_data,
         "data_valid": True,
     }
 
