@@ -567,7 +567,7 @@
     grid.appendChild(extraCard);
 
     // ── Socket.IO connection ───────────────────────────────────────
-    const socket = io({ transports: ['websocket', 'polling'] });
+    const socket = io({ transports: ['polling', 'websocket'] });
 
     // Set connected state immediately — socket may connect before event listeners attach
     document.getElementById('connDot').className = 'conn-dot connected';
@@ -619,8 +619,10 @@
             badge.textContent = `🔮 ${regime}`;
         }
 
-        // Extra cell
-        document.getElementById('extra-signals').textContent = data.strategies ? Object.keys(data.strategies).length : 0;
+        // Extra cell — sum actual signal counts from all strategies
+        document.getElementById('extra-signals').textContent = data.strategies
+            ? Object.values(data.strategies).reduce((sum, s) => sum + (s.signal_count || 0), 0)
+            : 0;
         document.getElementById('extra-time').textContent = data.last_updated || new Date().toLocaleTimeString();
 
         // Strategy cards
@@ -672,7 +674,7 @@
                 confEl.style.background = '#1f2937';
             } else {
                 confEl.style.width = `${conf * 100}%`;
-                confEl.style.background = pnlVal > 0 ? '#10b981' : (pnlVal < 0 ? '#ef4444' : '#475569');
+                confEl.style.background = strat.pnl > 0 ? '#10b981' : (strat.pnl < 0 ? '#ef4444' : '#475569');
             }
 
             // L2 overview aggregation (layer 2 strategies)

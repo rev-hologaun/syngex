@@ -118,8 +118,8 @@ class GEXImbalance(BaseStrategy):
 
         # Build volatility-based stop/target
         price_window = rolling_data.get(KEY_PRICE_5M)
-        if price_window and price_window.count >= 10 and price_window.std() is not None:
-            vol = price_window.std()
+        if price_window and price_window.count >= 10 and price_window.std is not None:
+            vol = price_window.std
             if vol is not None and vol > 0:
                 stop_distance = vol * STOP_VOL_MULT
             else:

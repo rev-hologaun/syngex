@@ -85,6 +85,7 @@ class SignalTracker:
         log_dir: str = "log",
         symbol: str = "UNKNOWN",
         strategy_hold_times: Optional[Dict[str, int]] = None,
+        signal_log_path: Optional[str] = None,
     ) -> None:
         """
         Initialize the SignalTracker.
@@ -95,6 +96,7 @@ class SignalTracker:
             log_dir: Directory for signal outcome logs.
             symbol: Symbol this tracker is monitoring.
             strategy_hold_times: Optional dict mapping strategy_id to max_hold_seconds.
+            signal_log_path: Optional path to global signals.jsonl for master ledger.
         """
         self.max_hold_seconds = max_hold_seconds
         self._strategy_hold_times = strategy_hold_times or {}
@@ -103,6 +105,7 @@ class SignalTracker:
         self._log_dir = Path(log_dir)
         self._log_dir.mkdir(parents=True, exist_ok=True)
         self._symbol = symbol
+        self._signal_log_path = signal_log_path  # global signals.jsonl path
 
         # Per-strategy statistics
         self._strategy_stats: Dict[str, Dict[str, Any]] = {}
@@ -160,7 +163,45 @@ class SignalTracker:
 
         self._strategy_stats[strat]["total_signals"] += 1
 
+        # --- Dual-log: append to per-symbol and global signal logs ---
+        self._log_signal_to_disk(signal_id, signal)
+
         return signal_id
+
+    def _log_signal_to_disk(self, signal_id: str, signal: Dict[str, Any]) -> None:
+        """Append a new signal to per-symbol and global JSONL logs."""
+        log_entry = {
+            "signal_id": signal_id,
+            "direction": signal.get("direction", "LONG"),
+            "confidence": float(signal.get("confidence", 0)),
+            "entry": float(signal.get("entry", 0)),
+            "stop": float(signal.get("stop", 0)),
+            "target": float(signal.get("target", 0)),
+            "strategy_id": signal.get("strategy_id", ""),
+            "symbol": self._symbol,
+            "reason": signal.get("reason", ""),
+            "risk_reward_ratio": float(signal.get("risk_reward_ratio", 0)),
+            "strength": signal.get("strength", "MODERATE"),
+            "timestamp": float(signal.get("timestamp", time.time())),
+            "metadata": signal.get("metadata", {}),
+        }
+        json_line = json.dumps(log_entry) + "\n"
+
+        # 1. Per-symbol log: log/signals_{SYMBOL}.jsonl
+        try:
+            sym_path = self._log_dir / f"signals_{self._symbol}.jsonl"
+            with open(sym_path, "a") as f:
+                f.write(json_line)
+        except OSError:
+            pass
+
+        # 2. Global master ledger: log/signals.jsonl (if configured)
+        if self._signal_log_path:
+            try:
+                with open(self._signal_log_path, "a") as f:
+                    f.write(json_line)
+            except OSError:
+                pass
 
     def update(self, underlying_price: float, timestamp: Optional[float] = None) -> List[ResolvedSignal]:
         """

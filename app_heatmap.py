@@ -118,6 +118,29 @@ def _transform_for_socket(data: dict) -> dict:
     except Exception:
         pass
 
+    # Load signal counts from per-symbol signal log (authoritative, survives restarts)
+    try:
+        sig_log_path = log_dir / f"signals_{SYMBOL}.jsonl"
+        if sig_log_path.exists():
+            strat_signal_counts: Dict[str, int] = {}
+            for line in sig_log_path.read_text().strip().splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    entry = json.loads(line)
+                    sid = entry.get("strategy_id", "")
+                    if sid:
+                        strat_signal_counts[sid] = strat_signal_counts.get(sid, 0) + 1
+                except json.JSONDecodeError:
+                    pass
+            # Merge signal counts into strategy_stats
+            for sid, count in strat_signal_counts.items():
+                if sid not in strategy_stats:
+                    strategy_stats[sid] = {}
+                strategy_stats[sid]["signal_count"] = count
+    except Exception:
+        pass
+
     now = time.time()
 
     for strat_name, health in strategy_health.items():

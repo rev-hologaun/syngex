@@ -188,11 +188,13 @@ class SyngexOrchestrator:
 
         # Signal tracker for outcome resolution (symbol-specific log)
         log_dir = self._data_dir.parent / "log"
+        signal_log_path = str(log_dir / "signals.jsonl")  # global master ledger
         self._signal_tracker = SignalTracker(
             max_hold_seconds=900,  # global default
             strategy_hold_times=strategy_hold_times,
             log_dir=str(log_dir),
             symbol=self.symbol,
+            signal_log_path=signal_log_path,
         )
 
         # Apply global config to EngineConfig
