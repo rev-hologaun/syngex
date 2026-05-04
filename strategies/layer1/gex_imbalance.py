@@ -34,6 +34,7 @@ Confidence factors:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
@@ -47,7 +48,7 @@ logger = logging.getLogger("Syngex.Strategies.GEXImbalance")
 # ---------------------------------------------------------------------------
 
 PUT_HEAVY_RATIO = 0.4        # < 0.4 → long bias
-CALL_HEAVY_RATIO = 0.6       # > 0.6 → short bias
+CALL_HEAVY_RATIO = 0.75      # > 0.75 → short bias
 STRONG_PUT_RATIO = 0.25      # very strong long signal
 STRONG_CALL_RATIO = 0.75     # very strong short signal
 MIN_MESSAGES = 20            # minimum data points for signal quality
@@ -67,6 +68,8 @@ class GEXImbalance(BaseStrategy):
     strategy_id = "gex_imbalance"
     layer = "layer1"
 
+    _last_signal_time: Dict[str, float] = {}
+
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """
         Evaluate GEX imbalance and return directional signals.
@@ -76,6 +79,13 @@ class GEXImbalance(BaseStrategy):
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
             return []
+
+        # Per-symbol cooldown (5 minutes)
+        ts = data.get("timestamp", time.time())
+        symbol = data.get("symbol", "")
+        if symbol and symbol in self._last_signal_time:
+            if ts - self._last_signal_time[symbol] < 300:  # 5 minutes
+                return []
 
         gex_calc = data.get("gex_calculator")
         if gex_calc is None:
@@ -109,6 +119,12 @@ class GEXImbalance(BaseStrategy):
         if not vwap_confirmed:
             return []  # No trend confirmation — skip
 
+        # Regime alignment — hard filter
+        if bias == "LONG" and regime != "POSITIVE":
+            return []  # Don't LONG in non-POSITIVE regime
+        if bias == "SHORT" and regime != "NEGATIVE":
+            return []  # Don't SHORT in non-NEGATIVE regime
+
         # Compute confidence
         confidence = self._compute_confidence(
             ratio, bias_strength, regime, total_msgs, vwap_confirmed
@@ -140,6 +156,10 @@ class GEXImbalance(BaseStrategy):
 
         risk = abs(underlying_price - stop)
         reward = abs(target - underlying_price)
+
+        # Update cooldown
+        if symbol:
+            self._last_signal_time[symbol] = ts
 
         return [Signal(
             direction=direction,
@@ -256,11 +276,11 @@ class GEXImbalance(BaseStrategy):
             return False
 
         if bias == "LONG":
-            # Price above VWAP confirms upward pressure
-            return price > mean
-        else:
-            # Price below VWAP confirms downward pressure
+            # Put-heavy in a dip (price below VWAP) = mean reversion LONG
             return price < mean
+        else:
+            # Call-heavy above VWAP = trend continuation SHORT
+            return price > mean
 
     # ------------------------------------------------------------------
     # Confidence computation
