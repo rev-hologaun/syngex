@@ -119,7 +119,7 @@ class GEXImbalance(BaseStrategy):
 
         # Compute confidence
         confidence = self._compute_confidence(
-            ratio, bias_strength, regime, total_msgs, vwap_confirmed
+            ratio, bias_strength, bias, regime, total_msgs, vwap_confirmed
         )
         if confidence < MIN_CONFIDENCE:
             return []
@@ -283,6 +283,7 @@ class GEXImbalance(BaseStrategy):
         self,
         ratio: float,
         bias_strength: float,
+        bias: str,
         regime: str,
         total_msgs: int,
         vwap_confirmed: bool,
