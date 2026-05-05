@@ -50,27 +50,27 @@ logger = logging.getLogger("Syngex.Strategies.ExtrinsicIntrinsicFlow")
 # ---------------------------------------------------------------------------
 
 # Extrinsic expansion threshold: current > rolling avg by this %
-EXTRINSIC_EXPANSION_THRESHOLD = 0.05    # 5% expansion
+EXTRINSIC_EXPANSION_THRESHOLD = 0.03    # 3% expansion
 
 # Extrinsic collapse threshold: current < rolling avg by this %
 EXTRINSIC_COLLAPSE_THRESHOLD = 0.10     # 10% collapse
 
 # Volume spike threshold for new money
-VOLUME_SPIKE_RATIO = 1.50               # 150% of avg (1.5×)
+VOLUME_SPIKE_RATIO = 1.30               # 130% of avg (1.3×)
 
 # Min net gamma for positive regime
-MIN_NET_GAMMA = 5000.0
+MIN_NET_GAMMA = 2000.0
 
 # Stop and target
 STOP_PCT = 0.005                        # 0.5% stop
 TARGET_PCT = 0.008                      # 0.8% target (1.6:1 R:R)
 
 # Min confidence
-MIN_CONFIDENCE = 0.35
+MIN_CONFIDENCE = 0.25
 MAX_CONFIDENCE = 0.80                   # v2 cap
 
 # Min data points — need more data for extrinsic tracking
-MIN_DATA_POINTS = 10
+MIN_DATA_POINTS = 5
 
 # Rolling window size for extrinsic proxy (count-based, ~30s at 1Hz)
 EXTRINSIC_WINDOW_SIZE = 30
@@ -304,6 +304,11 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         if confidence < MIN_CONFIDENCE:
             return None
 
+        # Extract trend from price window for metadata
+        rolling_data = data.get("rolling_data", {})
+        price_window = rolling_data.get(KEY_VOLUME_5M)
+        trend = price_window.trend if price_window else "UNKNOWN"
+
         # Build signal
         stop = price * (1 - STOP_PCT)
         target = price * (1 + TARGET_PCT)
@@ -325,6 +330,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
                 "extrinsic_change_pct": round(extrinsic_change_pct, 4),
                 "volume_ratio": round(vol_ratio, 2),
                 "volume_trend": vol_trend,
+                "trend": trend,
                 "net_gamma": round(net_gamma, 2),
                 "stop_pct": STOP_PCT,
                 "target_pct": TARGET_PCT,
@@ -377,6 +383,11 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         if confidence < MIN_CONFIDENCE:
             return None
 
+        # Extract trend from price window for metadata
+        rolling_data = data.get("rolling_data", {})
+        price_window = rolling_data.get(KEY_VOLUME_5M)
+        trend = price_window.trend if price_window else "UNKNOWN"
+
         # Build signal
         stop = price * (1 + STOP_PCT)
         target = price * (1 - TARGET_PCT)
@@ -398,6 +409,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
                 "extrinsic_change_pct": round(extrinsic_change_pct, 4),
                 "volume_ratio": round(vol_ratio, 2),
                 "volume_trend": vol_trend,
+                "trend": trend,
                 "net_gamma": round(net_gamma, 2),
                 "stop_pct": STOP_PCT,
                 "target_pct": TARGET_PCT,
@@ -467,6 +479,11 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         if confidence < MIN_CONFIDENCE:
             return None
 
+        # Extract trend from price window for metadata
+        rolling_data = data.get("rolling_data", {})
+        price_window = rolling_data.get(KEY_VOLUME_5M)
+        trend = price_window.trend if price_window else "UNKNOWN"
+
         # Build signal
         if fade_direction == Direction.LONG:
             stop = price * (1 + STOP_PCT)
@@ -492,6 +509,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
                 "extrinsic_change_pct": round(extrinsic_change_pct, 4),
                 "volume_ratio": round(vol_ratio, 2),
                 "volume_trend": vol_trend,
+                "trend": trend,
                 "fade_direction": fade_direction.value,
                 "net_gamma": round(net_gamma, 2),
                 "stop_pct": STOP_PCT,
