@@ -48,27 +48,27 @@ logger = logging.getLogger("Syngex.Strategies.ProbDistributionShift")
 # ---------------------------------------------------------------------------
 
 # Z-score threshold for significant shift
-Z_SCORE_THRESHOLD = 2.0             # 2 standard deviations
+Z_SCORE_THRESHOLD = 1.5             # 1.5 standard deviations
 
 # Minimum consecutive same-direction signals
-MIN_CONSECUTIVE_SIGNALS = 3         # 3 consecutive evaluations
+MIN_CONSECUTIVE_SIGNALS = 2         # 2 consecutive evaluations
 
 # Min net gamma for positive regime
-MIN_NET_GAMMA = 5000.0
+MIN_NET_GAMMA = 2000.0
 
 # Stop and target
 STOP_PCT = 0.005                    # 0.5% stop
 TARGET_PCT = 0.008                  # 0.8% target (1.6:1 R:R)
 
 # Min confidence
-MIN_CONFIDENCE = 0.35
+MIN_CONFIDENCE = 0.25
 MAX_CONFIDENCE = 0.80               # v2 cap
 
 # Min strikes with data
 MIN_STRIKES_WITH_DATA = 5           # Need at least 5 strikes for distribution
 
 # Min data points for rolling stats
-MIN_DATA_POINTS = 10                # Need more data for z-score calculation
+MIN_DATA_POINTS = 5                 # Need enough data for z-score calculation
 
 # Rolling window size for momentum tracking (count-based, ~30s at 1Hz)
 MOMENTUM_WINDOW_SIZE = 30
@@ -164,6 +164,10 @@ class ProbDistributionShift(BaseStrategy):
         if volume_5m is not None and volume_5m.count >= MIN_DATA_POINTS:
             vol_trend = volume_5m.trend
 
+        # --- Price trend ---
+        price_window = rolling_data.get("price_5m")
+        price_trend = price_window.trend if price_window else "UNKNOWN"
+
         # --- Determine signal direction ---
         signal_direction = None
 
@@ -232,6 +236,7 @@ class ProbDistributionShift(BaseStrategy):
                     consec_long if signal_direction == Direction.LONG else consec_short
                 ),
                 "volume_trend": vol_trend,
+                "price_trend": price_trend,
                 "net_gamma": round(net_gamma, 2),
                 "regime": data.get("regime", "UNKNOWN"),
                 "momentum_window_count": momentum_window.count,
