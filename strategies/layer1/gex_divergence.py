@@ -68,6 +68,9 @@ class GEXDivergence(BaseStrategy):
     When price trends in one direction but GEX trends the other,
     the structural support for the trend is evaporating. Fade the move.
 
+    Regime is a soft confidence factor (not a hard gate): aligned regimes
+    boost confidence, misaligned regimes reduce it but do not block signals.
+
     Requires rolling "price" and "net_gamma" windows in rolling_data.
     """
 
@@ -129,11 +132,12 @@ class GEXDivergence(BaseStrategy):
             # Bullish divergence: price down, GEX up → LONG
             divergence_type = "bullish"
 
-        # Regime alignment: only fire in matching regime
+        # Regime alignment: soft confidence factor, not a hard gate.
+        regime_misaligned = False
         if divergence_type == "bullish" and regime != "POSITIVE":
-            return []  # Bullish divergence outside positive regime = weak signal
+            regime_misaligned = True
         if divergence_type == "bearish" and regime != "NEGATIVE":
-            return []  # Bearish divergence outside negative regime = weak signal
+            regime_misaligned = True
 
         # Get confirmation from last price movement
         price_change = self._get_price_change(price_window)
@@ -144,7 +148,8 @@ class GEXDivergence(BaseStrategy):
         # Compute confidence
         confidence = self._compute_confidence(
             price_slope, gamma_slope, divergence_type,
-            price_window, gamma_window, regime, confirmed
+            price_window, gamma_window, regime, confirmed,
+            regime_misaligned
         )
         if confidence < MIN_CONFIDENCE:
             return []
@@ -282,6 +287,7 @@ class GEXDivergence(BaseStrategy):
         gamma_window: Any,
         regime: str,
         confirmed: bool,
+        regime_misaligned: bool = False,
     ) -> float:
         """
         Compute divergence signal confidence.
@@ -291,7 +297,8 @@ class GEXDivergence(BaseStrategy):
         - Gamma slope magnitude: larger GEX shift = stronger structural change (0.2–0.3)
         - Slope ratio: balanced divergence = higher confidence (0.1–0.15)
         - Data quality: more points = more reliable (0.05–0.1)
-        - Regime alignment: positive regime + bullish divergence = stronger (0.1)
+        - Regime alignment: aligned regime adds bonus; misaligned zeroes it out
+          but does not block the signal (regime is a soft confidence factor)
         """
         # Price slope confidence
         price_conf = 0.15 + 0.15 * min(1.0, abs(price_slope) / 0.01)
@@ -309,12 +316,13 @@ class GEXDivergence(BaseStrategy):
         min_count = min(price_window.count, gamma_window.count)
         data_conf = min(0.1, (min_count - MIN_DATA_POINTS) / 100)
 
-        # Regime alignment
+        # Regime alignment: soft bonus when aligned, zero when misaligned
         regime_conf = 0.0
-        if divergence_type == "bullish" and regime == "POSITIVE":
-            regime_conf = 0.1  # Bullish divergence in positive regime = strong
-        elif divergence_type == "bearish" and regime == "NEGATIVE":
-            regime_conf = 0.1  # Bearish divergence in negative regime = strong
+        if not regime_misaligned:
+            if divergence_type == "bullish" and regime == "POSITIVE":
+                regime_conf = 0.1
+            elif divergence_type == "bearish" and regime == "NEGATIVE":
+                regime_conf = 0.1
 
         # Normalize each component to [0,1] and average
         norm_price = (price_conf - 0.15) / (0.3 - 0.15) if 0.3 != 0.15 else 1.0

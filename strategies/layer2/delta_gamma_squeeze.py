@@ -2,21 +2,20 @@
 strategies/layer2/delta_gamma_squeeze.py — Delta-Gamma Squeeze
 
 Extreme momentum entry strategy (bidirectional).
-Detects when price is being pushed toward a gamma wall while delta
-at that strike accelerates — a classic gamma squeeze setup.
+Detects gamma squeeze setups using total delta acceleration at wall proximity.
 
-LONG: Price approaching a Call Wall above with accelerating delta
-SHORT: Price approaching a Put Wall below with accelerating delta
+LONG: Price approaching a Call Wall above with accelerating total delta
+SHORT: Price approaching a Put Wall below with accelerating total delta
 
 Logic:
     LONG:
         1. Find nearest Call Wall above price
-        2. Check if call delta at that strike is accelerating
+        2. Check if total delta is accelerating
         3. Check for volume spike on the breakout candle
         4. Enter LONG when all conditions align
     SHORT:
         1. Find nearest Put Wall below price
-        2. Check if put delta at that strike is accelerating
+        2. Check if total delta is accelerating
         3. Check for volume spike on the breakdown candle
         4. Enter SHORT when all conditions align
 
@@ -69,10 +68,10 @@ TARGET_RISK_MULT = 2.0                # 2× risk for target
 
 class DeltaGammaSqueeze(BaseStrategy):
     """
-    Detects gamma squeeze setups bidirectionally.
+    Detects gamma squeeze setups using total delta acceleration at wall proximity.
 
-    LONG: Price approaching a Call Wall above with accelerating delta
-    SHORT: Price approaching a Put Wall below with accelerating delta
+    LONG: Price approaching a Call Wall above with accelerating total delta
+    SHORT: Price approaching a Put Wall below with accelerating total delta
 
     A gamma squeeze occurs when dealers must hedge their options positions,
     pushing price toward the wall and forcing more hedging — a
@@ -252,16 +251,13 @@ class DeltaGammaSqueeze(BaseStrategy):
         side: str,
     ) -> Optional[float]:
         """
-        Check if delta at a strike is accelerating.
+        Check if total delta is accelerating.
 
-        Compares current delta to rolling average. Returns ratio of
-        current to rolling avg. > 1.0 means accelerating.
+        Compares current delta to rolling average of total delta
+        over the 5-minute window. Returns ratio of current to rolling
+        avg. > 1.0 means accelerating.
         """
-        key = f"delta_{side}_5m"
-        window = rolling_data.get(key)
-        if window is None or window.count < MIN_DATA_POINTS:
-            # Fallback: use total_delta rolling window
-            window = rolling_data.get(KEY_TOTAL_DELTA_5M)
+        window = rolling_data.get(KEY_TOTAL_DELTA_5M)
         if window is None or window.count < MIN_DATA_POINTS:
             return None
 

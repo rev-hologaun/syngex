@@ -62,8 +62,12 @@ class GammaFlipBreakout(BaseStrategy):
         """
         Evaluate current state and return flip breakout signals.
 
-        Returns empty list when no flip point exists or conditions
-        are not met.
+        Uses the gamma flip point as the regime boundary. If no flip
+        point exists (e.g. pure positive/negative regime), falls back
+        to the ATM strike as a regime boundary proxy.
+
+        Returns empty list when no flip point or ATM strike exists,
+        or when other conditions are not met.
         """
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
@@ -81,10 +85,13 @@ class GammaFlipBreakout(BaseStrategy):
         if abs(net_gamma) < 200000:
             return []
 
-        # Get the gamma flip point
+        # Get the gamma flip point (regime boundary)
         flip_strike = gex_calc.get_gamma_flip()
+        # Fallback: use ATM strike when no flip point exists
         if flip_strike is None:
-            return []
+            flip_strike = gex_calc.get_atm_strike(underlying_price)
+        if flip_strike is None:
+            return []  # No data at all
 
         # Per-symbol cooldown (10 minutes)
         ts = data.get("timestamp", time.time())

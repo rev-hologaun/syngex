@@ -221,9 +221,8 @@ class IVSkewSqueeze(BaseStrategy):
         if rolling_avg_skew is None:
             return None
 
-        if current_skew >= rolling_avg_skew:
-            # Skew is not normalizing (not moving toward zero)
-            # For negative skew: current should be > avg (less negative = easing)
+        if current_skew <= rolling_avg_skew:
+            # Skew is not normalizing (still getting more negative)
             return None
 
         # All conditions met — compute confidence
