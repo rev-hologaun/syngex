@@ -47,14 +47,14 @@ logger = logging.getLogger("Syngex.Strategies.GEXImbalance")
 # Constants
 # ---------------------------------------------------------------------------
 
-PUT_HEAVY_RATIO = 0.4        # < 0.4 → long bias
-CALL_HEAVY_RATIO = 0.75      # > 0.75 → short bias
+PUT_HEAVY_RATIO = 0.5        # < 0.5 → long bias
+CALL_HEAVY_RATIO = 0.65      # > 0.65 → short bias
 STRONG_PUT_RATIO = 0.25      # very strong long signal
 STRONG_CALL_RATIO = 0.75     # very strong short signal
 MIN_MESSAGES = 20            # minimum data points for signal quality
 STOP_VOL_MULT = 2.5          # stop = 2.5x rolling price std dev
 TARGET_RISK_MULT = 1.5       # target = 1.5x stop distance
-MIN_CONFIDENCE = 0.35        # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.25        # Minimum confidence to emit signal
 
 
 class GEXImbalance(BaseStrategy):
@@ -68,7 +68,7 @@ class GEXImbalance(BaseStrategy):
     strategy_id = "gex_imbalance"
     layer = "layer1"
 
-    _last_signal_time: Dict[str, float] = {}
+
 
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """
@@ -80,12 +80,8 @@ class GEXImbalance(BaseStrategy):
         if underlying_price <= 0:
             return []
 
-        # Per-symbol cooldown (5 minutes)
         ts = data.get("timestamp", time.time())
         symbol = data.get("symbol", "")
-        if symbol and symbol in self._last_signal_time:
-            if ts - self._last_signal_time[symbol] < 300:  # 5 minutes
-                return []
 
         gex_calc = data.get("gex_calculator")
         if gex_calc is None:
@@ -119,11 +115,7 @@ class GEXImbalance(BaseStrategy):
         if not vwap_confirmed:
             return []  # No trend confirmation — skip
 
-        # Regime alignment — hard filter
-        if bias == "LONG" and regime != "POSITIVE":
-            return []  # Don't LONG in non-POSITIVE regime
-        if bias == "SHORT" and regime != "NEGATIVE":
-            return []  # Don't SHORT in non-NEGATIVE regime
+        # Regime alignment — soft confidence factor (no hard gates)
 
         # Compute confidence
         confidence = self._compute_confidence(
@@ -157,9 +149,9 @@ class GEXImbalance(BaseStrategy):
         risk = abs(underlying_price - stop)
         reward = abs(target - underlying_price)
 
-        # Update cooldown
-        if symbol:
-            self._last_signal_time[symbol] = ts
+        # Add trend to metadata
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        trend = price_window.trend if price_window else "UNKNOWN"
 
         return [Signal(
             direction=direction,
@@ -178,6 +170,7 @@ class GEXImbalance(BaseStrategy):
                 "bias": bias,
                 "bias_strength": round(bias_strength, 3),
                 "regime": regime,
+                "trend": trend,
                 "total_messages": total_msgs,
                 "risk": round(risk, 2),
                 "reward": round(reward, 2),
@@ -316,12 +309,16 @@ class GEXImbalance(BaseStrategy):
         else:
             ratio_conf = 0.0
 
-        # Regime alignment bonus (0.0–0.15)
+        # Regime alignment bonus (bias-aware: +0.15 aligned, -0.10 misaligned)
         regime_bonus = 0.0
-        if ratio < PUT_HEAVY_RATIO and regime == "POSITIVE":
-            regime_bonus = 0.15  # Put-heavy + positive regime = strong long
-        elif ratio > CALL_HEAVY_RATIO and regime == "NEGATIVE":
-            regime_bonus = 0.15  # Call-heavy + negative regime = strong short
+        if bias == "LONG" and regime == "POSITIVE":
+            regime_bonus = 0.15  # Aligned: put-heavy + positive regime
+        elif bias == "SHORT" and regime == "NEGATIVE":
+            regime_bonus = 0.15  # Aligned: call-heavy + negative regime
+        elif bias == "LONG" and regime == "NEGATIVE":
+            regime_bonus = -0.10  # Misaligned: penalize but don't block
+        elif bias == "SHORT" and regime == "POSITIVE":
+            regime_bonus = -0.10  # Misaligned: penalize but don't block
 
         # Data freshness bonus (0.0–0.1)
         msg_conf = min(0.1, total_msgs / 10000)
@@ -331,7 +328,7 @@ class GEXImbalance(BaseStrategy):
 
         # Normalize each component to [0,1] and average
         norm_ratio = (ratio_conf - 0.4) / (0.8 - 0.4) if 0.8 != 0.4 else 1.0
-        norm_regime = regime_bonus / 0.15 if 0.15 != 0 else 0.0
+        norm_regime = (regime_bonus + 0.10) / 0.25 if 0.25 != 0 else 0.0  # shift [-0.10, +0.15] → [0, 1]
         norm_msg = msg_conf / 0.1 if 0.1 != 0 else 0.0
         norm_vwap = vwap_bonus / 0.1 if 0.1 != 0 else 0.0
         confidence = (norm_ratio + norm_regime + norm_msg + norm_vwap) / 4.0
