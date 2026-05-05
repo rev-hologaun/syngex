@@ -3,18 +3,19 @@ strategies/layer1/magnet_accelerate.py — Magnet & Accelerate
 
 Two-phase strategy centered on the highest-GEX strike (the "magnet").
 
-Phase 1 — Magnet Pull:
-    When net gamma is positive and price is below the magnet,
-    go LONG targeting the magnet. Dealer hedging pulls price up.
+Phase 1 — Magnet Pull (bidirectional in POSITIVE regime):
+    When net gamma is positive, dealer hedging pulls price toward the magnet:
+    - Price below magnet → LONG toward magnet (dealer hedging pulls price up)
+    - Price above magnet → SHORT toward magnet (dealer hedging pulls price down)
 
-Phase 2 — Acceleration:
+Phase 2 — Acceleration (NEGATIVE regime, bidirectional):
     When price breaks through the magnet and cumulative gamma
     turns negative, enter in the breakout direction.
     Dealer hedging accelerates the move.
 
 Entry:
-    - Phase 1: LONG when price < magnet and net_gamma > 0
-    - Phase 2: LONG or SHORT on magnet breakout + gamma regime flip
+    - Phase 1: LONG when price < magnet (positive gamma), SHORT when price > magnet (positive gamma)
+    - Phase 2: LONG or SHORT on magnet breakout + negative gamma regime
 
 Exit:
     - Phase 1: Exit within 0.3% of magnet or when GEX weakens
@@ -48,7 +49,7 @@ BREAKOUT_PCT = 0.002          # 0.2% — price must be this far past magnet to b
 MAX_BREAKOUT_PCT = 0.02       # 2% — max distance past magnet (no chasing)
 TRAIL_STOP_PCT = 0.01         # 1% — trailing stop for Phase 2
 TARGET_RISK_MULT = 1.5        # Minimum 1.5× risk for target distance
-MIN_CONFIDENCE = 0.35         # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.25         # Minimum confidence to emit signal
 
 
 class MagnetAccelerate(BaseStrategy):
@@ -62,11 +63,14 @@ class MagnetAccelerate(BaseStrategy):
 
     strategy_id = "magnet_accelerate"
     layer = "layer1"
-    _last_signal_time: Dict[str, float] = {}
 
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """
         Evaluate current state and return magnet/acceleration signals.
+
+        No cooldown — every tick is evaluated independently.
+        Signals include a max_hold_minutes metadata field (60 min) for
+        the engine to enforce hold-time limits.
 
         Returns empty list when magnet is not identifiable or conditions
         are not met.
@@ -97,22 +101,27 @@ class MagnetAccelerate(BaseStrategy):
         if magnet_gex < MIN_MAGNET_GEX:
             return []
 
-        # Per-symbol cooldown (5 minutes)
         ts = data.get("timestamp", time.time())
         symbol = data.get("symbol", "")
-        if symbol and symbol in self._last_signal_time:
-            if ts - self._last_signal_time[symbol] < 300:
-                return []
 
         signals: List[Signal] = []
 
-        # Phase 1: Magnet pull
+        # Phase 1: Magnet pull (bidirectional in POSITIVE regime)
         if regime == "POSITIVE" and net_gamma > 0:
-            sig = self._phase1_pull(
-                magnet_strike, magnet_gex, underlying_price, net_gamma, rolling_data
-            )
-            if sig:
-                signals.append(sig)
+            # LONG: price below magnet → LONG toward magnet
+            if underlying_price < magnet_strike:
+                sig = self._phase1_pull(
+                    magnet_strike, magnet_gex, underlying_price, net_gamma, rolling_data, Direction.LONG
+                )
+                if sig:
+                    signals.append(sig)
+            # SHORT: price above magnet → SHORT toward magnet
+            elif underlying_price > magnet_strike:
+                sig = self._phase1_pull(
+                    magnet_strike, magnet_gex, underlying_price, net_gamma, rolling_data, Direction.SHORT
+                )
+                if sig:
+                    signals.append(sig)
 
         # Phase 2: Acceleration breakout (NEGATIVE regime only)
         if regime == "NEGATIVE":
@@ -121,10 +130,6 @@ class MagnetAccelerate(BaseStrategy):
             )
             if sig:
                 signals.append(sig)
-
-        # Update cooldown timestamp
-        if symbol:
-            self._last_signal_time[symbol] = ts
 
         return signals
 
@@ -139,24 +144,33 @@ class MagnetAccelerate(BaseStrategy):
         price: float,
         net_gamma: float,
         rolling_data: Dict[str, Any],
+        direction: Direction,
     ) -> Optional[Signal]:
         """
-        Phase 1: Price below magnet + positive gamma → LONG toward magnet.
+        Phase 1: Bidirectional magnet pull in positive gamma regime.
 
-        Dealer hedging (long gamma) means they buy dips and sell rallies,
-        which naturally pulls price toward the magnet strike.
+        Direction.LONG:  price below magnet → LONG toward magnet
+                        (dealer hedging pulls price up)
+        Direction.SHORT: price above magnet → SHORT toward magnet
+                        (dealer hedging pulls price down)
         """
-        if price >= magnet_strike:
-            return None
+        if direction == Direction.LONG:
+            if price >= magnet_strike:
+                return None
+            distance_pct = (magnet_strike - price) / price
+        else:
+            # Direction.SHORT
+            if price <= magnet_strike:
+                return None
+            distance_pct = (price - magnet_strike) / price
 
-        distance_pct = (magnet_strike - price) / price
         if distance_pct < 0.003:
             return None  # Already at magnet — not a pull
         if distance_pct > 0.02:
             # More than 2% away — not in magnet range
             return None
 
-        # Check for upward momentum in recent price action
+        price_window = rolling_data.get(KEY_PRICE_5M)
         momentum = self._price_momentum(rolling_data)
 
         # Confidence: closer to magnet + stronger gamma + good momentum
@@ -166,36 +180,43 @@ class MagnetAccelerate(BaseStrategy):
 
         # Target: magnet strike (exit within 0.3% of it)
         target = magnet_strike
-        # Stop: below recent low or 1% below entry
-        stop = price * (1 - 0.01)
+        # Stop: 1% beyond entry (opposite direction)
+        stop = price * (1 + 0.01) if direction == Direction.SHORT else price * (1 - 0.01)
 
-        # Check rolling window low for tighter stop
-        price_window = rolling_data.get(KEY_PRICE_5M)
+        # Tighter stop from rolling window
         if price_window and price_window.min is not None:
-            stop = max(stop, price_window.min * 0.998)
+            if direction == Direction.LONG:
+                stop = max(stop, price_window.min * 0.998)
+            else:
+                stop = min(stop, price_window.max * 1.002)
 
-        risk = price - stop
+        risk = abs(price - stop)
         if risk <= 0:
             return None
 
         return Signal(
-            direction=Direction.LONG,
+            direction=direction,
             confidence=round(confidence, 3),
             entry=price,
             stop=round(stop, 2),
             target=round(target, 2),
             strategy_id=self.strategy_id,
-            reason=f"Magnet pull: price {price:.2f} → magnet {magnet_strike:.2f}, "
-                   f"positive gamma regime, GEX={magnet_gex:.0f}",
+            reason=f"Magnet pull {'SHORT' if direction == Direction.SHORT else 'LONG'}: "
+                   f"price {price:.2f} {'above' if direction == Direction.SHORT else 'below'} "
+                   f"magnet {magnet_strike:.2f}, positive gamma regime, GEX={magnet_gex:.0f}",
             metadata={
                 "phase": 1,
+                "direction": direction.name,
                 "magnet_strike": magnet_strike,
                 "magnet_gex": magnet_gex,
                 "distance_to_magnet_pct": round(distance_pct, 4),
                 "net_gamma": round(net_gamma, 2),
                 "momentum": momentum,
+                "regime": "POSITIVE",
+                "trend": price_window.trend if price_window else "UNKNOWN",
                 "risk": round(risk, 2),
-                "risk_reward_ratio": round((target - price) / risk, 2),
+                "risk_reward_ratio": round(abs(target - price) / risk, 2),
+                "max_hold_minutes": 60,
             },
         )
 
@@ -218,6 +239,8 @@ class MagnetAccelerate(BaseStrategy):
         dealer hedging accelerates in the breakout direction.
         """
         distance_from_magnet = (price - magnet_strike) / magnet_strike
+
+        price_window = rolling_data.get(KEY_PRICE_5M)
 
         # Need price to be past the magnet by at least BREAKOUT_PCT
         if abs(distance_from_magnet) < BREAKOUT_PCT:
@@ -274,12 +297,15 @@ class MagnetAccelerate(BaseStrategy):
             ),
             metadata={
                 "phase": 2,
+                "direction": direction.name,
                 "magnet_strike": magnet_strike,
                 "distance_from_magnet_pct": round(distance_from_magnet, 4),
                 "net_gamma": round(net_gamma, 2),
                 "regime": regime,
+                "trend": price_window.trend if price_window else "UNKNOWN",
                 "risk": round(risk, 2),
                 "risk_reward_ratio": round(abs(target - price) / risk, 2),
+                "max_hold_minutes": 60,
             },
         )
 
