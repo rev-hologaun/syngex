@@ -17,7 +17,8 @@ Scoring:
 
     Score 3 = max conviction (technical + wall + flip)
     Score 2 = moderate conviction (any two)
-    Score < 2 = no trade
+    Score 1 = wall-level confluence alone is valid
+    Score 0 = no trade
 
 Entry:
     - Score 3 at resistance (call wall + flip + swing high) → SHORT
@@ -29,7 +30,7 @@ Exit:
     - Target: 2× risk (1:2 RR)
 
 Confidence factors:
-    - Base confidence from score (score 3 → 0.7, score 2 → 0.45)
+    - Base confidence from score (score 3 → 0.6, score 2 → 0.35)
     - Wall strength bonus (higher |GEX| = more confidence)
     - Regime alignment bonus
 """
@@ -37,7 +38,6 @@ Confidence factors:
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
@@ -51,9 +51,9 @@ logger = logging.getLogger("Syngex.Strategies.ConfluenceReversal")
 # ---------------------------------------------------------------------------
 
 CONFLUENCE_DISTANCE_PCT = 0.003  # 0.3% — max distance for confluence
-MIN_STRUCTURAL_SIGNALS = 2        # Must have 2+ independent structural signals
-MAX_CONFIDENCE_BASE = 0.7         # Base confidence for score 3
-MIN_CONFIDENCE = 0.40             # Minimum confidence to emit signal
+MIN_STRUCTURAL_SIGNALS = 1        # Wall-level confluence alone is valid
+MAX_CONFIDENCE_BASE = 0.6         # Base confidence for score 3
+MIN_CONFIDENCE = 0.25             # Minimum confidence to emit signal
 STOP_PCT = 0.008                  # 0.8% stop
 TARGET_RISK_MULT = 2.0            # 2× risk for target
 
@@ -67,14 +67,11 @@ class ConfluenceReversal(BaseStrategy):
 
     Combines technical S/R with gamma structural levels for high-probability
     reversal trades. Score each level: technical=1, gamma wall=1, flip=1.
-    Trade only levels with score >= 2.
+    Trade levels with score >= 1 (wall-level confluence alone is valid).
     """
 
     strategy_id = "confluence_reversal"
     layer = "layer1"
-
-    # Per-symbol signal cooldown: max 1 signal per symbol per 10 minutes
-    _last_signal_time: Dict[str, float] = {}
 
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """
@@ -97,12 +94,8 @@ class ConfluenceReversal(BaseStrategy):
         walls = gex_calc.get_gamma_walls(threshold=500_000)
         flip = gex_calc.get_gamma_flip()
 
-        # Per-symbol cooldown: max 1 signal per symbol per 10 minutes
-        ts = data.get("timestamp", time.time())
-        symbol = data.get("symbol", "")
-        if symbol and symbol in self._last_signal_time:
-            if ts - self._last_signal_time[symbol] < 600:
-                return []  # Cooldown active
+        # Price window for trend info (used by signal builders)
+        price_window = self._get_price_window(rolling_data)
 
         # Find confluence levels
         resistance_levels = self._find_confluence_levels(
@@ -119,7 +112,7 @@ class ConfluenceReversal(BaseStrategy):
             best_resist = max(resistance_levels, key=lambda x: x.get("structural_count", 0))
             if best_resist.get("structural_count", 0) >= MIN_STRUCTURAL_SIGNALS:
                 sig = self._build_short_signal(
-                    best_resist, underlying_price, regime
+                    best_resist, underlying_price, regime, price_window
                 )
                 if sig:
                     signals.append(sig)
@@ -129,14 +122,10 @@ class ConfluenceReversal(BaseStrategy):
             best_support = max(support_levels, key=lambda x: x.get("structural_count", 0))
             if best_support.get("structural_count", 0) >= MIN_STRUCTURAL_SIGNALS:
                 sig = self._build_long_signal(
-                    best_support, underlying_price, regime
+                    best_support, underlying_price, regime, price_window
                 )
                 if sig:
                     signals.append(sig)
-
-        # Update cooldown timer
-        if symbol:
-            self._last_signal_time[symbol] = ts
 
         return signals
 
@@ -157,6 +146,7 @@ class ConfluenceReversal(BaseStrategy):
 
         Confluence requires at least MIN_STRUCTURAL_SIGNALS independent
         structural signals: gamma wall, gamma flip, and/or VWAP.
+        Wall-level confluence alone (score 1) is valid.
         Rolling extremes (max/min) are technical — they can boost
         confidence but don't count as structural signals.
 
@@ -171,7 +161,8 @@ class ConfluenceReversal(BaseStrategy):
             candidate_walls = [w for w in walls if w["strike"] < price]
 
         # Get rolling window for technical signal check
-        rw = self._get_price_window(rolling_data)
+        price_window = self._get_price_window(rolling_data)
+        rw = price_window
         has_technical = False
         technical_type = None
         if rw is not None and rw.count >= 3:
@@ -283,12 +274,9 @@ class ConfluenceReversal(BaseStrategy):
         level: Dict[str, Any],
         price: float,
         regime: str,
+        price_window: Optional[Any],
     ) -> Optional[Signal]:
         """Build a SHORT signal from a resistance confluence level."""
-        # Hard regime filter — don't SHORT in POSITIVE regime
-        if regime != "NEGATIVE":
-            return None
-
         strike = level["strike"]
         structural_count = level.get("structural_count", 0)
         gex = level.get("gex", 0)
@@ -303,14 +291,21 @@ class ConfluenceReversal(BaseStrategy):
         gex_bonus = min(0.15, abs(gex) / 10_000_000)
         # Technical signal bonus (normalize to [0,1])
         tech_bonus = 0.05 if level.get("has_technical") else 0.0
-        # Regime alignment bonus (normalize to [0,1])
-        regime_bonus = 0.10 if regime == "NEGATIVE" else 0.0
+        # Regime as soft confidence factor: aligned = +0.15, misaligned = -0.10
+        regime_aligned = regime == "NEGATIVE"
+        regime_bonus = 0.15 if regime_aligned else -0.10
+        # Trend as soft confidence factor: FLAT = no change, UP/DOWN = -0.05
+        trend = price_window.trend if price_window else "UNKNOWN"
+        trend_penalty = -0.05 if trend in ("UP", "DOWN") else 0.0
+
         # Normalize and average with base
-        norm_base = (confidence - 0.45) / (0.7 - 0.45) if 0.7 != 0.45 else 1.0
+        norm_base = (confidence - 0.25) / (0.6 - 0.25) if 0.6 != 0.25 else 1.0
         norm_gex = gex_bonus / 0.15 if 0.15 != 0 else 0.0
         norm_tech = tech_bonus / 0.05 if 0.05 != 0 else 0.0
-        norm_regime = regime_bonus / 0.05 if 0.05 != 0 else 0.0
+        norm_regime = (regime_bonus + 0.10) / 0.25  # map [-0.10, +0.15] → [0, 1]
         confidence = (norm_base + norm_gex + norm_tech + norm_regime) / 4.0
+        # Apply trend penalty
+        confidence += trend_penalty
         if confidence < MIN_CONFIDENCE:
             return None
 
@@ -331,7 +326,7 @@ class ConfluenceReversal(BaseStrategy):
             reason=f"Confluence SHORT at {strike:.0f}: "
                    f"{structural_count} structural signals, type={level.get('type', 'unknown')}, "
                    f"has_flip={level.get('has_flip', False)}, "
-                   f"regime={regime}",
+                   f"regime={regime}, trend={trend}",
             metadata={
                 "structural_count": structural_count,
                 "level_type": level.get("type", "unknown"),
@@ -343,6 +338,7 @@ class ConfluenceReversal(BaseStrategy):
                 "technical_type": level.get("technical_type"),
                 "distance_pct": round(level["distance_pct"], 4),
                 "regime": regime,
+                "trend": trend,
                 "risk": round(risk, 2),
                 "risk_reward_ratio": round(abs(target - price) / risk, 2),
             },
@@ -353,12 +349,9 @@ class ConfluenceReversal(BaseStrategy):
         level: Dict[str, Any],
         price: float,
         regime: str,
+        price_window: Optional[Any],
     ) -> Optional[Signal]:
         """Build a LONG signal from a support confluence level."""
-        # Hard regime filter — don't LONG in NEGATIVE regime
-        if regime != "POSITIVE":
-            return None
-
         strike = level["strike"]
         structural_count = level.get("structural_count", 0)
         gex = level.get("gex", 0)
@@ -373,14 +366,21 @@ class ConfluenceReversal(BaseStrategy):
         gex_bonus = min(0.15, abs(gex) / 10_000_000)
         # Technical signal bonus (normalize to [0,1])
         tech_bonus = 0.05 if level.get("has_technical") else 0.0
-        # Regime alignment bonus (normalize to [0,1])
-        regime_bonus = 0.10 if regime == "POSITIVE" else 0.0
+        # Regime as soft confidence factor: aligned = +0.15, misaligned = -0.10
+        regime_aligned = regime == "POSITIVE"
+        regime_bonus = 0.15 if regime_aligned else -0.10
+        # Trend as soft confidence factor: FLAT = no change, UP/DOWN = -0.05
+        trend = price_window.trend if price_window else "UNKNOWN"
+        trend_penalty = -0.05 if trend in ("UP", "DOWN") else 0.0
+
         # Normalize and average with base
-        norm_base = (confidence - 0.45) / (0.7 - 0.45) if 0.7 != 0.45 else 1.0
+        norm_base = (confidence - 0.25) / (0.6 - 0.25) if 0.6 != 0.25 else 1.0
         norm_gex = gex_bonus / 0.15 if 0.15 != 0 else 0.0
         norm_tech = tech_bonus / 0.05 if 0.05 != 0 else 0.0
-        norm_regime = regime_bonus / 0.05 if 0.05 != 0 else 0.0
+        norm_regime = (regime_bonus + 0.10) / 0.25  # map [-0.10, +0.15] → [0, 1]
         confidence = (norm_base + norm_gex + norm_tech + norm_regime) / 4.0
+        # Apply trend penalty
+        confidence += trend_penalty
         if confidence < MIN_CONFIDENCE:
             return None
 
@@ -401,7 +401,7 @@ class ConfluenceReversal(BaseStrategy):
             reason=f"Confluence LONG at {strike:.0f}: "
                    f"{structural_count} structural signals, type={level.get('type', 'unknown')}, "
                    f"has_flip={level.get('has_flip', False)}, "
-                   f"regime={regime}",
+                   f"regime={regime}, trend={trend}",
             metadata={
                 "structural_count": structural_count,
                 "level_type": level.get("type", "unknown"),
@@ -413,6 +413,7 @@ class ConfluenceReversal(BaseStrategy):
                 "technical_type": level.get("technical_type"),
                 "distance_pct": round(level["distance_pct"], 4),
                 "regime": regime,
+                "trend": trend,
                 "risk": round(risk, 2),
                 "risk_reward_ratio": round(abs(target - price) / risk, 2),
             },
