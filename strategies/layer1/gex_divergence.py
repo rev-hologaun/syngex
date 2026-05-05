@@ -37,7 +37,6 @@ Confidence factors:
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
@@ -50,15 +49,14 @@ logger = logging.getLogger("Syngex.Strategies.GEXDivergence")
 # Constants
 # ---------------------------------------------------------------------------
 
-DIVERGENCE_MIN_SLOPE = 0.001     # Minimum slope magnitude (0.1% — filters noise)
+DIVERGENCE_MIN_SLOPE = 0.0005   # Minimum slope magnitude (0.05% — catches subtler divergences)
 DIVERGENCE_WINDOW = 30           # Number of points for slope calculation
 CONFIRMATION_CANDLE_PCT = 0.002  # 0.2% candle for confirmation
-MIN_CONFIDENCE = 0.45            # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.25            # Minimum confidence to emit signal
 STOP_PCT = 0.005                 # 0.5% stop
 TARGET_RISK_MULT = 1.5           # 1.5× risk for target
 MIN_DATA_POINTS = 15             # Minimum data points for slope calculation
 MIN_TOTAL_GEX = 1000000.0        # 1M — minimum GEX wall strength
-SIGNAL_COOLDOWN = 300            # 5-minute per-symbol cooldown
 
 
 class GEXDivergence(BaseStrategy):
@@ -76,7 +74,6 @@ class GEXDivergence(BaseStrategy):
 
     strategy_id = "gex_divergence"
     layer = "layer1"
-    _last_signal_time: Dict[str, float] = {}
 
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """
@@ -164,14 +161,6 @@ class GEXDivergence(BaseStrategy):
         except Exception:
             return []  # Can't assess GEX strength — skip
 
-        # Per-symbol frequency cap (cooldown)
-        symbol = data.get("symbol", "UNKNOWN")
-        ts = data.get("timestamp", time.time())
-        last = self._last_signal_time.get(symbol, 0)
-        if ts - last < SIGNAL_COOLDOWN:
-            return []  # Signal for this symbol too recent
-        self._last_signal_time[symbol] = ts
-
         # Build signal
         if divergence_type == "bearish":
             direction = Direction.SHORT
@@ -203,6 +192,7 @@ class GEXDivergence(BaseStrategy):
                 "gamma_slope": round(gamma_slope, 6),
                 "price_window_count": price_window.count,
                 "gamma_window_count": gamma_window.count,
+                "trend": price_window.trend if price_window else "UNKNOWN",
                 "regime": regime,
                 "risk": round(risk, 2),
                 "reward": round(reward, 2),
