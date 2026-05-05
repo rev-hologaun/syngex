@@ -48,23 +48,23 @@ logger = logging.getLogger("Syngex.Strategies.ProbWeightedMagnet")
 # ---------------------------------------------------------------------------
 
 # OI concentration threshold (relative units)
-MIN_OI_CONCENTRATION = 5.0          # Minimum total OI at a strike
+MIN_OI_CONCENTRATION = 2.0          # Minimum total OI at a strike
 
 # Price consolidation: 5m range must be < this % of 30m range
-CONSOLIDATION_RATIO = 0.40          # 40%
+CONSOLIDATION_RATIO = 0.50          # 50%
 
 # Delta acceleration: delta change must exceed this ratio
-DELTA_ACCEL_RATIO = 1.10            # 10% change in delta
+DELTA_ACCEL_RATIO = 1.05            # 5% change in delta
 
 # Min net gamma for positive regime
-MIN_NET_GAMMA = 5000.0
+MIN_NET_GAMMA = 2000.0
 
 # Stop and target
 STOP_PCT = 0.005                    # 0.5% stop
 TARGET_RISK_MULT = 1.5              # 1.5× risk for target
 
 # Min confidence
-MIN_CONFIDENCE = 0.35
+MIN_CONFIDENCE = 0.25
 MAX_CONFIDENCE = 0.80               # v2 cap
 
 # Min data points
@@ -280,6 +280,7 @@ class ProbWeightedMagnet(BaseStrategy):
                 "risk": round(risk, 2),
                 "risk_reward_ratio": round(abs(target_price - price) / risk, 2)
                     if risk > 0 else 0,
+                "trend": price_30m.trend if price_30m else "UNKNOWN",
             },
         )
 
@@ -397,6 +398,7 @@ class ProbWeightedMagnet(BaseStrategy):
                 "risk": round(risk, 2),
                 "risk_reward_ratio": round(abs(target_price - price) / risk, 2)
                     if risk > 0 else 0,
+                "trend": price_30m.trend if price_30m else "UNKNOWN",
             },
         )
 
