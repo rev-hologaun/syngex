@@ -8,22 +8,22 @@ to normalize — trade the reversal.
 
 Logic:
     - Calculate IV Skew = avg_call_iv - avg_put_iv across the chain
-    - Extreme positive skew (>0.30) + price stable + net gamma positive → SHORT
+    - Extreme positive skew (>0.20) + price stable + net gamma positive → SHORT
       (euphoria: calls are expensive but price isn't breaking out)
-    - Extreme negative skew (<-0.10) + price stable + net gamma positive → LONG
+    - Extreme negative skew (<-0.07) + price stable + net gamma positive → LONG
       (panic: puts are expensive but price isn't breaking down)
     - Skew normalization confirms the trade (skew moving toward zero)
     - Net gamma positive required for stability
 
 Entry (LONG — panic overblown):
-    - Skew < -0.10 (puts more expensive — bearish fear)
+    - Skew < -0.07 (puts more expensive — bearish fear)
     - Price stable (not breaking down)
     - Net gamma positive (stable environment)
     - Volume not spiking down (no actual selling pressure)
     - Skew starting to normalize (current > rolling avg — fear easing)
 
 Entry (SHORT — euphoria overblown):
-    - Skew > 0.30 (calls more expensive — bullish euphoria)
+    - Skew > 0.20 (calls more expensive — bullish euphoria)
     - Price stable (not breaking out)
     - Net gamma positive (stable environment)
     - Volume not spiking up (no actual buying pressure)
@@ -54,8 +54,8 @@ logger = logging.getLogger("Syngex.Strategies.IVSkewSqueeze")
 # ---------------------------------------------------------------------------
 
 # IV Skew thresholds
-SKEW_EXTREME_POSITIVE = 0.30       # Calls 30%+ more expensive (euphoria)
-SKEW_EXTREME_NEGATIVE = -0.10      # Puts more expensive (panic)
+SKEW_EXTREME_POSITIVE = 0.20       # Calls 20%+ more expensive (euphoria)
+SKEW_EXTREME_NEGATIVE = -0.07      # Puts 7%+ more expensive (panic)
 
 # Price stability: price change must be < this % over 5m
 PRICE_STABLE_THRESHOLD = 0.005     # 0.5% change max
@@ -68,12 +68,12 @@ STOP_PCT = 0.005                   # 0.5% stop
 TARGET_PCT = 0.008                 # 0.8% target (1.6:1 R:R)
 
 # Min confidence
-MIN_CONFIDENCE = 0.35
+MIN_CONFIDENCE = 0.25
 MAX_CONFIDENCE = 0.80              # v2 strategies cap
 
 # Min data points
 MIN_DATA_POINTS = 5                # Need data for basic checks
-MIN_SKEW_DATA_POINTS = 10          # Minimum for skew rolling window
+MIN_SKEW_DATA_POINTS = 5           # Minimum for skew rolling window
 
 # Volume spike check
 VOLUME_SPIKE_THRESHOLD = 1.5       # Volume > 1.5× avg = spike
@@ -238,6 +238,10 @@ class IVSkewSqueeze(BaseStrategy):
         stop = price * (1 - STOP_PCT)
         target = price * (1 + TARGET_PCT)
 
+        rolling_data = data.get("rolling_data", {})
+        price_window_meta = rolling_data.get(KEY_PRICE_5M)
+        trend = price_window_meta.trend if price_window_meta else "UNKNOWN"
+
         return Signal(
             direction=Direction.LONG,
             confidence=round(confidence, 3),
@@ -262,6 +266,7 @@ class IVSkewSqueeze(BaseStrategy):
                 "target_pct": TARGET_PCT,
                 "risk_reward_ratio": round(abs(target - price) / (price - stop), 2)
                     if (price - stop) > 0 else 0,
+                "trend": trend,
             },
         )
 
@@ -326,6 +331,10 @@ class IVSkewSqueeze(BaseStrategy):
         stop = price * (1 + STOP_PCT)
         target = price * (1 - TARGET_PCT)
 
+        rolling_data = data.get("rolling_data", {})
+        price_window_meta = rolling_data.get(KEY_PRICE_5M)
+        trend = price_window_meta.trend if price_window_meta else "UNKNOWN"
+
         return Signal(
             direction=Direction.SHORT,
             confidence=round(confidence, 3),
@@ -350,6 +359,7 @@ class IVSkewSqueeze(BaseStrategy):
                 "target_pct": TARGET_PCT,
                 "risk_reward_ratio": round(abs(target - price) / (stop - price), 2)
                     if (stop - price) > 0 else 0,
+                "trend": trend,
             },
         )
 
@@ -425,10 +435,10 @@ class IVSkewSqueeze(BaseStrategy):
             5. Net gamma strength — stronger positive gamma = higher confidence
         """
         # 1. Skew extremity (0.15–0.25)
-        #    Skew < -0.10 is the threshold; deeper = higher confidence
+        #    Skew < -0.07 is the threshold; deeper = higher confidence
         skew_magnitude = abs(current_skew)
-        # Normalize: -0.10 = 0.3, -0.30 = 0.6, -0.50+ = 1.0
-        skew_conf = min(1.0, (skew_magnitude - 0.10) / 0.40)
+        # Normalize: -0.07 = 0.3, -0.27 = 0.6, -0.47+ = 1.0
+        skew_conf = min(1.0, (skew_magnitude - 0.07) / 0.40)
         skew_component = 0.15 + 0.10 * skew_conf
 
         # 2. Price stability (0.15–0.25)
@@ -487,10 +497,10 @@ class IVSkewSqueeze(BaseStrategy):
             5. Net gamma strength — stronger positive gamma = higher confidence
         """
         # 1. Skew extremity (0.15–0.25)
-        #    Skew > 0.30 is the threshold; higher = higher confidence
+        #    Skew > 0.20 is the threshold; higher = higher confidence
         skew_magnitude = abs(current_skew)
-        # Normalize: 0.30 = 0.3, 0.50 = 0.6, 0.70+ = 1.0
-        skew_conf = min(1.0, (skew_magnitude - 0.30) / 0.40)
+        # Normalize: 0.20 = 0.3, 0.40 = 0.6, 0.60+ = 1.0
+        skew_conf = min(1.0, (skew_magnitude - 0.20) / 0.40)
         skew_component = 0.15 + 0.10 * skew_conf
 
         # 2. Price stability (0.15–0.25)
