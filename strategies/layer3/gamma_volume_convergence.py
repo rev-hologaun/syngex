@@ -39,7 +39,7 @@ logger = logging.getLogger("Syngex.Strategies.GammaVolumeConvergence")
 
 # Delta acceleration threshold: current total_delta must exceed rolling avg
 # by this ratio (15% above rolling average)
-DELTA_ACCEL_RATIO = 1.15
+DELTA_ACCEL_RATIO = 1.10
 
 # Delta acceleration lower bound for SHORT: current total_delta must be
 # above this ratio of rolling avg (ensures delta is declining, not negative).
@@ -50,11 +50,11 @@ DELTA_ACCEL_MIN_RATIO = 0.30
 
 # Gamma spike threshold: current total_gamma must exceed rolling avg by
 # this ratio (20% above rolling average)
-GAMMA_SPIKE_RATIO = 1.20
+GAMMA_SPIKE_RATIO = 1.15
 
 # Volume spike threshold: current volume must exceed rolling avg by this
 # ratio (20% above rolling average)
-VOLUME_SPIKE_RATIO = 1.20
+VOLUME_SPIKE_RATIO = 1.15
 
 # Stop loss: 0.5% against entry
 STOP_PCT = 0.005
@@ -63,7 +63,7 @@ STOP_PCT = 0.005
 TARGET_PCT = 0.010
 
 # Minimum confidence to emit a signal
-MIN_CONFIDENCE = 0.35
+MIN_CONFIDENCE = 0.25
 
 # Maximum confidence — micro-signals shouldn't carry max conviction
 MAX_CONFIDENCE = 0.90
@@ -201,6 +201,10 @@ class GammaVolumeConvergence(BaseStrategy):
         walls = self._safe_get_walls(gex_calc)
         call_wall_above = self._nearest_wall_above(walls, price)
 
+        # Rolling window trend
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        rolling_trend = price_window.trend if price_window else "UNKNOWN"
+
         return Signal(
             direction=Direction.LONG,
             confidence=round(confidence, 3),
@@ -218,6 +222,7 @@ class GammaVolumeConvergence(BaseStrategy):
                 "gamma_spike_ratio": round(gamma_spike, 3),
                 "volume_up_spike": True,
                 "price_trend": "UP",
+                "rolling_trend": rolling_trend,
                 "net_gamma": round(net_gamma, 2),
                 "regime": regime,
                 "call_wall_above": call_wall_above["strike"] if call_wall_above else None,
@@ -299,6 +304,10 @@ class GammaVolumeConvergence(BaseStrategy):
         walls = self._safe_get_walls(gex_calc)
         put_wall_below = self._nearest_wall_below(walls, price)
 
+        # Rolling window trend
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        rolling_trend = price_window.trend if price_window else "UNKNOWN"
+
         return Signal(
             direction=Direction.SHORT,
             confidence=round(confidence, 3),
@@ -316,6 +325,7 @@ class GammaVolumeConvergence(BaseStrategy):
                 "gamma_spike_ratio": round(gamma_spike, 3),
                 "volume_down_spike": True,
                 "price_trend": "DOWN",
+                "rolling_trend": rolling_trend,
                 "net_gamma": round(net_gamma, 2),
                 "regime": regime,
                 "put_wall_below": put_wall_below["strike"] if put_wall_below else None,
