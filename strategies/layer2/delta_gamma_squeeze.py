@@ -44,13 +44,13 @@ logger = logging.getLogger("Syngex.Strategies.DeltaGammaSqueeze")
 # ---------------------------------------------------------------------------
 
 # How close price must be to call wall (as fraction of price)
-CALL_WALL_PROXIMITY_PCT = 0.02        # 2% (was 1.5%) — wider wall proximity
+CALL_WALL_PROXIMITY_PCT = 0.03        # 3% (was 2%) — wider wall proximity
 
 # Minimum delta acceleration ratio: current delta must exceed rolling avg by this
-DELTA_ACCEL_RATIO = 1.15              # 15% above rolling avg (was 25%)
+DELTA_ACCEL_RATIO = 1.10              # 10% above rolling avg (was 15%)
 
 # Volume spike threshold: current volume must exceed rolling avg by this
-VOLUME_SPIKE_RATIO = 1.2              # 20% above rolling avg (was 40%)
+VOLUME_SPIKE_RATIO = 1.15             # 15% above rolling avg (was 20%)
 
 # Minimum wall GEX to consider
 MIN_WALL_GEX = 500000
@@ -60,6 +60,9 @@ PRICE_ABOVE_MEAN_CONFIDENCE = 0.55    # Price in upper half of 5m window
 
 # Min rolling window data points required
 MIN_DATA_POINTS = 3                   # Fewer points needed (was 5)
+
+# Minimum confidence threshold
+MIN_CONFIDENCE = 0.25
 
 # Stop and target parameters
 STOP_BELOW_WALL_PCT = 0.008           # 0.8% below entry
@@ -205,8 +208,12 @@ class DeltaGammaSqueeze(BaseStrategy):
             distance_pct, accel_ratio, vol_spike, price_trend,
             wall_gex, regime, net_gamma, direction,
         )
-        if confidence < 0.35:
+        if confidence < MIN_CONFIDENCE:
             return None
+
+        # Add trend from price window
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        trend = price_window.trend if price_window else "UNKNOWN"
 
         # Build signal with direction-specific entry/stop/target
         entry = price
@@ -240,6 +247,7 @@ class DeltaGammaSqueeze(BaseStrategy):
                 "net_gamma": round(net_gamma, 2),
                 "risk": round(risk, 2),
                 "risk_reward_ratio": round(abs(target - entry) / risk, 2) if risk > 0 else 0,
+                "trend": trend,
             },
         )
 
