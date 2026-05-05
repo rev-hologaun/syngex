@@ -44,16 +44,19 @@ MIN_TREND_POINTS = 5
 MIN_GREEKS_POINTS = 5
 
 # Delta must be below rolling avg by this ratio
-DELTA_DECLINE_RATIO = 0.90            # Delta below 90% of rolling avg (was 85%)
+DELTA_DECLINE_RATIO = 0.95            # Delta below 95% of rolling avg (was 90%)
 
 # Volume must be below rolling avg by this ratio
-VOLUME_DECLINE_RATIO = 0.85           # Volume below 85% of rolling avg (was 80%)
+VOLUME_DECLINE_RATIO = 0.90           # Volume below 90% of rolling avg (was 85%)
 
 # Trend must be sustained for this many points
-MIN_TREND_DURATION = 3                # At least 3 candles in trend (was 4)
+MIN_TREND_DURATION = 2                # At least 2 candles in trend (was 3)
 
 # Stop distance
 STOP_PCT = 0.008                      # 0.8% beyond swing
+
+# Minimum confidence to emit a signal
+MIN_CONFIDENCE = 0.25                 # Min confidence threshold (was 0.35)
 
 # Target: mean reversion to rolling average
 MEAN_REVERSION_MULT = 1.0             # 1.0× distance — target is the rolling mean
@@ -154,7 +157,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
             trend_strength, delta_decline, vol_decline,
             net_gamma, regime,
         )
-        if confidence < 0.35:
+        if confidence < MIN_CONFIDENCE:
             return None
 
         # 5. Build signal
@@ -194,6 +197,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
                 "rolling_mean": round(rolling_mean, 2) if rolling_mean else None,
                 "net_gamma": round(net_gamma, 2),
                 "regime": regime,
+                "price_trend": price_window.trend if price_window else "UNKNOWN",
                 "risk": round(risk, 2),
                 "risk_reward_ratio": round(abs(target - entry) / risk, 2) if risk > 0 else 0,
             },
