@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
+from strategies.rolling_keys import KEY_PRICE_5M
 
 logger = logging.getLogger("Syngex.Strategies.GammaWallBounce")
 
@@ -42,12 +43,11 @@ WALL_PROXIMITY_PCT = 0.005       # 0.5% — how close price must be to wall
 STOP_PAST_WALL_PCT = 0.004       # 0.4% — stop beyond the wall
 TARGET_RISK_MULT = 1.5           # 1.5× risk for target
 MIN_WALL_GEX = 500000            # Minimum |GEX| to consider a wall
-MIN_CONFIDENCE = 0.35            # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.25            # Minimum confidence to emit signal
 MAX_CONFIDENCE = 0.85            # Hard cap — wall bounce alone can't be max conviction
 
 
 class GammaWallBounce(BaseStrategy):
-    _last_signal_time: Dict[str, float] = {}
 
     """
     Mean-reversion strategy trading bounces off gamma walls.
@@ -80,12 +80,7 @@ class GammaWallBounce(BaseStrategy):
         if not walls:
             return []
 
-        # Per-symbol cooldown
         ts = data.get("timestamp", time.time())
-        symbol = data.get("symbol", "")
-        if symbol and symbol in self._last_signal_time:
-            if ts - self._last_signal_time[symbol] < 300:
-                return []
 
         price_above_walls = [w for w in walls if w["strike"] > underlying_price]
         price_below_walls = [w for w in walls if w["strike"] < underlying_price]
@@ -103,9 +98,6 @@ class GammaWallBounce(BaseStrategy):
             sig = self._check_put_wall(wall, underlying_price, walls, rolling_data, data.get("regime", ""))
             if sig:
                 signals.append(sig)
-
-        if symbol:
-            self._last_signal_time[symbol] = ts
 
         return signals
 
@@ -142,8 +134,17 @@ class GammaWallBounce(BaseStrategy):
         # Check rejection: price should be in lower part of recent range
         # Use rolling window if available, otherwise rely on proximity
         rejection_score = self._rejection_score(wall, price, all_walls, rolling_data)
-        if rejection_score < 0.5:
+        if rejection_score < 0.6:
             return None
+
+        # Check velocity: if price is crossing the wall at high speed,
+        # the wall is permeable — skip the signal
+        if not self._check_velocity(price, wall_strike, rolling_data, "call"):
+            return None
+
+        # Get trend from rolling data
+        pw = rolling_data.get(KEY_PRICE_5M) if rolling_data else None
+        trend = pw.trend if pw else "UNKNOWN"
 
         # Calculate confidence
         confidence = self._compute_confidence(
@@ -177,6 +178,8 @@ class GammaWallBounce(BaseStrategy):
                 "rejection_score": round(rejection_score, 3),
                 "risk": round(risk, 2),
                 "risk_reward_ratio": round(abs(target - price) / risk, 2) if risk > 0 else 0,
+                "regime": regime,
+                "trend": trend,
             },
         )
 
@@ -210,8 +213,17 @@ class GammaWallBounce(BaseStrategy):
             return None
 
         rejection_score = self._rejection_score(wall, price, all_walls, rolling_data)
-        if rejection_score < 0.5:
+        if rejection_score < 0.6:
             return None
+
+        # Check velocity: if price is crossing the wall at high speed,
+        # the wall is permeable — skip the signal
+        if not self._check_velocity(price, wall_strike, rolling_data, "put"):
+            return None
+
+        # Get trend from rolling data
+        pw = rolling_data.get(KEY_PRICE_5M) if rolling_data else None
+        trend = pw.trend if pw else "UNKNOWN"
 
         confidence = self._compute_confidence(
             distance_pct, abs(wall_gex), rejection_score, "put", regime
@@ -242,12 +254,44 @@ class GammaWallBounce(BaseStrategy):
                 "rejection_score": round(rejection_score, 3),
                 "risk": round(risk, 2),
                 "risk_reward_ratio": round(abs(target - price) / risk, 2) if risk > 0 else 0,
+                "regime": regime,
+                "trend": trend,
             },
         )
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _check_velocity(
+        self,
+        price: float,
+        wall_strike: float,
+        rolling_data: Dict[str, Any] = None,
+        wall_side: str = "",
+    ) -> bool:
+        """
+        Check if price is approaching wall at high velocity.
+        If velocity is too high, the wall is being pierced, not rejected.
+        Returns True if velocity is acceptable (low enough for bounce), False if too high.
+        """
+        pw = rolling_data.get(KEY_PRICE_5M) if rolling_data else None
+        if pw is None or pw.count < 3:
+            return True  # No data, assume acceptable
+
+        recent = pw.values[-3:]
+        if len(recent) < 2:
+            return True
+
+        # Calculate velocity: price change per tick as % of price
+        tick_velocity = abs(recent[-1] - recent[0]) / abs(recent[0])
+
+        # If velocity > 0.5% per tick, wall is being pierced
+        VELOCITY_THRESHOLD = 0.005
+        if tick_velocity > VELOCITY_THRESHOLD:
+            return False
+
+        return True
 
     def _rejection_score(
         self,
@@ -315,10 +359,12 @@ class GammaWallBounce(BaseStrategy):
         norm_reject = (rejection_conf - 0.2) / (0.3 - 0.2) if 0.3 != 0.2 else 1.0
         regime_bonus = 0.0
         if side == "call" and regime == "POSITIVE":
-            regime_bonus = 0.1
+            regime_bonus = 0.15  # dealers sell rallies in positive regime
         elif side == "put" and regime == "NEGATIVE":
-            regime_bonus = 0.1
-        norm_regime = regime_bonus / 0.1 if regime_bonus > 0 else 0.0
+            regime_bonus = 0.15  # dealers buy dips in negative regime
+        elif regime_bonus == 0:
+            regime_bonus = -0.10  # misaligned regime — still fire but penalize
+        norm_regime = regime_bonus / 0.15 if regime_bonus > 0 else 0.0
         confidence = (norm_prox + norm_strength + norm_reject + norm_regime) / 4.0
         return min(MAX_CONFIDENCE, max(0.0, confidence))
 
