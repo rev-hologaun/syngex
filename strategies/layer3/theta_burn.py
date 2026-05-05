@@ -47,7 +47,7 @@ logger = logging.getLogger("Syngex.Strategies.ThetaBurn")
 # ---------------------------------------------------------------------------
 
 # Net gamma must be strongly positive (threshold to avoid weak signals)
-MIN_NET_GAMMA = 10000.0
+MIN_NET_GAMMA = 5000.0
 
 # Wall proximity for bounce trades
 WALL_PROXIMITY_PCT = 0.005  # 0.5%
@@ -60,13 +60,13 @@ MIN_TARGET_PCT = 0.002      # 0.2% min target
 MAX_TARGET_PCT = 0.004      # 0.4% max target
 
 # Range narrowness: 5m range must be < this % of 30m range
-RANGE_NARROWNESS_RATIO = 0.30  # 30%
+RANGE_NARROWNESS_RATIO = 0.40  # 40%
 
 # Rejection signal thresholds
 DIVERGENCE_VOLUME_THRESHOLD = 0.80  # Volume < 80% of avg = declining
 
 # Min confidence
-MIN_CONFIDENCE = 0.35
+MIN_CONFIDENCE = 0.25
 MAX_CONFIDENCE = 0.80  # Micro-signal cap, lower for pin trades
 
 # Min data points
@@ -229,7 +229,7 @@ class ThetaBurn(BaseStrategy):
         rejection_score, rejection_type = self._check_rejection(
             rolling_data, "LONG", wall_strike,
         )
-        if rejection_score < 0.4:
+        if rejection_score < 0.3:
             return None
 
         # Compute confidence
@@ -242,6 +242,9 @@ class ThetaBurn(BaseStrategy):
             return None
 
         # Build signal
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        trend = price_window.trend if price_window else "UNKNOWN"
+
         entry = price
         stop = wall_strike * (1 - STOP_PAST_WALL_PCT)
         risk = entry - stop
@@ -278,6 +281,7 @@ class ThetaBurn(BaseStrategy):
                 "risk_reward_ratio": round(
                     (target - entry) / risk, 2
                 ) if risk > 0 else 0,
+                "trend": trend,
             },
         )
 
@@ -330,7 +334,7 @@ class ThetaBurn(BaseStrategy):
         rejection_score, rejection_type = self._check_rejection(
             rolling_data, "SHORT", wall_strike,
         )
-        if rejection_score < 0.4:
+        if rejection_score < 0.3:
             return None
 
         # Compute confidence
@@ -343,6 +347,9 @@ class ThetaBurn(BaseStrategy):
             return None
 
         # Build signal
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        trend = price_window.trend if price_window else "UNKNOWN"
+
         entry = price
         stop = wall_strike * (1 + STOP_PAST_WALL_PCT)
         risk = stop - entry
@@ -379,6 +386,7 @@ class ThetaBurn(BaseStrategy):
                 "risk_reward_ratio": round(
                     (entry - target) / risk, 2
                 ) if risk > 0 else 0,
+                "trend": trend,
             },
         )
 
