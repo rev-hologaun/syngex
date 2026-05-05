@@ -43,13 +43,13 @@ logger = logging.getLogger("Syngex.Strategies.IVBandBreakout")
 
 # Delta acceleration threshold: current delta must be below rolling avg
 # by this ratio (< 1.0 means deceleration = coiling signal)
-DELTA_DECEL_RATIO = 0.98  # Delta must be below rolling avg
+DELTA_DECEL_RATIO = 0.95  # Delta must be below rolling avg
 
 # IV compression: IV must be in bottom 25% of its 30m range
 # (checked via RollingWindow.is_in_bottom_quartile)
 
 # Price compression: high-low range must be < 30% of rolling mean range
-PRICE_COMPRESSION_RATIO = 0.30
+PRICE_COMPRESSION_RATIO = 0.40
 
 # Minimum price move to count as breakout (0.05%)
 BREAKOUT_MOVE_PCT = 0.0005
@@ -62,7 +62,7 @@ STOP_PCT = 0.005              # 0.5% stop
 TARGET_PCT = 0.010            # 1.0% target (2:1 R:R)
 
 # Min confidence
-MIN_CONFIDENCE = 0.35
+MIN_CONFIDENCE = 0.25
 MAX_CONFIDENCE = 0.85         # Micro-signal cap
 
 # Min data points
@@ -206,6 +206,9 @@ class IVBandBreakout(BaseStrategy):
         stop = entry * (1 - STOP_PCT)
         target = entry * (1 + TARGET_PCT)
 
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        trend = price_window.trend if price_window else "UNKNOWN"
+
         return Signal(
             direction=Direction.LONG,
             confidence=round(confidence, 3),
@@ -224,6 +227,7 @@ class IVBandBreakout(BaseStrategy):
                 "price_compression_ratio": round(self._get_price_compression_ratio(rolling_data), 3),
                 "delta_deceleration_ratio": round(delta_decel, 3),
                 "volume_trend": vol_trend,
+                "price_trend": trend,
                 "net_gamma": round(net_gamma, 2),
                 "regime": regime,
                 "stop": round(stop, 2),
@@ -306,6 +310,9 @@ class IVBandBreakout(BaseStrategy):
         stop = entry * (1 + STOP_PCT)
         target = entry * (1 - TARGET_PCT)
 
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        trend = price_window.trend if price_window else "UNKNOWN"
+
         return Signal(
             direction=Direction.SHORT,
             confidence=round(confidence, 3),
@@ -324,6 +331,7 @@ class IVBandBreakout(BaseStrategy):
                 "price_compression_ratio": round(self._get_price_compression_ratio(rolling_data), 3),
                 "delta_deceleration_ratio": round(delta_decel, 3),
                 "volume_trend": vol_trend,
+                "price_trend": trend,
                 "net_gamma": round(net_gamma, 2),
                 "regime": regime,
                 "stop": round(stop, 2),
