@@ -46,10 +46,10 @@ logger = logging.getLogger("Syngex.Strategies.StrikeConcentration")
 TOP_OI_STRIKES_COUNT = 3
 
 # Bounce proximity: price must be within this % of the strike
-BOUNCE_PROXIMITY_PCT = 0.003  # 0.3%
+BOUNCE_PROXIMITY_PCT = 0.005  # 0.5%
 
 # Slice confirmation: candle body must be > this % of total range
-SLICE_BODY_RATIO = 0.5  # 50% body
+SLICE_BODY_RATIO = 0.3  # 30% body
 
 # Volume spike for slice confirmation
 SLICE_VOLUME_RATIO = 1.20  # 20% above rolling avg
@@ -65,7 +65,7 @@ STOP_PCT_SLICE = 0.003  # 0.3% against entry for slices
 TARGET_RISK_MULT = 1.5  # 1.5× risk for bounce targets
 
 # Min confidence
-MIN_CONFIDENCE = 0.35
+MIN_CONFIDENCE = 0.25
 MAX_CONFIDENCE = 0.85  # Micro-signal cap
 
 # Min data points
@@ -188,16 +188,20 @@ class StrikeConcentration(BaseStrategy):
 
         Conditions:
             1. Nearest top-OI Put strike BELOW current price
-            2. Price within 0.3% of that strike
+            2. Price within 0.5% of that strike
             3. Bullish reversal signal (divergence OR candlestick pattern)
             4. Net Gamma > 0 (already checked in evaluate)
         """
+        # Trend
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        trend = price_window.trend if price_window else "UNKNOWN"
+
         # Find nearest top-OI strike below price
         put_strike, rank, total_oi = self._nearest_strike_below(top_strikes, price)
         if put_strike is None:
             return None
 
-        # Check proximity: price within 0.3% of strike
+        # Check proximity: price within 0.5% of strike
         proximity = abs(price - put_strike) / put_strike
         if proximity > BOUNCE_PROXIMITY_PCT:
             return None
@@ -245,6 +249,7 @@ class StrikeConcentration(BaseStrategy):
                 "bullish_reversal": True,
                 "net_gamma": round(net_gamma, 2),
                 "regime": regime,
+                "trend": trend,
                 "risk": round(risk, 2),
                 "risk_reward_ratio": round(
                     (target - entry) / risk, 2
@@ -270,16 +275,20 @@ class StrikeConcentration(BaseStrategy):
 
         Conditions:
             1. Nearest top-OI Call strike ABOVE current price
-            2. Price within 0.3% of that strike
+            2. Price within 0.5% of that strike
             3. Bearish reversal signal (divergence OR candlestick pattern)
             4. Net Gamma > 0 (already checked in evaluate)
         """
+        # Trend
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        trend = price_window.trend if price_window else "UNKNOWN"
+
         # Find nearest top-OI strike above price
         call_strike, rank, total_oi = self._nearest_strike_above(top_strikes, price)
         if call_strike is None:
             return None
 
-        # Check proximity: price within 0.3% of strike
+        # Check proximity: price within 0.5% of strike
         proximity = abs(call_strike - price) / call_strike
         if proximity > BOUNCE_PROXIMITY_PCT:
             return None
@@ -327,6 +336,7 @@ class StrikeConcentration(BaseStrategy):
                 "bearish_reversal": True,
                 "net_gamma": round(net_gamma, 2),
                 "regime": regime,
+                "trend": trend,
                 "risk": round(risk, 2),
                 "risk_reward_ratio": round(
                     (entry - target) / risk, 2
@@ -356,12 +366,16 @@ class StrikeConcentration(BaseStrategy):
             3. Volume spike: current > rolling avg by ≥20%
             4. Delta at that strike turning positive
         """
+        # Trend
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        trend = price_window.trend if price_window else "UNKNOWN"
+
         # Find nearest top-OI strike above price (the one being sliced through)
         call_strike, rank, total_oi = self._nearest_strike_above(top_strikes, price)
         if call_strike is None:
             return None
 
-        # Check strong candle: body > 50% of range
+        # Check strong candle: body > 30% of range
         body_ratio = self._get_candle_body_ratio(rolling_data)
         if body_ratio is None or body_ratio < SLICE_BODY_RATIO:
             return None
@@ -413,6 +427,7 @@ class StrikeConcentration(BaseStrategy):
                 "delta_positive": True,
                 "net_gamma": round(net_gamma, 2),
                 "regime": regime,
+                "trend": trend,
                 "risk": round(risk, 2),
                 "risk_reward_ratio": round(
                     (target - entry) / risk, 2
@@ -442,12 +457,16 @@ class StrikeConcentration(BaseStrategy):
             3. Volume spike: current > rolling avg by ≥20%
             4. Delta at that strike turning negative
         """
+        # Trend
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        trend = price_window.trend if price_window else "UNKNOWN"
+
         # Find nearest top-OI strike below price (the one being sliced through)
         put_strike, rank, total_oi = self._nearest_strike_below(top_strikes, price)
         if put_strike is None:
             return None
 
-        # Check strong candle: body > 50% of range
+        # Check strong candle: body > 30% of range
         body_ratio = self._get_candle_body_ratio(rolling_data)
         if body_ratio is None or body_ratio < SLICE_BODY_RATIO:
             return None
@@ -499,6 +518,7 @@ class StrikeConcentration(BaseStrategy):
                 "delta_negative": True,
                 "net_gamma": round(net_gamma, 2),
                 "regime": regime,
+                "trend": trend,
                 "risk": round(risk, 2),
                 "risk_reward_ratio": round(
                     (entry - target) / risk, 2
