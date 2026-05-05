@@ -48,7 +48,7 @@ logger = logging.getLogger("Syngex.Strategies.VolCompressionRange")
 COMPRESSION_PCT = 0.003       # 0.3% max range for compression
 MIN_RANGE_BARS = 20           # Minimum data points in rolling window
 WALL_EDGE_PROXIMITY = 0.004   # 0.4% from wall for edge trade
-MIN_CONFIDENCE = 0.40         # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.25         # Minimum confidence to emit signal
 STOP_PCT = 0.006              # 0.6% stop (wider for scalping)
 TARGET_RISK_MULT = 1.5        # 1.5× risk for target
 STD_THRESHOLD = 0.002         # Max std of price for compression
@@ -65,7 +65,6 @@ class VolCompressionRange(BaseStrategy):
 
     strategy_id = "vol_compression_range"
     layer = "layer1"
-    _last_signal_time: Dict[str, float] = {}
 
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """
@@ -89,12 +88,8 @@ class VolCompressionRange(BaseStrategy):
         if regime != "POSITIVE":
             return []
 
-        # Per-symbol cooldown
         ts = data.get("timestamp", time.time())
         symbol = data.get("symbol", "")
-        if symbol and symbol in self._last_signal_time:
-            if ts - self._last_signal_time[symbol] < 600:
-                return []
 
         # Get the best price rolling window
         price_window = self._get_price_window(rolling_data)
@@ -122,9 +117,6 @@ class VolCompressionRange(BaseStrategy):
             )
             if sig:
                 signals.append(sig)
-
-        if symbol:
-            self._last_signal_time[symbol] = ts
 
         return signals
 
@@ -212,6 +204,8 @@ class VolCompressionRange(BaseStrategy):
         if risk <= 0:
             return None
 
+        trend = price_window.trend if price_window else "UNKNOWN"
+
         return Signal(
             direction=Direction.SHORT,
             confidence=round(confidence, 3),
@@ -231,6 +225,8 @@ class VolCompressionRange(BaseStrategy):
                 "price_window_count": price_window.count,
                 "risk": round(risk, 2),
                 "risk_reward_ratio": round(abs(target - price) / risk, 2),
+                "regime": regime,
+                "trend": trend,
             },
         )
 
@@ -263,13 +259,14 @@ class VolCompressionRange(BaseStrategy):
         if position_in_range > 0.4:
             return None  # Not near lower edge
 
-        # Find nearest put wall below price
+        # Find nearest wall below price (any type; put walls get bonus)
         walls = gex_calc.get_gamma_walls(threshold=500_000)
-        put_walls = [w for w in walls if w["strike"] < price and w["side"] == "put"]
-        if not put_walls:
+        any_walls_below = [w for w in walls if w["strike"] < price]
+        if not any_walls_below:
             return None
 
-        nearest_wall = max(put_walls, key=lambda w: w["strike"])
+        nearest_wall = max(any_walls_below, key=lambda w: w["strike"])
+        is_put_wall = nearest_wall.get("side") == "put"
         wall_distance = (price - nearest_wall["strike"]) / price
 
         if wall_distance > WALL_EDGE_PROXIMITY:
@@ -278,7 +275,7 @@ class VolCompressionRange(BaseStrategy):
         # Compute confidence
         confidence = self._edge_confidence(
             position_in_range, wall_distance, nearest_wall["gex"],
-            rng / price, price_window.count, "long"
+            rng / price, price_window.count, "long", is_put_wall=is_put_wall
         )
         if confidence < MIN_CONFIDENCE:
             return None
@@ -290,6 +287,8 @@ class VolCompressionRange(BaseStrategy):
         if risk <= 0:
             return None
 
+        trend = price_window.trend if price_window else "UNKNOWN"
+
         return Signal(
             direction=Direction.LONG,
             confidence=round(confidence, 3),
@@ -297,18 +296,22 @@ class VolCompressionRange(BaseStrategy):
             stop=round(stop, 2),
             target=round(target, 2),
             strategy_id=self.strategy_id,
-            reason=f"Range LONG: price near lower edge, put wall at "
+            reason=f"Range LONG: price near lower edge, wall at "
                    f"{nearest_wall['strike']:.0f}, range={rng/price:.2%}",
             metadata={
                 "edge": "lower",
-                "put_wall_strike": nearest_wall["strike"],
-                "put_wall_gex": nearest_wall["gex"],
+                "wall_strike": nearest_wall["strike"],
+                "wall_gex": nearest_wall["gex"],
+                "wall_side": nearest_wall.get("side", "unknown"),
+                "is_put_wall": is_put_wall,
                 "wall_distance_pct": round(wall_distance, 4),
                 "position_in_range": round(position_in_range, 3),
                 "range_pct": round(rng / price, 4),
                 "price_window_count": price_window.count,
                 "risk": round(risk, 2),
                 "risk_reward_ratio": round(abs(target - price) / risk, 2),
+                "regime": regime,
+                "trend": trend,
             },
         )
 
@@ -324,6 +327,7 @@ class VolCompressionRange(BaseStrategy):
         range_pct: float,
         window_count: int,
         direction: str,
+        is_put_wall: bool = False,
     ) -> float:
         """
         Compute confidence for a range edge signal.
@@ -335,6 +339,7 @@ class VolCompressionRange(BaseStrategy):
         - Wall strength: higher |GEX| = higher confidence (0.1–0.2)
         - Data quality: more points = higher confidence (0.0–0.1)
         - Regime alignment: positive regime = required, bonus if confirmed (0.1)
+        - Put wall bonus: put walls at lower edge get +0.05 confidence
         """
         # Position confidence: how close to edge
         if direction == "short":
@@ -359,6 +364,9 @@ class VolCompressionRange(BaseStrategy):
         # Regime bonus (positive gamma regime already required)
         regime_conf = 0.1
 
+        # Put wall bonus (only meaningful for LONG side)
+        put_wall_conf = 0.05 if is_put_wall else 0.0
+
         # Normalize each component to [0,1] and average
         norm_pos = (position_conf - 0.2) / (0.3 - 0.2) if 0.3 != 0.2 else 1.0
         norm_wall = (wall_conf - 0.2) / (0.3 - 0.2) if 0.3 != 0.2 else 1.0
@@ -367,6 +375,8 @@ class VolCompressionRange(BaseStrategy):
         norm_data = data_conf / 0.1 if 0.1 != 0 else 0.0
         norm_regime = regime_conf / 0.1 if 0.1 != 0 else 0.0
         confidence = (norm_pos + norm_wall + norm_tight + norm_strength + norm_data + norm_regime) / 6.0
+        # Add put wall bonus directly
+        confidence += put_wall_conf
         return min(1.0, max(0.0, confidence))
 
     def _get_price_window(
