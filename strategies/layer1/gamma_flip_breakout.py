@@ -25,7 +25,6 @@ Confidence factors:
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
@@ -42,7 +41,7 @@ FLIP_PROXIMITY_PCT = 0.025      # 2.5% — price must be within this of flip
 STOP_OTHER_SIDE_PCT = 0.01      # 1% — stop on other side of flip
 ATR_MULT = 1.5                   # 1.5× rolling range as ATR proxy
 TARGET_RR = 2.5                  # 1:2.5 risk-reward minimum
-MIN_CONFIDENCE = 0.35            # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.25            # Minimum confidence to emit signal
 MIN_GAMMA_STRENGTH = 100000      # Minimum |net_gamma| for regime confidence
 
 
@@ -56,7 +55,6 @@ class GammaFlipBreakout(BaseStrategy):
 
     strategy_id = "gamma_flip_breakout"
     layer = "layer1"
-    _last_signal_time: Dict[str, float] = {}
 
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """
@@ -93,13 +91,6 @@ class GammaFlipBreakout(BaseStrategy):
         if flip_strike is None:
             return []  # No data at all
 
-        # Per-symbol cooldown (10 minutes)
-        ts = data.get("timestamp", time.time())
-        symbol = data.get("symbol", "")
-        if symbol and symbol in self._last_signal_time:
-            if ts - self._last_signal_time[symbol] < 600:
-                return []
-
         signals: List[Signal] = []
 
         if underlying_price > flip_strike:
@@ -116,9 +107,6 @@ class GammaFlipBreakout(BaseStrategy):
             )
             if sig:
                 signals.append(sig)
-
-        if symbol:
-            self._last_signal_time[symbol] = ts
 
         return signals
 
@@ -172,6 +160,7 @@ class GammaFlipBreakout(BaseStrategy):
         gex_calc: Any,
     ) -> Optional[Signal]:
         """SHORT fade: price rallied toward flip, expect rejection."""
+        price_window = rolling_data.get(KEY_PRICE_5M)
         # Stop: above price or other side of flip, whichever is closer
         stop = max(price * 1.003, flip_strike * (1 + STOP_OTHER_SIDE_PCT))
         risk = stop - price
@@ -208,6 +197,7 @@ class GammaFlipBreakout(BaseStrategy):
                 "atr": round(atr, 2),
                 "risk": round(risk, 2),
                 "risk_reward_ratio": round(abs(target - price) / risk, 2),
+                "trend": price_window.trend if price_window else "UNKNOWN",
             },
         )
 
@@ -256,6 +246,7 @@ class GammaFlipBreakout(BaseStrategy):
                 "atr": round(atr, 2),
                 "risk": round(risk, 2),
                 "risk_reward_ratio": round(abs(target - price) / risk, 2),
+                "trend": price_window.trend if price_window else "UNKNOWN",
             },
         )
 
@@ -342,6 +333,7 @@ class GammaFlipBreakout(BaseStrategy):
                 "atr": round(atr, 2),
                 "risk": round(risk, 2),
                 "risk_reward_ratio": round(abs(target - price) / risk, 2),
+                "trend": price_window.trend if price_window else "UNKNOWN",
             },
         )
 
@@ -389,6 +381,7 @@ class GammaFlipBreakout(BaseStrategy):
                 "atr": round(atr, 2),
                 "risk": round(risk, 2),
                 "risk_reward_ratio": round(abs(target - price) / risk, 2),
+                "trend": price_window.trend if price_window else "UNKNOWN",
             },
         )
 
