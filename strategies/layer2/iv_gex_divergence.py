@@ -46,7 +46,7 @@ logger = logging.getLogger("Syngex.Strategies.IVGEXDivergence")
 # ---------------------------------------------------------------------------
 
 # Price must be at or above this percentile of 30m window
-PRICE_PERCENTILE_THRESHOLD = 0.75     # p75 — price in top 25% of range
+PRICE_PERCENTILE_THRESHOLD = 0.70     # p70 — price in top 30% of range
 
 # Min data points for price window
 MIN_PRICE_POINTS = 10
@@ -55,7 +55,7 @@ MIN_PRICE_POINTS = 10
 MIN_IV_POINTS = 5
 
 # Min positive net gamma threshold
-MIN_POSITIVE_GAMMA = 500000           # $500k net gamma
+MIN_POSITIVE_GAMMA = 200000           # $200k net gamma
 
 # IV decline threshold: IV must be below rolling avg by this ratio
 IV_DECLINE_RATIO = 0.95             # IV below 95% of rolling avg
@@ -63,6 +63,9 @@ IV_DECLINE_RATIO = 0.95             # IV below 95% of rolling avg
 # Stop and target
 STOP_PCT = 0.006                      # 0.6% stop
 TARGET_RISK_MULT = 1.5                # 1.5× risk toward mean
+
+# Min confidence threshold for signal emission
+MIN_CONFIDENCE = 0.25
 
 # Max confidence cap
 MAX_CONFIDENCE = 0.95
@@ -120,7 +123,7 @@ class IVGEXDivergence(BaseStrategy):
                     price_high, iv_decline, net_gamma,
                     wall_above, regime, "SHORT",
                 )
-                if confidence >= 0.35:
+                if confidence >= MIN_CONFIDENCE:
                     sig = self._build_signal(
                         signal_type="SHORT",
                         price=underlying_price,
@@ -153,7 +156,7 @@ class IVGEXDivergence(BaseStrategy):
                     price_low, iv_expand, net_gamma,
                     wall_below, regime, "LONG",
                 )
-                if confidence >= 0.35:
+                if confidence >= MIN_CONFIDENCE:
                     sig = self._build_signal(
                         signal_type="LONG",
                         price=underlying_price,
@@ -395,6 +398,9 @@ class IVGEXDivergence(BaseStrategy):
             if wall:
                 wall_info = f" | nearest call wall at {wall['strike']}"
 
+            price_window = rolling_data.get(KEY_PRICE_30M)
+            trend = price_window.trend if price_window else "UNKNOWN"
+
             return Signal(
                 direction=Direction.SHORT,
                 confidence=round(min(confidence, MAX_CONFIDENCE), 3),
@@ -415,6 +421,7 @@ class IVGEXDivergence(BaseStrategy):
                     "wall_above_strike": wall["strike"] if wall else None,
                     "wall_above_gex": wall["gex"] if wall else None,
                     "regime": regime,
+                    "trend": trend,
                     "risk": round(risk, 2),
                     "risk_reward_ratio": round(abs(target - entry) / risk, 2) if risk > 0 else 0,
                 },
@@ -430,6 +437,9 @@ class IVGEXDivergence(BaseStrategy):
             wall_info = ""
             if wall:
                 wall_info = f" | nearest put wall at {wall['strike']}"
+
+            price_window = rolling_data.get(KEY_PRICE_30M)
+            trend = price_window.trend if price_window else "UNKNOWN"
 
             return Signal(
                 direction=Direction.LONG,
@@ -451,6 +461,7 @@ class IVGEXDivergence(BaseStrategy):
                     "wall_below_strike": wall["strike"] if wall else None,
                     "wall_below_gex": wall["gex"] if wall else None,
                     "regime": regime,
+                    "trend": trend,
                     "risk": round(risk, 2),
                     "risk_reward_ratio": round(abs(target - entry) / risk, 2) if risk > 0 else 0,
                 },
