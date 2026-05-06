@@ -846,10 +846,16 @@
     }
 
     // ── Gamma Wall computation ─────────────────────────────────────
-    function computeGammaWalls(gammaData) {
+    function computeGammaWalls(gammaData, underlyingPrice) {
         if (!gammaData || gammaData.length === 0) return [];
+        let filtered = gammaData;
+        if (underlyingPrice != null && underlyingPrice > 0) {
+            filtered = gammaData.filter(d =>
+                Math.abs(d.strike - underlyingPrice) / underlyingPrice <= 0.02
+            );
+        }
         // Sort by absolute net_gamma descending
-        return gammaData
+        return filtered
             .map(d => ({ ...d }))
             .sort((a, b) => Math.abs(b.net_gamma) - Math.abs(a.net_gamma));
     }
@@ -1059,7 +1065,7 @@
         drawGammaChart(gammaCanvas, gammaData, underlyingPrice);
 
         // Gamma Wall info
-        const walls = computeGammaWalls(gammaData);
+        const walls = computeGammaWalls(gammaData, underlyingPrice);
         if (walls.length > 0) {
             const dominant = walls[0];
             const isCall = dominant.net_gamma >= 0;

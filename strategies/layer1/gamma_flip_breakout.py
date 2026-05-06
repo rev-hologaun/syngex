@@ -143,10 +143,10 @@ class GammaFlipBreakout(BaseStrategy):
 
         if zs is not None and zs > 0.3:
             # Price is above its rolling mean → SHORT fade
-            return self._short_fade(flip_strike, price, atr, net_gamma, regime, gex_calc)
+            return self._short_fade(flip_strike, price, atr, net_gamma, regime, rolling_data, gex_calc)
         elif zs is not None and zs < -0.3:
             # Price is below its rolling mean → LONG fade
-            return self._long_fade(flip_strike, price, atr, net_gamma, regime, gex_calc)
+            return self._long_fade(flip_strike, price, atr, net_gamma, regime, rolling_data, gex_calc)
 
         return None
 
@@ -157,6 +157,7 @@ class GammaFlipBreakout(BaseStrategy):
         atr: float,
         net_gamma: float,
         regime: str,
+        rolling_data: Dict[str, Any],
         gex_calc: Any,
     ) -> Optional[Signal]:
         """SHORT fade: price rallied toward flip, expect rejection."""
@@ -208,9 +209,11 @@ class GammaFlipBreakout(BaseStrategy):
         atr: float,
         net_gamma: float,
         regime: str,
+        rolling_data: Dict[str, Any],
         gex_calc: Any,
     ) -> Optional[Signal]:
         """LONG fade: price dipped away from flip, expect bounce back."""
+        price_window = rolling_data.get(KEY_PRICE_5M)
         # Stop: below price or other side of flip
         stop = min(price * 0.997, flip_strike * (1 - STOP_OTHER_SIDE_PCT))
         risk = price - stop
@@ -280,10 +283,10 @@ class GammaFlipBreakout(BaseStrategy):
 
         if zs is not None and zs > 0.3:
             # Price trending up toward flip → LONG breakout
-            return self._long_breakout(flip_strike, price, atr, net_gamma, regime, gex_calc)
+            return self._long_breakout(flip_strike, price, atr, net_gamma, regime, rolling_data, gex_calc)
         elif zs is not None and zs < -0.3:
             # Price trending down away from flip → SHORT breakout
-            return self._short_breakout(flip_strike, price, atr, net_gamma, regime, gex_calc)
+            return self._short_breakout(flip_strike, price, atr, net_gamma, regime, rolling_data, gex_calc)
 
         return None
 
@@ -294,9 +297,11 @@ class GammaFlipBreakout(BaseStrategy):
         atr: float,
         net_gamma: float,
         regime: str,
+        rolling_data: Dict[str, Any],
         gex_calc: Any,
     ) -> Optional[Signal]:
         """LONG breakout: price approaching flip from below, expect momentum."""
+        price_window = rolling_data.get(KEY_PRICE_5M)
         # Stop: below flip or 1.5× ATR below entry
         stop = max(flip_strike * (1 - STOP_OTHER_SIDE_PCT), price * (1 - ATR_MULT * atr / price))
         risk = price - stop
@@ -344,9 +349,11 @@ class GammaFlipBreakout(BaseStrategy):
         atr: float,
         net_gamma: float,
         regime: str,
+        rolling_data: Dict[str, Any],
         gex_calc: Any,
     ) -> Optional[Signal]:
         """SHORT breakout: price moving away from flip downward."""
+        price_window = rolling_data.get(KEY_PRICE_5M)
         stop = min(flip_strike * (1 + STOP_OTHER_SIDE_PCT), price * (1 + ATR_MULT * atr / price))
         risk = stop - price
         if risk <= 0:
