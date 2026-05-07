@@ -197,9 +197,10 @@ class StrikeConcentration(BaseStrategy):
         trend = price_window.trend if price_window else "UNKNOWN"
 
         # Find nearest top-OI strike below price
-        put_strike, rank, total_oi = self._nearest_strike_below(top_strikes, price)
-        if put_strike is None:
+        result = self._nearest_strike_below(top_strikes, price)
+        if result is None:
             return None
+        put_strike, rank, total_oi = result
 
         # Check proximity: price within 0.5% of strike
         proximity = abs(price - put_strike) / put_strike
@@ -284,9 +285,10 @@ class StrikeConcentration(BaseStrategy):
         trend = price_window.trend if price_window else "UNKNOWN"
 
         # Find nearest top-OI strike above price
-        call_strike, rank, total_oi = self._nearest_strike_above(top_strikes, price)
-        if call_strike is None:
+        result = self._nearest_strike_above(top_strikes, price)
+        if result is None:
             return None
+        call_strike, rank, total_oi = result
 
         # Check proximity: price within 0.5% of strike
         proximity = abs(call_strike - price) / call_strike
@@ -371,9 +373,10 @@ class StrikeConcentration(BaseStrategy):
         trend = price_window.trend if price_window else "UNKNOWN"
 
         # Find nearest top-OI strike above price (the one being sliced through)
-        call_strike, rank, total_oi = self._nearest_strike_above(top_strikes, price)
-        if call_strike is None:
+        result = self._nearest_strike_above(top_strikes, price)
+        if result is None:
             return None
+        call_strike, rank, total_oi = result
 
         # Check strong candle: body > 30% of range
         body_ratio = self._get_candle_body_ratio(rolling_data)
@@ -462,9 +465,10 @@ class StrikeConcentration(BaseStrategy):
         trend = price_window.trend if price_window else "UNKNOWN"
 
         # Find nearest top-OI strike below price (the one being sliced through)
-        put_strike, rank, total_oi = self._nearest_strike_below(top_strikes, price)
-        if put_strike is None:
+        result = self._nearest_strike_below(top_strikes, price)
+        if result is None:
             return None
+        put_strike, rank, total_oi = result
 
         # Check strong candle: body > 30% of range
         body_ratio = self._get_candle_body_ratio(rolling_data)
