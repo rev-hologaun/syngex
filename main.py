@@ -803,6 +803,72 @@ class SyngexOrchestrator:
             logger.info("  TOP_STRIKES:  %s", "  |  ".join(parts))
 
     # ------------------------------------------------------------------
+    # Per-strategy last trigger
+    # ------------------------------------------------------------------
+
+    def _build_last_trigger(self) -> Dict[str, Dict[str, Any]]:
+        """Build last_trigger data for each strategy from open + resolved signals."""
+        if not self._signal_tracker:
+            return {}
+
+        triggers: Dict[str, Dict[str, Any]] = {}
+        now = time.time()
+
+        # Build timestamp -> signal map for open signals
+        open_by_strat: Dict[str, Dict[str, Any]] = {}
+        for sig in self._signal_tracker.get_open_signals():
+            sid = sig.strategy_id
+            if sid not in open_by_strat or sig.timestamp > open_by_strat[sid].get("timestamp", 0):
+                open_by_strat[sid] = {
+                    "direction": sig.direction,
+                    "confidence": sig.confidence,
+                    "entry": sig.entry,
+                    "stop": sig.stop,
+                    "target": sig.target,
+                    "timestamp": sig.timestamp,
+                }
+
+        # Build timestamp -> signal map for resolved signals
+        resolved_by_strat: Dict[str, Dict[str, Any]] = {}
+        for r in self._signal_tracker.get_resolved():
+            sid = r.open_signal.strategy_id
+            if sid not in resolved_by_strat or r.resolution_time > resolved_by_strat[sid].get("timestamp", 0):
+                resolved_by_strat[sid] = {
+                    "direction": r.open_signal.direction,
+                    "confidence": r.open_signal.confidence,
+                    "entry": r.open_signal.entry,
+                    "stop": r.open_signal.stop,
+                    "target": r.open_signal.target,
+                    "timestamp": r.resolution_time,
+                }
+
+        # Merge: prefer open signal (most recent), fall back to resolved
+        all_strats = set(open_by_strat.keys()) | set(resolved_by_strat.keys())
+        for sid in all_strats:
+            open_sig = open_by_strat.get(sid)
+            resolved_sig = resolved_by_strat.get(sid)
+
+            if open_sig and resolved_sig:
+                # Pick whichever is more recent
+                last = open_sig if open_sig["timestamp"] >= resolved_sig["timestamp"] else resolved_sig
+            elif open_sig:
+                last = open_sig
+            else:
+                last = resolved_sig
+
+            if last:
+                triggers[sid] = {
+                    "side": "BUY" if last["direction"] == "LONG" else "SELL",
+                    "confidence": round(last["confidence"], 3),
+                    "entry": round(last["entry"], 2),
+                    "stop": round(last["stop"], 2),
+                    "target": round(last["target"], 2),
+                    "timestamp": last["timestamp"],
+                }
+
+        return triggers
+
+    # ------------------------------------------------------------------
     # Per-strategy health data
     # ------------------------------------------------------------------
 
@@ -1065,6 +1131,8 @@ class SyngexOrchestrator:
             export["strategy_engine"] = self._strategy_engine.get_status()
             # Per-strategy health data for heatmap
             export["strategy_health"] = self._build_strategy_health()
+            # Per-strategy last trigger for execution card
+            export["last_trigger"] = self._build_last_trigger()
             # Micro-signal confidence overlay for dashboard
             recent = self._strategy_engine.get_recent_signals(20)
             micro_signals: Dict[str, Dict[str, Any]] = {}

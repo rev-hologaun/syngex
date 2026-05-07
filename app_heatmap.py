@@ -199,6 +199,7 @@ def _transform_for_socket(data: dict) -> dict:
         "last_updated": data.get("last_updated", ""),
         "micro_signals": data.get("micro_signals", {}),
         "gamma_data": gamma_data,
+        "last_trigger": data.get("last_trigger", {}),
         "data_valid": True,
     }
 
