@@ -36,6 +36,7 @@ from typing import Any, Dict, List, Optional
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_keys import KEY_PRICE_5M
+from strategies.volume_filter import VolumeFilter
 
 logger = logging.getLogger("Syngex.Strategies.MagnetAccelerate")
 
@@ -49,7 +50,7 @@ BREAKOUT_PCT = 0.002          # 0.2% — price must be this far past magnet to b
 MAX_BREAKOUT_PCT = 0.02       # 2% — max distance past magnet (no chasing)
 TRAIL_STOP_PCT = 0.01         # 1% — trailing stop for Phase 2
 TARGET_RISK_MULT = 1.5        # Minimum 1.5× risk for target distance
-MIN_CONFIDENCE = 0.25         # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.65         # Minimum confidence to emit signal
 
 
 class MagnetAccelerate(BaseStrategy):
@@ -87,6 +88,13 @@ class MagnetAccelerate(BaseStrategy):
         regime = data.get("regime", "")
         net_gamma = data.get("net_gamma", 0)
 
+        # Global volume filter — Phase 1 only (Phase 2 breakout is unaffected)
+        vol_check = VolumeFilter.evaluate(rolling_data, MIN_CONFIDENCE)
+        if not vol_check["recommended"]:
+            # Volume too low — suppress Phase 1 signals only
+            # Phase 2 (breakout) signals still fire below
+            pass  # We'll gate Phase 1 explicitly below
+
         # Find the magnet strike (highest |net_gamma|)
         magnet_strike = self._find_magnet(gex_calc)
         if magnet_strike is None:
@@ -107,7 +115,8 @@ class MagnetAccelerate(BaseStrategy):
         signals: List[Signal] = []
 
         # Phase 1: Magnet pull (bidirectional in POSITIVE regime)
-        if regime == "POSITIVE" and net_gamma > 0:
+        # Gate with volume filter — low volume = no mean-reversion signals
+        if regime == "POSITIVE" and net_gamma > 0 and vol_check["recommended"]:
             # LONG: price below magnet → LONG toward magnet
             if underlying_price < magnet_strike:
                 sig = self._phase1_pull(
@@ -124,6 +133,7 @@ class MagnetAccelerate(BaseStrategy):
                     signals.append(sig)
 
         # Phase 2: Acceleration breakout (NEGATIVE regime only)
+        # Phase 2 is unaffected by volume filter — breakout signals are high-conviction
         if regime == "NEGATIVE":
             sig = self._phase2_accelerate(
                 magnet_strike, underlying_price, net_gamma, regime, rolling_data

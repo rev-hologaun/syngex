@@ -649,6 +649,9 @@ class SyngexOrchestrator:
             if gex_summary:
                 net_delta = gex_summary.get("net_delta", 0.0)
                 total_vol = gex_summary.get("total_volume", 0)
+                # Push total volume for volume confirmation filter
+                if KEY_VOLUME_5M in self._rolling_data:
+                    self._rolling_data[KEY_VOLUME_5M].push(total_vol)
                 # Track total_delta_5m for delta_volume_exhaustion
                 if KEY_TOTAL_DELTA_5M in self._rolling_data:
                     self._rolling_data[KEY_TOTAL_DELTA_5M].push(net_delta)

@@ -43,6 +43,7 @@ from typing import Any, Dict, List, Optional
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_keys import KEY_PRICE_5M, KEY_PRICE_30M
+from strategies.volume_filter import VolumeFilter
 
 logger = logging.getLogger("Syngex.Strategies.ConfluenceReversal")
 
@@ -53,7 +54,7 @@ logger = logging.getLogger("Syngex.Strategies.ConfluenceReversal")
 CONFLUENCE_DISTANCE_PCT = 0.003  # 0.3% — max distance for confluence
 MIN_STRUCTURAL_SIGNALS = 1        # Wall-level confluence alone is valid
 MAX_CONFIDENCE_BASE = 0.6         # Base confidence for score 3
-MIN_CONFIDENCE = 0.25             # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.65             # Minimum confidence to emit signal
 STOP_PCT = 0.008                  # 0.8% stop
 TARGET_RISK_MULT = 2.0            # 2× risk for target
 
@@ -88,6 +89,12 @@ class ConfluenceReversal(BaseStrategy):
             return []
 
         rolling_data = data.get("rolling_data", {})
+
+        # Global volume filter — skip if volume doesn't support the signal
+        vol_check = VolumeFilter.evaluate(rolling_data, MIN_CONFIDENCE)
+        if not vol_check["recommended"]:
+            return []
+
         regime = data.get("regime", "")
 
         # Gather structural levels

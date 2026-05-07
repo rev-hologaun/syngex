@@ -38,6 +38,7 @@ from typing import Any, Dict, List, Optional
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_keys import KEY_PRICE_5M, KEY_PRICE_30M, KEY_VOLUME_5M
+from strategies.volume_filter import VolumeFilter
 
 logger = logging.getLogger("Syngex.Strategies.VolCompressionRange")
 
@@ -48,7 +49,7 @@ logger = logging.getLogger("Syngex.Strategies.VolCompressionRange")
 COMPRESSION_PCT = 0.003       # 0.3% max range for compression
 MIN_RANGE_BARS = 20           # Minimum data points in rolling window
 WALL_EDGE_PROXIMITY = 0.004   # 0.4% from wall for edge trade
-MIN_CONFIDENCE = 0.25         # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.45         # Minimum confidence to emit signal
 STOP_PCT = 0.006              # 0.6% stop (wider for scalping)
 TARGET_RISK_MULT = 1.5        # 1.5× risk for target
 STD_THRESHOLD = 0.002         # Max std of price for compression
@@ -90,6 +91,11 @@ class VolCompressionRange(BaseStrategy):
 
         ts = data.get("timestamp", time.time())
         symbol = data.get("symbol", "")
+
+        # Volume confirmation filter
+        vol_filter = VolumeFilter.evaluate(rolling_data, MIN_CONFIDENCE)
+        if not vol_filter["recommended"]:
+            return []
 
         # Get the best price rolling window
         price_window = self._get_price_window(rolling_data)

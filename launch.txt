@@ -6,7 +6,7 @@ python3 main.py --port 8220 intc dashboard
 python3 main.py --port 8230 amzn dashboard
 python3 main.py --port 8240 nvda dashboard
 python3 main.py --port 8250 meta dashboard
-python3 main.py --port 8260 pltr dashboard
+python3 main.py --port 8260 amd dashboard
 python3 main.py --port 8270 sofi dashboard
 python3 main.py --port 8280 spy dashboard
 python3 main.py --port 8290 qqq dashboard

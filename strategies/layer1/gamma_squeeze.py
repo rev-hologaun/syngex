@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
+from strategies.volume_filter import VolumeFilter
 from strategies.rolling_keys import (
     KEY_PRICE_5M,
     KEY_VOLUME_DOWN_5M,
@@ -49,7 +50,7 @@ PIN_ATR_PCT = 0.003           # 0.3% — max range for pin detection
 WALL_PROXIMITY_PCT = 0.003    # 0.3% — price must be near wall for breakout
 VOLUME_SURGE_MULT = 1.5       # 1.5× average volume = confirmation
 MIN_WALL_GEX = 500000         # Minimum |GEX| for wall consideration
-MIN_CONFIDENCE = 0.25         # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.50         # was 0.25
 TARGET_RISK_MULT = 2.0        # 2× risk for squeeze targets
 MIN_MASSIVE_WALL_GEX = 5_000_000  # Fallback threshold for POSITIVE regime filter
 
@@ -80,6 +81,12 @@ class GammaSqueeze(BaseStrategy):
             return []
 
         rolling_data = data.get("rolling_data", {})
+
+        # Global volume confirmation filter
+        vol_check = VolumeFilter.evaluate(rolling_data, MIN_CONFIDENCE)
+        if not vol_check["recommended"]:
+            return []
+
         net_gamma = data.get("net_gamma", 0)
         regime = data.get("regime", "")
 

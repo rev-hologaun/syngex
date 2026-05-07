@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Optional
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_keys import KEY_PRICE_5M
+from strategies.volume_filter import VolumeFilter
 
 logger = logging.getLogger("Syngex.Strategies.GammaWallBounce")
 
@@ -74,6 +75,11 @@ class GammaWallBounce(BaseStrategy):
             return []
 
         rolling_data = data.get("rolling_data")
+
+        # Global volume filter — wall bounce is mean-reversion, needs volume conviction
+        vol_check = VolumeFilter.evaluate(rolling_data, MIN_CONFIDENCE)
+        if not vol_check["recommended"]:
+            return []
 
         # Get walls above and below price
         walls = gex_calc.get_gamma_walls(threshold=MIN_WALL_GEX)
