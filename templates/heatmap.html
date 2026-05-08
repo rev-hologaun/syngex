@@ -282,7 +282,7 @@
             overflow: hidden;
             position: relative;
             transition: border-color 0.3s ease;
-            min-height: 140px;
+            min-height: 180px;
         }
         .card:hover {
             border-color: var(--accent);
@@ -308,12 +308,12 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 0.5rem 0.65rem 0.3rem;
+            padding: 0.6rem 0.8rem 0.4rem;
             position: relative;
             z-index: 1;
         }
         .card-name {
-            font-size: 0.65rem;
+            font-size: 0.75rem;
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.06em;
@@ -321,12 +321,25 @@
             line-height: 1.2;
         }
         .card-layer {
-            font-size: 0.55rem;
+            font-size: 0.65rem;
             color: #475569;
             text-transform: uppercase;
             letter-spacing: 0.08em;
             margin-right: 0.4rem;
         }
+
+        /* ── Directional bar (top of tile) ───────────────────── */
+        .card-dir-bar {
+            height: 6px;
+            position: relative;
+            z-index: 1;
+            margin: 0.5rem 0.65rem 0;
+            border-radius: 3px;
+            transition: background 0.5s ease;
+        }
+        .card-dir-bar.long { background: #10b981; }
+        .card-dir-bar.short { background: #ef4444; }
+        .card-dir-bar.void { background: #374151; }
 
         /* Status LED */
         .led {
@@ -359,54 +372,87 @@
             50% { opacity: 0.4; box-shadow: 0 0 10px #ef4444; }
         }
 
-        /* Execution card body — E/S/T rows */
+        /* ── Signal Tile body — Command Center layout ────────── */
         .card-body {
             flex: 1;
             display: flex;
             flex-direction: column;
-            justify-content: center;
-            padding: 0.15rem 0.65rem;
+            justify-content: space-around;
+            padding: 0.6rem 0.8rem;
             position: relative;
             z-index: 1;
-            gap: 0.1rem;
+            gap: 0.3rem;
+            min-height: 0;
         }
-        .card-level {
+
+        /* Header row — MASSIVE font (2.5x base) */
+        .card-signal-header {
             font-family: 'JetBrains Mono', 'Fira Code', monospace;
-            font-size: 0.72rem;
-            font-weight: 600;
-            line-height: 1.3;
+            font-size: 2.0em;
+            font-weight: 900;
+            letter-spacing: 0.04em;
             display: flex;
             align-items: baseline;
-            gap: 0.3rem;
+            justify-content: space-between;
+            line-height: 1.1;
         }
-        .card-level-label {
-            color: var(--text-dim);
-            font-size: 0.6rem;
-            font-weight: 700;
-            min-width: 0.9rem;
+        .card-signal-header .dir-icon {
+            margin-right: 0.15em;
         }
-        .card-level-value {
-            font-size: 0.75rem;
-            font-weight: 700;
+        .card-signal-header .dir-icon.long { color: #10b981; }
+        .card-signal-header .dir-icon.short { color: #ef4444; }
+        .card-signal-header .dir-text {
+            font-weight: 900;
+            text-transform: uppercase;
         }
-        .card-direction {
-            font-size: 0.7rem;
+        .card-signal-header .dir-text.long { color: #10b981; }
+        .card-signal-header .dir-text.short { color: #ef4444; }
+        .card-signal-header .conf-badge {
+            font-size: 0.5em;
             font-weight: 800;
-            letter-spacing: 0.04em;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.3rem;
+            padding: 0.15em 0.5em;
+            border-radius: 6px;
+            background: rgba(255,255,255,0.15);
+            white-space: nowrap;
+            align-self: center;
+            line-height: 1;
         }
-        .card-direction.long { color: #10b981; }
-        .card-direction.short { color: #ef4444; }
-        .card-confidence {
+
+        /* Thick separator */
+        .card-separator {
+            height: 3px;
+            background: rgba(255,255,255,0.25);
+            border-radius: 2px;
+            margin: 0.15rem 0;
+        }
+
+        /* Data rows — MASSIVE font (2x base) */
+        .card-data-row {
             font-family: 'JetBrains Mono', 'Fira Code', monospace;
-            font-size: 0.65rem;
+            font-size: 1.6em;
             font-weight: 700;
-            padding: 0.1rem 0.45rem;
-            border-radius: 4px;
-            background: rgba(255,255,255,0.1);
+            line-height: 1.2;
+            display: flex;
+            align-items: baseline;
+            gap: 0.5rem;
         }
+        .card-data-row .data-label {
+            font-size: 0.85em;
+            font-weight: 800;
+            opacity: 0.7;
+            min-width: 0;
+        }
+        .card-data-row .data-value {
+            font-size: 1em;
+            font-weight: 700;
+        }
+        .card-data-row .data-at {
+            font-size: 1em;
+            font-weight: 800;
+            opacity: 0.6;
+        }
+
+        /* No signal state */
         .card-no-signal {
             flex: 1;
             display: flex;
@@ -417,7 +463,7 @@
             z-index: 1;
         }
         .card-no-signal span {
-            font-size: 0.6rem;
+            font-size: 0.85rem;
             color: #475569;
             text-transform: uppercase;
             letter-spacing: 0.08em;
@@ -957,6 +1003,7 @@
                 </div>
                 <div class="led led-idle" id="led-${s.id}"></div>
             </div>
+            <div class="card-dir-bar void" id="dirbar-${s.id}"></div>
             <div class="card-body" id="body-${s.id}">
                 <div class="card-no-signal"><span>NO RECENT SIGNAL</span></div>
             </div>
@@ -969,7 +1016,7 @@
             </div>
         `;
         grid.appendChild(card);
-        cardElements[s.id] = { card, body: document.getElementById(`body-${s.id}`) };
+        cardElements[s.id] = { card, body: document.getElementById(`body-${s.id}`), dirbar: document.getElementById(`dirbar-${s.id}`) };
     });
 
     // Create Layer 2 Overview card
@@ -1181,12 +1228,13 @@
                 led.className = `led led-${strat.status === 'error' ? 'error' : (strat.status === 'idle' ? 'idle' : 'active')}`;
             }
 
-            // ── Execution card body ──
+            // ── Signal Tile body ──
             const trigger = lastTriggers[id];
             const body = el.body;
 
             if (health === 'void' || !trigger) {
                 body.innerHTML = '<div class="card-no-signal"><span>NO RECENT SIGNAL</span></div>';
+                el.dirbar.className = 'card-dir-bar void';
                 document.getElementById(`last-${id}`).textContent = 'Last: —';
                 const pnlEl = document.getElementById(`pnl-${id}`);
                 pnlEl.textContent = '—';
@@ -1209,11 +1257,29 @@
                 const textColor = getContrastColor(bgColor);
 
                 body.innerHTML = `
-                    <div class="card-direction ${dirClass}">${dirIcon} ${trigger.side} <span class="card-confidence" style="color:${textColor};">${confPct}%</span></div>
-                    <div class="card-level" style="color:${textColor};"><span class="card-level-label">E:</span><span class="card-level-value">$${trigger.entry.toFixed(2)}</span></div>
-                    <div class="card-level" style="color:${textColor};"><span class="card-level-label">S:</span><span class="card-level-value">$${trigger.stop.toFixed(2)}</span></div>
-                    <div class="card-level" style="color:${textColor};"><span class="card-level-label">T:</span><span class="card-level-value">$${trigger.target.toFixed(2)}</span></div>
+                    <div class="card-signal-header" style="color:${textColor};">
+                        <span>
+                            <span class="dir-icon ${dirClass}">${dirIcon}</span>
+                            <span class="dir-text ${dirClass}">${trigger.side}</span>
+                        </span>
+                        <span class="conf-badge" style="background:rgba(255,255,255,0.15);">${confPct}%</span>
+                    </div>
+                    <div class="card-separator"></div>
+                    <div class="card-data-row" style="color:${textColor};">
+                        <span class="data-at">@</span>
+                        <span class="data-value">$${trigger.entry.toFixed(2)}</span>
+                        <span style="opacity:0.3;margin:0 0.3rem;">│</span>
+                        <span class="data-label">S:</span>
+                        <span class="data-value">$${trigger.stop.toFixed(2)}</span>
+                    </div>
+                    <div class="card-data-row" style="color:${textColor};">
+                        <span class="data-label">T:</span>
+                        <span class="data-value">$${trigger.target.toFixed(2)}</span>
+                    </div>
                 `;
+
+                // Directional bar color
+                el.dirbar.className = `card-dir-bar ${dirClass}`;
 
                 document.getElementById(`last-${id}`).textContent = `Last: ${formatTime(trigger.timestamp)}`;
                 const pnlEl = document.getElementById(`pnl-${id}`);
