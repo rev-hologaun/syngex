@@ -15,8 +15,11 @@ KEY_VOLUME_5M = "volume_5m"
 KEY_VOLUME_DOWN_5M = "volume_down_5m"
 KEY_VOLUME_UP_5M = "volume_up_5m"
 KEY_TOTAL_DELTA_5M = "total_delta_5m"
+KEY_WALL_DELTA_5M = "wall_delta_5m"
 KEY_TOTAL_GAMMA_5M = "total_gamma_5m"
 KEY_IV_SKEW_5M = "iv_skew_5m"
+KEY_ATM_DELTA_5M = "atm_delta_5m"
+KEY_ATM_IV_5M = "atm_iv_5m"
 
 # --- Strategy-specific keys (created by individual strategies) ---
 KEY_EXTRINSIC_PROXY_5M = "extrinsic_proxy_5m"
@@ -35,8 +38,11 @@ CORE_KEYS = (
     KEY_VOLUME_DOWN_5M,
     KEY_VOLUME_UP_5M,
     KEY_TOTAL_DELTA_5M,
+    KEY_WALL_DELTA_5M,
     KEY_TOTAL_GAMMA_5M,
     KEY_IV_SKEW_5M,
+    KEY_ATM_DELTA_5M,
+    KEY_ATM_IV_5M,
 )
 
 # All keys in one tuple for validation
@@ -47,7 +53,8 @@ __all__ = [
     "KEY_PRICE_5M", "KEY_PRICE_30M",
     "KEY_NET_GAMMA_5M",
     "KEY_VOLUME_5M", "KEY_VOLUME_DOWN_5M", "KEY_VOLUME_UP_5M",
-    "KEY_TOTAL_DELTA_5M", "KEY_TOTAL_GAMMA_5M", "KEY_IV_SKEW_5M",
+    "KEY_TOTAL_DELTA_5M", "KEY_WALL_DELTA_5M", "KEY_TOTAL_GAMMA_5M", "KEY_IV_SKEW_5M",
+    "KEY_ATM_DELTA_5M", "KEY_ATM_IV_5M",
     "KEY_EXTRINSIC_PROXY_5M", "KEY_PROB_MOMENTUM_5M",
     "KEY_CONSEC_LONG", "KEY_CONSEC_SHORT",
     "CORE_KEYS", "ALL_KEYS",

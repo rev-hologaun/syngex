@@ -127,6 +127,13 @@ layer2:
       iv_decline_pct: 0.05
       min_confidence: 0.35
 
+  delta_iv_divergence:
+    enabled: true
+    tracker:
+      max_hold_seconds: 2700
+    params:
+      min_confidence: 0.35
+
 # Layer 3: Micro-Signal (1Hz) — 4 strategies
 layer3:
   gamma_volume_convergence:

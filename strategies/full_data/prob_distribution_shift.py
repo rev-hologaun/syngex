@@ -38,7 +38,6 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
-from strategies.rolling_window import RollingWindow
 from strategies.rolling_keys import KEY_PROB_MOMENTUM_5M, KEY_CONSEC_LONG, KEY_CONSEC_SHORT, KEY_VOLUME_5M
 
 logger = logging.getLogger("Syngex.Strategies.ProbDistributionShift")
@@ -54,7 +53,7 @@ Z_SCORE_THRESHOLD = 1.5             # 1.5 standard deviations
 MIN_CONSECUTIVE_SIGNALS = 2         # 2 consecutive evaluations
 
 # Min net gamma for positive regime
-MIN_NET_GAMMA = 2000.0
+MIN_NET_GAMMA = 500000.0
 
 # Stop and target
 STOP_PCT = 0.005                    # 0.5% stop
@@ -69,9 +68,6 @@ MIN_STRIKES_WITH_DATA = 5           # Need at least 5 strikes for distribution
 
 # Min data points for rolling stats
 MIN_DATA_POINTS = 5                 # Need enough data for z-score calculation
-
-# Rolling window size for momentum tracking (count-based, ~30s at 1Hz)
-MOMENTUM_WINDOW_SIZE = 30
 
 # Volume filter
 VOLUME_TREND_ALLOWED_LONG = ["FLAT", "UP"]
@@ -135,15 +131,10 @@ class ProbDistributionShift(BaseStrategy):
         if momentum is None:
             return []
 
-        # --- Ensure rolling window exists ---
-        if KEY_PROB_MOMENTUM_5M not in rolling_data:
-            rolling_data[KEY_PROB_MOMENTUM_5M] = RollingWindow(
-                window_type="count",
-                window_size=MOMENTUM_WINDOW_SIZE,
-            )
-
-        momentum_window: RollingWindow = rolling_data[KEY_PROB_MOMENTUM_5M]
-        momentum_window.push(momentum, data.get("timestamp"))
+        # --- Use main.py's populated momentum window ---
+        momentum_window = rolling_data.get(KEY_PROB_MOMENTUM_5M)
+        if momentum_window is None:
+            return []
 
         # --- Need enough data for z-score ---
         if momentum_window.count < MIN_DATA_POINTS:
@@ -300,8 +291,8 @@ class ProbDistributionShift(BaseStrategy):
                 except (ValueError, TypeError):
                     continue
 
-                call_delta = strike_data.get("call_delta", 0.0)
-                put_delta = strike_data.get("put_delta", 0.0)
+                call_delta = strike_data.get("call_delta_sum", 0.0)
+                put_delta = strike_data.get("put_delta_sum", 0.0)
                 net_delta = call_delta - put_delta
 
                 # Skip strikes with no delta data
@@ -407,8 +398,8 @@ class ProbDistributionShift(BaseStrategy):
                 strike = float(strike_str)
             except (ValueError, TypeError):
                 continue
-            call_delta = strike_data.get("call_delta", 0.0)
-            put_delta = strike_data.get("put_delta", 0.0)
+            call_delta = strike_data.get("call_delta_sum", 0.0)
+            put_delta = strike_data.get("put_delta_sum", 0.0)
             net_delta = call_delta - put_delta
             if call_delta == 0 and put_delta == 0:
                 continue

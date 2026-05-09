@@ -57,7 +57,7 @@ CONSOLIDATION_RATIO = 0.50          # 50%
 DELTA_ACCEL_RATIO = 1.05            # 5% change in delta
 
 # Min net gamma for positive regime
-MIN_NET_GAMMA = 2000.0
+MIN_NET_GAMMA = 500000.0
 
 # Stop and target
 STOP_PCT = 0.005                    # 0.5% stop
@@ -210,8 +210,8 @@ class ProbWeightedMagnet(BaseStrategy):
 
             # Delta as ProbITM proxy — for calls below price,
             # rising call delta = rising ProbITM = accumulation
-            call_delta = strike_data.get("call_delta", 0)
-            put_delta = strike_data.get("put_delta", 0)
+            call_delta = strike_data.get("call_delta_sum", 0)
+            put_delta = strike_data.get("put_delta_sum", 0)
 
             # Use net delta magnitude as the delta proxy
             net_delta = abs(call_delta - put_delta)
@@ -328,8 +328,8 @@ class ProbWeightedMagnet(BaseStrategy):
                 continue
 
             # For puts above price, falling put delta = ProbITM falling = distribution
-            call_delta = strike_data.get("call_delta", 0)
-            put_delta = strike_data.get("put_delta", 0)
+            call_delta = strike_data.get("call_delta_sum", 0)
+            put_delta = strike_data.get("put_delta_sum", 0)
 
             # Use net delta magnitude as the delta proxy
             net_delta = abs(call_delta - put_delta)

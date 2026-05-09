@@ -154,9 +154,8 @@ class GEXDivergence(BaseStrategy):
         # GEX wall strength gate: divergence on thin walls is worthless
         try:
             summary = gex_calc.get_summary()
-            net_gex = summary.get("net_gex", 0.0)
-            total_gex = summary.get("total_gex", 0.0)
-            if abs(net_gex) < MIN_TOTAL_GEX and abs(total_gex) < MIN_TOTAL_GEX:
+            net_gamma_val = summary.get("net_gamma", 0.0)
+            if abs(net_gamma_val) < MIN_TOTAL_GEX:
                 return []  # GEX walls too weak for a reliable signal
         except Exception:
             return []  # Can't assess GEX strength — skip

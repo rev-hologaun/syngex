@@ -33,7 +33,13 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
-from strategies.rolling_keys import KEY_PRICE_5M, KEY_VOLUME_5M, KEY_TOTAL_DELTA_5M
+from strategies.rolling_keys import (
+    KEY_PRICE_5M,
+    KEY_VOLUME_5M,
+    KEY_VOLUME_DOWN_5M,
+    KEY_VOLUME_UP_5M,
+    KEY_TOTAL_DELTA_5M,
+)
 
 logger = logging.getLogger("Syngex.Strategies.IVBandBreakout")
 
@@ -185,10 +191,13 @@ class IVBandBreakout(BaseStrategy):
         if not self._check_breakout_high(rolling_data):
             return None
 
-        # 5. Volume trending UP
-        vol_trend = self._get_volume_trend(rolling_data)
-        if vol_trend != "UP":
+        # 5. Volume trending UP (call volume)
+        vol_window = rolling_data.get(KEY_VOLUME_UP_5M)
+        if vol_window is None or vol_window.count < 3:
             return None
+        if vol_window.trend != "UP":
+            return None
+        vol_trend = "UP"
 
         # 6. Delta at ATM turning positive
         if not self._check_atm_delta_positive(gex_calc, atm_strike):
@@ -289,10 +298,13 @@ class IVBandBreakout(BaseStrategy):
         if not self._check_breakout_low(rolling_data):
             return None
 
-        # 5. Volume trending DOWN
-        vol_trend = self._get_volume_trend(rolling_data)
-        if vol_trend != "DOWN":
+        # 5. Volume trending DOWN (put volume)
+        vol_window = rolling_data.get(KEY_VOLUME_DOWN_5M)
+        if vol_window is None or vol_window.count < 3:
             return None
+        if vol_window.trend != "DOWN":
+            return None
+        vol_trend = "DOWN"
 
         # 6. Delta at ATM turning negative
         if not self._check_atm_delta_negative(gex_calc, atm_strike):
@@ -378,8 +390,8 @@ class IVBandBreakout(BaseStrategy):
         if iv_latest is None or iv_p25 is None:
             return False, 0.0
 
-        # IV is compressed if latest is at or below p25
-        is_compressed = iv_latest <= iv_p25
+        # IV is compressed if latest is below p25
+        is_compressed = iv_latest < iv_p25
 
         # Depth = how far below p25 (positive = compressed deeper)
         depth = iv_p25 - iv_latest
@@ -391,7 +403,7 @@ class IVBandBreakout(BaseStrategy):
         """
         Check if price is compressing.
 
-        Current high-low range must be < 30% of the rolling mean range.
+        Current high-low range must be < 30% of 2 std devs of rolling prices.
         Tighter range = more coiled = higher breakout probability.
         """
         window = rolling_data.get(KEY_PRICE_5M)
@@ -399,12 +411,12 @@ class IVBandBreakout(BaseStrategy):
             return False
 
         current_range = window.range
-        mean_range = window.mean
+        std = window.std
 
-        if current_range is None or mean_range is None or mean_range == 0:
+        if current_range is None or std is None or std == 0:
             return False
 
-        compression_ratio = current_range / mean_range
+        compression_ratio = current_range / (std * 2)
         return compression_ratio < PRICE_COMPRESSION_RATIO
 
     @staticmethod
@@ -415,12 +427,12 @@ class IVBandBreakout(BaseStrategy):
             return 1.0
 
         current_range = window.range
-        mean_range = window.mean
+        std = window.std
 
-        if current_range is None or mean_range is None or mean_range == 0:
+        if current_range is None or std is None or std == 0:
             return 1.0
 
-        return current_range / mean_range
+        return current_range / (std * 2)
 
     @staticmethod
     def _check_delta_coiling(
@@ -501,14 +513,6 @@ class IVBandBreakout(BaseStrategy):
         # Must have moved enough to count as breakout
         move_pct = (window_min - latest) / window_min
         return move_pct >= BREAKOUT_MOVE_PCT
-
-    @staticmethod
-    def _get_volume_trend(rolling_data: Dict[str, Any]) -> str:
-        """Get the volume trend direction from the rolling window."""
-        window = rolling_data.get(KEY_VOLUME_5M)
-        if window is None:
-            return "FLAT"
-        return window.trend
 
     @staticmethod
     def _check_atm_delta_positive(gex_calc: Any, atm_strike: float) -> bool:

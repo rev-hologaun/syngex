@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
-from strategies.rolling_keys import KEY_VOLUME_5M
+from strategies.rolling_keys import KEY_VOLUME_5M, KEY_VOLUME_UP_5M, KEY_VOLUME_DOWN_5M
 
 logger = logging.getLogger("Syngex.Strategies.CallPutFlowAsymmetry")
 
@@ -135,8 +135,7 @@ class CallPutFlowAsymmetry(BaseStrategy):
             # Calls: use call_gamma_oi as proxy for volume
             call_oi = strike_data.get("call_oi", 0)
             call_gamma = strike_data.get("call_gamma", 0)
-            # get_greeks_summary() returns "call_delta" (not "call_delta_sum")
-            call_delta = abs(strike_data.get("call_delta", 0))
+            call_delta = abs(strike_data.get("call_delta_sum", 0))
             if call_oi > 0 and call_gamma > 0 and call_delta > 0.01:
                 total_call_score += call_oi * call_gamma * call_delta
                 call_points += 1
@@ -144,8 +143,7 @@ class CallPutFlowAsymmetry(BaseStrategy):
             # Puts
             put_oi = strike_data.get("put_oi", 0)
             put_gamma = strike_data.get("put_gamma", 0)
-            # get_greeks_summary() returns "put_delta" (not "put_delta_sum")
-            put_delta = abs(strike_data.get("put_delta", 0))
+            put_delta = abs(strike_data.get("put_delta_sum", 0))
             if put_oi > 0 and put_gamma > 0 and put_delta > 0.01:
                 total_put_score += put_oi * put_gamma * put_delta
                 put_points += 1
@@ -177,7 +175,7 @@ class CallPutFlowAsymmetry(BaseStrategy):
         vol_up = self._check_volume_up(rolling_data)
 
         confidence = self._compute_confidence(
-            flow_ratio, iv_aligned, vol_up, net_gamma, regime,
+            flow_ratio, iv_aligned, vol_up, net_gamma, regime, "LONG",
         )
         if confidence < MIN_CONFIDENCE:
             return []
@@ -237,7 +235,7 @@ class CallPutFlowAsymmetry(BaseStrategy):
 
         confidence = self._compute_confidence(
             1.0 / flow_ratio if flow_ratio > 0 else float("inf"),
-            iv_aligned, vol_down, net_gamma, regime,
+            iv_aligned, vol_down, net_gamma, regime, "SHORT",
         )
         if confidence < MIN_CONFIDENCE:
             return []
@@ -275,15 +273,15 @@ class CallPutFlowAsymmetry(BaseStrategy):
         )]
 
     def _check_volume_up(self, rolling_data: Dict[str, Any]) -> bool:
-        """Check if volume is trending up."""
-        window = rolling_data.get(KEY_VOLUME_5M)
+        """Check if call volume is trending up."""
+        window = rolling_data.get(KEY_VOLUME_UP_5M)
         if window is None or window.count < 3:
             return False
         return window.trend == "UP"
 
     def _check_volume_down(self, rolling_data: Dict[str, Any]) -> bool:
-        """Check if volume is trending down."""
-        window = rolling_data.get(KEY_VOLUME_5M)
+        """Check if put volume is trending down."""
+        window = rolling_data.get(KEY_VOLUME_DOWN_5M)
         if window is None or window.count < 3:
             return False
         return window.trend == "DOWN"
@@ -295,6 +293,7 @@ class CallPutFlowAsymmetry(BaseStrategy):
         vol_aligned: bool,
         net_gamma: float,
         regime: str,
+        direction: str = "LONG",  # "LONG" or "SHORT"
     ) -> float:
         """
         Combine flow asymmetry factors into confidence.
@@ -313,10 +312,15 @@ class CallPutFlowAsymmetry(BaseStrategy):
         vol_conf = 0.15 if vol_aligned else 0.05
 
         # 4. Regime alignment (0.05–0.10)
-        regime_conf = 0.10 if regime == "POSITIVE" else 0.05
+        # Direction-aware: LONG likes POSITIVE, SHORT likes NEGATIVE
+        if direction == "LONG":
+            regime_conf = 0.10 if regime == "POSITIVE" else 0.05
+        else:
+            regime_conf = 0.10 if regime == "NEGATIVE" else 0.05
 
-        # 5. Net gamma context (0.0–0.05)
-        gamma_conf = 0.05 if abs(net_gamma) > 500000 else 0.0
+        # 5. Net gamma context (0.025–0.05)
+        # Grade by magnitude like gex_divergence
+        gamma_conf = 0.025 + 0.025 * min(1.0, abs(net_gamma) / 1000000)
 
         # Normalize each component to [0,1] and average
         norm_ratio = (ratio_conf - 0.25) / (0.35 - 0.25) if 0.35 != 0.25 else 1.0

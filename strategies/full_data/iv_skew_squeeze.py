@@ -61,7 +61,7 @@ SKEW_EXTREME_NEGATIVE = -0.07      # Puts 7%+ more expensive (panic)
 PRICE_STABLE_THRESHOLD = 0.005     # 0.5% change max
 
 # Min net gamma for positive regime confirmation
-MIN_NET_GAMMA = 5000.0
+MIN_NET_GAMMA = 500000.0  # 500k — matches other strategies' thresholds
 
 # Stop and target
 STOP_PCT = 0.005                   # 0.5% stop
@@ -77,11 +77,6 @@ MIN_SKEW_DATA_POINTS = 5           # Minimum for skew rolling window
 
 # Volume spike check
 VOLUME_SPIKE_THRESHOLD = 1.5       # Volume > 1.5× avg = spike
-
-# Skew window key (per-strategy state in rolling_data)
-SKEW_WINDOW_KEY = "iv_skew_5m"
-SKEW_WINDOW_SIZE = 1800            # 30-minute time-based window
-
 
 class IVSkewSqueeze(BaseStrategy):
     """
@@ -115,14 +110,10 @@ class IVSkewSqueeze(BaseStrategy):
         rolling_data = data.get("rolling_data", {})
         net_gamma = data.get("net_gamma", 0.0)
 
-        # --- Ensure skew rolling window exists ---
-        if SKEW_WINDOW_KEY not in rolling_data:
-            rolling_data[SKEW_WINDOW_KEY] = RollingWindow(
-                window_type="time",
-                window_size=SKEW_WINDOW_SIZE,
-            )
-
-        skew_window = rolling_data[SKEW_WINDOW_KEY]
+        # --- Use main.py's populated skew window ---
+        skew_window = rolling_data.get(KEY_IV_SKEW_5M)
+        if skew_window is None:
+            return []
 
         # --- Compute current IV skew ---
         try:
@@ -132,9 +123,6 @@ class IVSkewSqueeze(BaseStrategy):
 
         if current_skew is None:
             return []
-
-        # Push skew to rolling window for trend tracking
-        skew_window.push(current_skew, data.get("timestamp"))
 
         # Check minimum data points
         if skew_window.count < MIN_SKEW_DATA_POINTS:

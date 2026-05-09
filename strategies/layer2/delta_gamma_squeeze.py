@@ -31,11 +31,12 @@ Confidence factors:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
-from strategies.rolling_keys import KEY_PRICE_5M, KEY_VOLUME_5M, KEY_TOTAL_DELTA_5M
+from strategies.rolling_keys import KEY_PRICE_5M, KEY_VOLUME_5M, KEY_TOTAL_DELTA_5M, KEY_WALL_DELTA_5M
 
 logger = logging.getLogger("Syngex.Strategies.DeltaGammaSqueeze")
 
@@ -44,13 +45,13 @@ logger = logging.getLogger("Syngex.Strategies.DeltaGammaSqueeze")
 # ---------------------------------------------------------------------------
 
 # How close price must be to call wall (as fraction of price)
-CALL_WALL_PROXIMITY_PCT = 0.03        # 3% (was 2%) — wider wall proximity
+WALL_PROXIMITY_PCT = 0.03             # 3% (was 2%) — wider wall proximity
 
 # Minimum delta acceleration ratio: current delta must exceed rolling avg by this
 DELTA_ACCEL_RATIO = 1.10              # 10% above rolling avg (was 15%)
 
 # Volume spike threshold: current volume must exceed rolling avg by this
-VOLUME_SPIKE_RATIO = 1.15             # 15% above rolling avg (was 20%)
+VOLUME_SPIKE_RATIO = 1.20             # 20% above rolling avg
 
 # Minimum wall GEX to consider
 MIN_WALL_GEX = 500000
@@ -107,6 +108,12 @@ class DeltaGammaSqueeze(BaseStrategy):
 
         # Get walls above and below price
         walls = gex_calc.get_gamma_walls(threshold=MIN_WALL_GEX)
+
+        # Populate wall delta rolling window for acceleration tracking
+        wall_delta = self._get_nearest_wall_delta(walls, underlying_price, gex_calc)
+        if KEY_WALL_DELTA_5M in rolling_data:
+            rolling_data[KEY_WALL_DELTA_5M].push(wall_delta, time.time())
+
         call_walls_above = [
             w for w in walls
             if w["side"] == "call" and w["strike"] > underlying_price
@@ -123,7 +130,7 @@ class DeltaGammaSqueeze(BaseStrategy):
             )
             sig = self._evaluate_squeeze(
                 call_walls_above[0], underlying_price, gex_calc,
-                rolling_data, net_gamma, regime, "LONG",
+                rolling_data, net_gamma, regime, "LONG", wall_delta,
             )
             if sig:
                 signals.append(sig)
@@ -135,7 +142,7 @@ class DeltaGammaSqueeze(BaseStrategy):
             )
             sig = self._evaluate_squeeze(
                 put_walls_below[0], underlying_price, gex_calc,
-                rolling_data, net_gamma, regime, "SHORT",
+                rolling_data, net_gamma, regime, "SHORT", wall_delta,
             )
             if sig:
                 signals.append(sig)
@@ -151,6 +158,7 @@ class DeltaGammaSqueeze(BaseStrategy):
         net_gamma: float,
         regime: str,
         direction: str,  # "LONG" or "SHORT"
+        wall_delta: float = 0.0,
     ) -> Optional[Signal]:
         """Evaluate a specific wall for squeeze setup."""
         wall_strike = wall["strike"]
@@ -159,7 +167,7 @@ class DeltaGammaSqueeze(BaseStrategy):
         # Direction-specific proximity check
         if direction == "LONG":
             distance_pct = (wall_strike - price) / price
-            if distance_pct > CALL_WALL_PROXIMITY_PCT:
+            if distance_pct > WALL_PROXIMITY_PCT:
                 logger.debug(
                     "Squeeze: price %.2f too far from wall %.2f (dist=%.2f%%)",
                     price, wall_strike, distance_pct * 100,
@@ -170,7 +178,7 @@ class DeltaGammaSqueeze(BaseStrategy):
                 return None
         else:  # SHORT
             distance_pct = (price - wall_strike) / price
-            if distance_pct > CALL_WALL_PROXIMITY_PCT:
+            if distance_pct > WALL_PROXIMITY_PCT:
                 logger.debug(
                     "Squeeze: price %.2f too far from wall %.2f (dist=%.2f%%)",
                     price, wall_strike, distance_pct * 100,
@@ -180,17 +188,9 @@ class DeltaGammaSqueeze(BaseStrategy):
                 # Price already below wall — squeeze may have already fired
                 return None
 
-        # Delta acceleration — use call_delta for LONG, put_delta for SHORT
-        delta_data = gex_calc.get_delta_by_strike(wall_strike)
-        if direction == "LONG":
-            accel_delta = delta_data.get("call_delta", 0)
-            accel_side = "calls"
-        else:
-            accel_delta = delta_data.get("put_delta", 0)
-            accel_side = "puts"
-
+        # Delta acceleration — use wall_delta (net delta at nearest wall)
         accel_ratio = self._check_delta_acceleration(
-            accel_delta, rolling_data, wall_strike, accel_side,
+            wall_delta, rolling_data, wall_strike,
         )
         if accel_ratio is None or accel_ratio < DELTA_ACCEL_RATIO:
             logger.debug(
@@ -240,7 +240,7 @@ class DeltaGammaSqueeze(BaseStrategy):
                 "distance_to_wall_pct": round(distance_pct, 4),
                 "delta_acceleration_ratio": round(accel_ratio, 3),
                 "direction": direction,
-                "current_delta": round(accel_delta, 2),
+                "current_delta": round(wall_delta, 2),
                 "volume_spike": vol_spike,
                 "price_momentum": price_trend,
                 "regime": regime,
@@ -255,17 +255,16 @@ class DeltaGammaSqueeze(BaseStrategy):
         self,
         current_delta: float,
         rolling_data: Dict[str, Any],
-        strike: float,
-        side: str,
+        wall_strike: float,
     ) -> Optional[float]:
         """
-        Check if total delta is accelerating.
+        Check if wall delta is accelerating.
 
-        Compares current delta to rolling average of total delta
+        Compares current wall delta to rolling average of wall delta
         over the 5-minute window. Returns ratio of current to rolling
         avg. > 1.0 means accelerating.
         """
-        window = rolling_data.get(KEY_TOTAL_DELTA_5M)
+        window = rolling_data.get(KEY_WALL_DELTA_5M)
         if window is None or window.count < MIN_DATA_POINTS:
             return None
 
@@ -274,6 +273,14 @@ class DeltaGammaSqueeze(BaseStrategy):
             return None
 
         return current_delta / rolling_avg
+
+    def _get_nearest_wall_delta(self, walls, price, gex_calc):
+        """Get net delta magnitude at the nearest gamma wall."""
+        if not walls:
+            return 0.0
+        nearest = min(walls, key=lambda w: abs(w["strike"] - price) / price)
+        delta_data = gex_calc.get_delta_by_strike(nearest["strike"])
+        return abs(delta_data.get("net_delta", 0.0))
 
     def _check_volume_spike(self, rolling_data: Dict[str, Any]) -> bool:
         """Check if volume is spiking above rolling average."""
@@ -313,7 +320,7 @@ class DeltaGammaSqueeze(BaseStrategy):
         """
         # 1. Proximity to wall (0.25–0.35)
         # Closer = higher confidence
-        proximity_conf = 0.25 + 0.10 * (1 - distance_pct / CALL_WALL_PROXIMITY_PCT)
+        proximity_conf = 0.25 + 0.10 * (1 - distance_pct / WALL_PROXIMITY_PCT)
 
         # 2. Delta acceleration (0.20–0.30)
         # Higher ratio = more urgency
@@ -329,12 +336,13 @@ class DeltaGammaSqueeze(BaseStrategy):
         else:
             momentum_conf = 0.10 if price_trend == "DOWN" else 0.05
 
-        # 5. Regime alignment (0.0–0.10)
+        # 5. Regime alignment (0.05–0.10)
         # LONG prefers POSITIVE, SHORT prefers NEGATIVE
+        # NEUTRAL/UNKNOWN gets partial 0.05 boost (was 0.0)
         if direction == "LONG":
-            regime_conf = 0.10 if regime == "POSITIVE" else 0.0
+            regime_conf = 0.10 if regime == "POSITIVE" else 0.05
         else:
-            regime_conf = 0.10 if regime == "NEGATIVE" else 0.0
+            regime_conf = 0.10 if regime == "NEGATIVE" else 0.05
 
         # 6. Wall strength (0.0–0.05)
         wall_conf = 0.05 * min(1.0, abs(wall_gex) / 5_000_000)
@@ -344,7 +352,7 @@ class DeltaGammaSqueeze(BaseStrategy):
         norm_accel = (accel_conf - 0.20) / (0.30 - 0.20) if 0.30 != 0.20 else 1.0
         norm_vol = (vol_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
         norm_mom = (momentum_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
-        norm_regime = regime_conf / 0.10 if 0.10 != 0 else 0.0
+        norm_regime = (regime_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
         norm_wall = wall_conf / 0.05 if 0.05 != 0 else 0.0
         confidence = (norm_prox + norm_accel + norm_vol + norm_mom + norm_regime + norm_wall) / 6.0
         return min(1.0, max(0.0, confidence))

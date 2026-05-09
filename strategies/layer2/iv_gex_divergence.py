@@ -134,6 +134,7 @@ class IVGEXDivergence(BaseStrategy):
                         wall=wall_above,
                         regime=regime,
                         rolling_data=rolling_data,
+                        price_percentile=price_high,
                     )
                     if sig:
                         signals.append(sig)
@@ -167,6 +168,7 @@ class IVGEXDivergence(BaseStrategy):
                         wall=wall_below,
                         regime=regime,
                         rolling_data=rolling_data,
+                        price_percentile=1.0 - price_low,  # Convert "lowness" back to percentile
                     )
                     if sig:
                         signals.append(sig)
@@ -248,20 +250,8 @@ class IVGEXDivergence(BaseStrategy):
         # Check IV rolling window
         iv_window = rolling_data.get(f"iv_{atm_strike}_5m")
         if iv_window is None or iv_window.count < MIN_IV_POINTS:
-            # Fallback: use total_delta window as proxy for IV trend
-            # (IV often correlates with total_delta direction)
-            delta_window = rolling_data.get(KEY_TOTAL_DELTA_5M)
-            if delta_window is None or delta_window.count < MIN_IV_POINTS:
-                return False, None, 0.0
-
-            # Use delta decline as IV proxy
-            latest = delta_window.latest
-            avg = delta_window.mean
-            if latest is None or avg is None or avg == 0:
-                return False, None, 0.0
-
-            decline = 1.0 - (latest / avg)
-            return latest < avg * IV_DECLINE_RATIO, current_iv, decline
+            # No IV data available — cannot evaluate
+            return False, None, 0.0
 
         latest = iv_window.latest
         avg = iv_window.mean
@@ -297,18 +287,8 @@ class IVGEXDivergence(BaseStrategy):
         # Check IV rolling window
         iv_window = rolling_data.get(f"iv_{atm_strike}_5m")
         if iv_window is None or iv_window.count < MIN_IV_POINTS:
-            # Fallback: use total_delta window as proxy for IV trend
-            delta_window = rolling_data.get(KEY_TOTAL_DELTA_5M)
-            if delta_window is None or delta_window.count < MIN_IV_POINTS:
-                return False, None, 0.0
-
-            latest = delta_window.latest
-            avg = delta_window.mean
-            if latest is None or avg is None or avg == 0:
-                return False, None, 0.0
-
-            expansion = (latest / avg) - 1.0
-            return latest > avg / IV_DECLINE_RATIO, current_iv, expansion
+            # No IV data available — cannot evaluate
+            return False, None, 0.0
 
         latest = iv_window.latest
         avg = iv_window.mean
@@ -328,7 +308,7 @@ class IVGEXDivergence(BaseStrategy):
     def _compute_confidence(
         self,
         price_percentile: float,
-        iv_decline: float,
+        iv_change: float,
         net_gamma: float,
         wall_above: Optional[Dict[str, Any]],
         regime: str,
@@ -348,7 +328,7 @@ class IVGEXDivergence(BaseStrategy):
             pct_conf = 0.20 + 0.10 * min(1.0, (price_percentile - 0.75) / 0.25)
 
         # 2. IV change magnitude (0.20–0.25)
-        iv_conf = 0.20 + 0.05 * min(1.0, iv_decline / 0.15)
+        iv_conf = 0.20 + 0.05 * min(1.0, iv_change / 0.15)
 
         # 3. Net gamma magnitude (0.15–0.20)
         gamma_conf = 0.15 + 0.05 * min(1.0, abs(net_gamma) / 5_000_000)
@@ -382,6 +362,7 @@ class IVGEXDivergence(BaseStrategy):
         wall: Optional[Dict[str, Any]],
         regime: str,
         rolling_data: Dict[str, Any],
+        price_percentile: Optional[float] = None,
     ) -> Optional[Signal]:
         """Build a Signal object for LONG or SHORT divergence."""
         entry = price
@@ -414,7 +395,7 @@ class IVGEXDivergence(BaseStrategy):
                     f"{wall_info}"
                 ),
                 metadata={
-                    "price_percentile": round(1.0 - iv_decline, 3),
+                    "price_percentile": round(price_percentile, 3) if price_percentile is not None else None,
                     "iv_atm": round(iv_atm, 4) if iv_atm else None,
                     "iv_decline_pct": round(iv_decline, 4),
                     "net_gamma": round(net_gamma, 2),
@@ -454,7 +435,7 @@ class IVGEXDivergence(BaseStrategy):
                     f"{wall_info}"
                 ),
                 metadata={
-                    "price_percentile": round(iv_decline, 3),
+                    "price_percentile": round(price_percentile, 3) if price_percentile is not None else None,
                     "iv_atm": round(iv_atm, 4) if iv_atm else None,
                     "iv_decline_pct": round(iv_decline, 4),
                     "net_gamma": round(net_gamma, 2),

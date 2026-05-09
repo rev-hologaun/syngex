@@ -25,6 +25,7 @@ Confidence factors:
 from __future__ import annotations
 
 import logging
+import statistics
 from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
@@ -155,7 +156,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
         # 4. Compute confidence
         confidence = self._compute_confidence(
             trend_strength, delta_decline, vol_decline,
-            net_gamma, regime,
+            net_gamma, regime, trend_direction,
         )
         if confidence < MIN_CONFIDENCE:
             return None
@@ -205,20 +206,26 @@ class DeltaVolumeExhaustion(BaseStrategy):
 
     def _trend_strength(self, window: Any) -> float:
         """
-        Score trend strength based on z-score and consistency.
+        Score trend strength based on first-half vs second-half mean difference.
 
         Returns 0.0–1.0. Higher = stronger, more sustained trend.
+        Direction-agnostic (works for both UP and DOWN trends).
         """
         if window.count < MIN_TREND_POINTS:
             return 0.0
 
-        # Z-score of latest value (how far from mean)
-        z = window.z_score
-        if z is None:
+        vals = list(window.values)
+        half = len(vals) // 2
+        first_half = statistics.mean(vals[:half])
+        second_half = statistics.mean(vals[half:])
+        diff = abs(second_half - first_half)
+        std = window.std
+
+        if std is None or std == 0:
             return 0.0
 
-        # Normalize z-score to 0–1 range (z=2 → ~0.95, z=0 → 0.5)
-        strength = min(1.0, max(0.0, 0.5 + z / 4.0))
+        # Normalize by std (same approach window.trend uses internally)
+        strength = min(1.0, max(0.0, 0.3 + (diff / std) / 4.0))
 
         # Bonus for longer sustained trends
         duration_bonus = min(0.15, (window.count - MIN_TREND_POINTS) * 0.03)
@@ -272,6 +279,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
         vol_decline: bool,
         net_gamma: float,
         regime: str,
+        trend_direction: str,
     ) -> float:
         """
         Combine all factors into confidence score.
@@ -289,11 +297,15 @@ class DeltaVolumeExhaustion(BaseStrategy):
 
         # 4. Regime alignment (0.0–0.10)
         # Exhaustion signals are stronger in strong regimes
-        regime_conf = 0.10 if regime == "POSITIVE" else 0.05
+        # Direction-aware regime alignment
+        if trend_direction == "UP":
+            regime_conf = 0.10 if regime == "NEGATIVE" else 0.05
+        else:
+            regime_conf = 0.10 if regime == "POSITIVE" else 0.05
 
         # 5. Net gamma context (0.0–0.10)
-        # Strong positive gamma supports mean reversion
-        gamma_conf = 0.10 if net_gamma > 500000 else 0.05
+        # Use abs(net_gamma) — both positive and negative gamma support mean reversion
+        gamma_conf = 0.05 + 0.05 * min(1.0, abs(net_gamma) / 1000000)
 
         # Normalize each component to [0,1] and average
         norm_trend = (trend_conf - 0.25) / (0.35 - 0.25) if 0.35 != 0.25 else 1.0

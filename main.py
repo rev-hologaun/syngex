@@ -85,6 +85,7 @@ from strategies.layer2 import (
     CallPutFlowAsymmetry,
     IVGEXDivergence,
 )
+from strategies.layer2.delta_iv_divergence import DeltaIVDivergence
 from strategies.layer3 import (
     GammaVolumeConvergence,
     IVBandBreakout,
@@ -231,6 +232,9 @@ class SyngexOrchestrator:
             KEY_VOLUME_5M: RollingWindow(window_type="time", window_size=300),
             # Layer 2 rolling windows
             KEY_TOTAL_DELTA_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_WALL_DELTA_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_ATM_DELTA_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_ATM_IV_5M: RollingWindow(window_type="time", window_size=300),
             # Layer 3 / full_data rolling windows (missing feeds)
             KEY_VOLUME_UP_5M: RollingWindow(window_type="time", window_size=300),
             KEY_VOLUME_DOWN_5M: RollingWindow(window_type="time", window_size=300),
@@ -500,6 +504,7 @@ class SyngexOrchestrator:
                 "delta_volume_exhaustion": DeltaVolumeExhaustion,
                 "call_put_flow_asymmetry": CallPutFlowAsymmetry,
                 "iv_gex_divergence": IVGEXDivergence,
+                "delta_iv_divergence": DeltaIVDivergence,
             },
             "layer3": {
                 "gamma_volume_convergence": GammaVolumeConvergence,
@@ -539,8 +544,8 @@ class SyngexOrchestrator:
                 except (ValueError, TypeError):
                     continue
 
-                call_delta = strike_data.get("call_delta", 0.0)
-                put_delta = strike_data.get("put_delta", 0.0)
+                call_delta = strike_data.get("call_delta_sum", 0.0)
+                put_delta = strike_data.get("put_delta_sum", 0.0)
                 call_gamma = strike_data.get("call_gamma", 0.0)
                 put_gamma = strike_data.get("put_gamma", 0.0)
 
@@ -695,6 +700,38 @@ class SyngexOrchestrator:
                 if prob_mom is not None:
                     self._rolling_data[KEY_PROB_MOMENTUM_5M].push(prob_mom)
 
+                # Push probability momentum for prob_distribution_shift
+                try:
+                    atm_strike = self._calculator.get_atm_strike(self._calculator.underlying_price)
+                    if atm_strike is not None and KEY_PROB_MOMENTUM_5M in self._rolling_data:
+                        momentum = 0.0
+                        for strike_str, strike_data in gex_summary.items():
+                            try:
+                                strike = float(strike_str)
+                            except (ValueError, TypeError):
+                                continue
+                            call_delta = strike_data.get("call_delta_sum", 0.0)
+                            put_delta = strike_data.get("put_delta_sum", 0.0)
+                            if call_delta == 0 and put_delta == 0:
+                                continue
+                            distance = strike - atm_strike
+                            momentum += (call_delta - put_delta) * distance
+                        self._rolling_data[KEY_PROB_MOMENTUM_5M].push(momentum, time.time())
+                except Exception:
+                    pass
+
+                # Push per-strike ATM delta and IV for delta_iv_divergence
+                atm_price = self._calculator.underlying_price
+                atm_strike = self._calculator.get_atm_strike(atm_price)
+                if atm_strike is not None:
+                    delta_data = self._calculator.get_delta_by_strike(atm_strike)
+                    atm_delta = delta_data.get("net_delta", 0.0)
+                    if KEY_ATM_DELTA_5M in self._rolling_data:
+                        self._rolling_data[KEY_ATM_DELTA_5M].push(atm_delta)
+
+                    atm_iv = self._calculator.get_iv_by_strike(atm_strike)
+                    if atm_iv is not None and KEY_ATM_IV_5M in self._rolling_data:
+                        self._rolling_data[KEY_ATM_IV_5M].push(atm_iv)
 
 
         except Exception as exc:

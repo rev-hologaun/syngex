@@ -16,10 +16,12 @@ from .delta_gamma_squeeze import DeltaGammaSqueeze
 from .delta_volume_exhaustion import DeltaVolumeExhaustion
 from .call_put_flow_asymmetry import CallPutFlowAsymmetry
 from .iv_gex_divergence import IVGEXDivergence
+from .delta_iv_divergence import DeltaIVDivergence
 
 __all__ = [
     "DeltaGammaSqueeze",
     "DeltaVolumeExhaustion",
     "CallPutFlowAsymmetry",
     "IVGEXDivergence",
+    "DeltaIVDivergence",
 ]

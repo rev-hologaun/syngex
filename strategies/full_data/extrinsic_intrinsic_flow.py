@@ -40,8 +40,7 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
-from strategies.rolling_window import RollingWindow
-from strategies.rolling_keys import KEY_EXTRINSIC_PROXY_5M, KEY_VOLUME_5M
+from strategies.rolling_keys import KEY_EXTRINSIC_PROXY_5M, KEY_VOLUME_UP_5M, KEY_VOLUME_DOWN_5M
 
 logger = logging.getLogger("Syngex.Strategies.ExtrinsicIntrinsicFlow")
 
@@ -59,7 +58,7 @@ EXTRINSIC_COLLAPSE_THRESHOLD = 0.10     # 10% collapse
 VOLUME_SPIKE_RATIO = 1.30               # 130% of avg (1.3×)
 
 # Min net gamma for positive regime
-MIN_NET_GAMMA = 2000.0
+MIN_NET_GAMMA = 500000.0
 
 # Stop and target
 STOP_PCT = 0.005                        # 0.5% stop
@@ -71,9 +70,6 @@ MAX_CONFIDENCE = 0.80                   # v2 cap
 
 # Min data points — need more data for extrinsic tracking
 MIN_DATA_POINTS = 5
-
-# Rolling window size for extrinsic proxy (count-based, ~30s at 1Hz)
-EXTRINSIC_WINDOW_SIZE = 30
 
 # Volume trend filters
 VALID_VOLUME_TREND_LONG = ["UP"]
@@ -133,26 +129,13 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         if net_gamma < MIN_NET_GAMMA:
             return []
 
-        # --- Calculate extrinsic proxy ---
-        extrinsic_proxy = self._calculate_extrinsic_proxy(greeks_summary)
-        if extrinsic_proxy is None:
+        # --- Use main.py's populated extrinsic window ---
+        extrinsic_window = rolling_data.get(KEY_EXTRINSIC_PROXY_5M)
+        if extrinsic_window is None:
             return []
-
-        # --- Ensure extrinsic rolling window exists ---
-        if KEY_EXTRINSIC_PROXY_5M not in rolling_data:
-            rolling_data[KEY_EXTRINSIC_PROXY_5M] = RollingWindow(
-                window_type="count",
-                window_size=EXTRINSIC_WINDOW_SIZE,
-            )
-
-        extrinsic_window: RollingWindow = rolling_data[KEY_EXTRINSIC_PROXY_5M]
-        extrinsic_window.push(extrinsic_proxy, data.get("timestamp"))
-
-        # --- Need enough data for rolling stats ---
         if extrinsic_window.count < MIN_DATA_POINTS:
             return []
 
-        # --- Get rolling stats ---
         extrinsic_mean = extrinsic_window.mean
         if extrinsic_mean is None or extrinsic_mean == 0:
             return []
@@ -164,13 +147,20 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         # --- Compute extrinsic change % ---
         extrinsic_change_pct = (current_extrinsic - extrinsic_mean) / extrinsic_mean
 
-        # --- Volume check ---
-        volume_5m = rolling_data.get(KEY_VOLUME_5M)
-        if volume_5m is None or volume_5m.count < MIN_DATA_POINTS:
+        # --- Directional volume check ---
+        volume_up_5m = rolling_data.get(KEY_VOLUME_UP_5M)
+        volume_down_5m = rolling_data.get(KEY_VOLUME_DOWN_5M)
+        if volume_up_5m is None or volume_down_5m is None:
+            return []
+        if volume_up_5m.count < MIN_DATA_POINTS or volume_down_5m.count < MIN_DATA_POINTS:
             return []
 
-        vol_ratio = self._get_volume_ratio(volume_5m)
-        vol_trend = volume_5m.trend
+        # Volume spike ratio: compare latest to rolling mean
+        vol_ratio = None
+        vol_trend = "FLAT"
+        if volume_up_5m.mean is not None and volume_up_5m.mean > 0:
+            vol_ratio = volume_up_5m.latest / volume_up_5m.mean if volume_up_5m.latest is not None else 1.0
+        vol_trend = volume_up_5m.trend if volume_up_5m.trend else "FLAT"
 
         # --- Determine signal type ---
         signals: List[Signal] = []
@@ -200,66 +190,6 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
             signals.append(fade_sig)
 
         return signals
-
-    # ------------------------------------------------------------------
-    # Extrinsic proxy calculation
-    # ------------------------------------------------------------------
-
-    def _calculate_extrinsic_proxy(
-        self,
-        greeks_summary: Dict[str, Any],
-    ) -> Optional[float]:
-        """
-        Calculate aggregate extrinsic value proxy across all strikes.
-
-        Uses abs(net_delta) × abs(net_gamma) as a proxy for extrinsic value.
-        High gamma + high delta = high extrinsic (near ATM, high IV).
-        Declining gamma + declining delta = declining extrinsic.
-
-        Returns total extrinsic proxy or None if insufficient data.
-        """
-        try:
-            total_proxy = 0.0
-            strike_count = 0
-
-            for strike_str, strike_data in greeks_summary.items():
-                try:
-                    # Validate strike key is numeric
-                    float(strike_str)
-                except (ValueError, TypeError):
-                    continue
-
-                call_delta = strike_data.get("call_delta", 0.0)
-                put_delta = strike_data.get("put_delta", 0.0)
-                call_gamma = strike_data.get("call_gamma", 0.0)
-                put_gamma = strike_data.get("put_gamma", 0.0)
-
-                # Skip strikes with no delta data
-                if call_delta == 0 and put_delta == 0:
-                    continue
-
-                # Net delta and gamma
-                net_delta = call_delta - put_delta
-                net_gamma_val = call_gamma + put_gamma  # Combined gamma magnitude
-
-                # Extrinsic proxy for this strike
-                proxy = abs(net_delta) * abs(net_gamma_val)
-
-                # Skip near-zero contributions
-                if proxy <= 0:
-                    continue
-
-                total_proxy += proxy
-                strike_count += 1
-
-            if strike_count < 3:
-                return None
-
-            return total_proxy
-
-        except Exception as e:
-            logger.debug("Error calculating extrinsic proxy: %s", e)
-            return None
 
     # ------------------------------------------------------------------
     # LONG: Extrinsic expansion + bullish volume
@@ -306,7 +236,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
 
         # Extract trend from price window for metadata
         rolling_data = data.get("rolling_data", {})
-        price_window = rolling_data.get(KEY_VOLUME_5M)
+        price_window = rolling_data.get(KEY_VOLUME_UP_5M)
         trend = price_window.trend if price_window else "UNKNOWN"
 
         # Build signal
@@ -385,7 +315,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
 
         # Extract trend from price window for metadata
         rolling_data = data.get("rolling_data", {})
-        price_window = rolling_data.get(KEY_VOLUME_5M)
+        price_window = rolling_data.get(KEY_VOLUME_UP_5M)
         trend = price_window.trend if price_window else "UNKNOWN"
 
         # Build signal
@@ -481,7 +411,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
 
         # Extract trend from price window for metadata
         rolling_data = data.get("rolling_data", {})
-        price_window = rolling_data.get(KEY_VOLUME_5M)
+        price_window = rolling_data.get(KEY_VOLUME_UP_5M)
         trend = price_window.trend if price_window else "UNKNOWN"
 
         # Build signal
@@ -677,12 +607,4 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _get_volume_ratio(self, volume_window: RollingWindow) -> Optional[float]:
-        """Get current volume / rolling average volume ratio."""
-        if volume_window.count < 2:
-            return None
-        current = volume_window.latest
-        avg = volume_window.mean
-        if current is None or avg is None or avg == 0:
-            return None
-        return current / avg
+
