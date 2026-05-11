@@ -74,6 +74,11 @@ layer1:
       put_heavy_threshold: 0.4
       call_heavy_threshold: 0.6
       min_confidence: 0.35
+      # v2 Imbalance-Velocity params
+      ratio_roc_threshold: 0.10
+      depth_alignment_min: 0.4
+      vwap_deviation_min_std: 1.5
+      regime_gamma_threshold: 500000
 
   confluence_reversal:
     enabled: true

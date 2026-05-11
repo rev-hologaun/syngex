@@ -56,6 +56,12 @@ STOP_VOL_MULT = 2.5          # stop = 2.5x rolling price std dev
 TARGET_RISK_MULT = 1.5       # target = 1.5x stop distance
 MIN_CONFIDENCE = 0.55        # Minimum confidence to emit signal
 
+# v2 Imbalance-Velocity constants
+RATIO_ROC_WINDOW = 5         # Number of ticks back for ROC
+RATIO_ROC_THRESHOLD = 0.10   # Minimum ROC to trigger (10% change)
+REGIME_GAMMA_THRESHOLD = 500000
+VWAP_DEVIATION_MIN_STD = 1.5
+
 
 class GEXImbalance(BaseStrategy):
     """
@@ -68,7 +74,9 @@ class GEXImbalance(BaseStrategy):
     strategy_id = "gex_imbalance"
     layer = "layer1"
 
-
+    def __init__(self) -> None:
+        super().__init__()
+        self._ratio_history: list = []  # List of (timestamp, ratio) tuples, capped at 20
 
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """
@@ -108,18 +116,40 @@ class GEXImbalance(BaseStrategy):
         if bias is None:
             return []  # Neutral zone — no signal
 
-        # VWAP trend confirmation
-        vwap_confirmed = self._check_vwap_trend(
-            underlying_price, rolling_data, bias
-        )
-        if not vwap_confirmed:
-            return []  # No trend confirmation — skip
+        # Depth snapshot
+        depth_snapshot = data.get("depth_snapshot")
 
-        # Regime alignment — soft confidence factor (no hard gates)
+        # Net gamma for regime intensity
+        net_gamma = gex_calc.get_net_gamma()
 
-        # Compute confidence
-        confidence = self._compute_confidence(
-            ratio, bias_strength, bias, regime, total_msgs, vwap_confirmed
+        # Update ratio history for ROC
+        self._update_ratio_history(ratio, ts)
+        roc = self._get_ratio_roc()
+
+        # ROC gating: velocity must align with bias direction
+        if roc is not None:
+            if bias == "LONG" and roc >= -RATIO_ROC_THRESHOLD:
+                return []  # ROC not negative enough for LONG
+            if bias == "SHORT" and roc <= RATIO_ROC_THRESHOLD:
+                return []  # ROC not positive enough for SHORT
+
+        # Depth alignment check
+        depth_alignment = self._check_depth_alignment(bias, depth_snapshot)
+        if depth_alignment is not None and depth_alignment < 0.4:
+            return []  # Liquidity doesn't support bias
+
+        # VWAP deviation check (distance-based)
+        vwap_dev = self._check_vwap_deviation(underlying_price, rolling_data, bias)
+        if vwap_dev is None or vwap_dev < VWAP_DEVIATION_MIN_STD:
+            return []  # Not sufficiently deviated from VWAP
+
+        # Regime intensity
+        regime_intensity = self._compute_regime_intensity(regime, net_gamma, bias)
+
+        # Compute confidence with 6-component scoring
+        confidence = self._compute_confidence_v2(
+            ratio, bias_strength, bias, regime_intensity, total_msgs,
+            vwap_dev, roc, depth_alignment
         )
         if confidence < MIN_CONFIDENCE:
             return []
@@ -239,98 +269,141 @@ class GEXImbalance(BaseStrategy):
         return (None, 0.0)
 
     # ------------------------------------------------------------------
-    # VWAP trend confirmation
+    # GEX Velocity (ROC of Ratio)
     # ------------------------------------------------------------------
 
-    def _check_vwap_trend(
-        self, price: float, rolling_data: Dict[str, Any], bias: str
-    ) -> bool:
-        """
-        Confirm the signal with VWAP trend.
+    def _update_ratio_history(self, ratio: float, ts: float) -> None:
+        """Append (ts, ratio) to history, capped at 20 entries."""
+        self._ratio_history.append((ts, ratio))
+        if len(self._ratio_history) > 20:
+            self._ratio_history.pop(0)
 
-        For LONG signals: price should be above VWAP (rolling mean).
-        For SHORT signals: price should be below VWAP (rolling mean).
+    def _get_ratio_roc(self) -> Optional[float]:
+        """Rate-of-change of ratio over RATIO_ROC_WINDOW ticks."""
+        if len(self._ratio_history) < RATIO_ROC_WINDOW + 1:
+            return None
+        recent = self._ratio_history[-1][1]
+        older = self._ratio_history[-(RATIO_ROC_WINDOW + 1)][1]
+        if older == 0:
+            return 0.0
+        return (recent - older) / abs(older)
 
-        Checks multiple rolling windows for confirmation.
+    # ------------------------------------------------------------------
+    # Liquidity Imbalance (Depth Alignment)
+    # ------------------------------------------------------------------
+
+    def _check_depth_alignment(self, bias: str, depth_snapshot: Optional[Dict]) -> Optional[float]:
+        """Check if order book depth supports the bias direction."""
+        if not depth_snapshot:
+            return None
+        bid_size = depth_snapshot.get("total_bid_size", 0)
+        ask_size = depth_snapshot.get("total_ask_size", 0)
+        total = bid_size + ask_size
+        if total == 0:
+            return None
+        if bias == "LONG":
+            return bid_size / total
+        else:
+            return ask_size / total
+
+    # ------------------------------------------------------------------
+    # Regime-Volatility Scaling
+    # ------------------------------------------------------------------
+
+    def _compute_regime_intensity(self, regime: str, net_gamma: float, bias: str) -> float:
+        """Compute regime intensity factor based on gamma regime and bias alignment."""
+        if bias == "LONG" and regime == "POSITIVE":
+            base = 0.15
+        elif bias == "SHORT" and regime == "NEGATIVE":
+            base = 0.15
+        elif bias == "LONG" and regime == "NEGATIVE":
+            base = -0.10
+        elif bias == "SHORT" and regime == "POSITIVE":
+            base = -0.10
+        else:
+            base = 0.0
+        intensity = min(1.0, abs(net_gamma) / REGIME_GAMMA_THRESHOLD)
+        return base * intensity
+
+    # ------------------------------------------------------------------
+    # VWAP Deviation (Distance-Based)
+    # ------------------------------------------------------------------
+
+    def _check_vwap_deviation(self, price: float, rolling_data: Dict[str, Any], bias: str) -> Optional[float]:
+        """Check price deviation from rolling mean in std-dev units.
+
+        LONG: price must be below mean (mean reversion buy).
+        SHORT: price must be above mean (mean reversion sell).
         """
-        # Check "price" window (generic) or "price_5m" / "price_30m"
         price_window = None
         for key in (KEY_PRICE_5M, KEY_PRICE_30M):
             rw = rolling_data.get(key)
             if rw and rw.count >= 5:
                 price_window = rw
                 break
-
-        if price_window is None:
-            return False
-
+        if price_window is None or price_window.mean is None or price_window.std is None:
+            return None
         mean = price_window.mean
-        if mean is None or mean <= 0:
-            return False
-
+        std = price_window.std
+        if std <= 0:
+            return None
+        deviation = (price - mean) / std
         if bias == "LONG":
-            # Put-heavy in a dip (price below VWAP) = mean reversion LONG
-            return price < mean
+            if deviation > 0:
+                return None
+            return round(abs(deviation), 3)
         else:
-            # Call-heavy above VWAP = trend continuation SHORT
-            return price > mean
+            if deviation < 0:
+                return None
+            return round(deviation, 3)
 
     # ------------------------------------------------------------------
-    # Confidence computation
+    # 6-Component Confidence Scoring (v2)
     # ------------------------------------------------------------------
 
-    def _compute_confidence(
-        self,
-        ratio: float,
-        bias_strength: float,
-        bias: str,
-        regime: str,
-        total_msgs: int,
-        vwap_confirmed: bool,
+    def _compute_confidence_v2(
+        self, ratio: float, bias_strength: float, bias: str,
+        regime_intensity: float, total_msgs: int,
+        vwap_dev: Optional[float], roc: Optional[float],
+        depth_alignment: Optional[float],
     ) -> float:
-        """
-        Combine ratio extremity, regime alignment, and data quality into confidence.
-
-        Returns 0.0–1.0.
-        """
-        # Ratio extremity: how far from neutral (0.4–0.6)
-        # Strong signals (near 0 or 1) get higher confidence
+        """Combine 6 components into a normalized confidence score [0, 1]."""
+        # 1. Ratio extremity (0.15–0.25)
         if ratio < PUT_HEAVY_RATIO:
-            # Put-heavy: closer to 0 = stronger
             if ratio <= STRONG_PUT_RATIO:
-                ratio_conf = 0.8
+                ratio_conf = 0.25
             else:
-                ratio_conf = 0.4 + 0.4 * (1 - ratio / PUT_HEAVY_RATIO)
+                ratio_conf = 0.15 + 0.10 * (1 - ratio / PUT_HEAVY_RATIO)
         elif ratio > CALL_HEAVY_RATIO:
-            # Call-heavy: higher ratio = stronger (normalize against 3.0 upper bound)
-            if ratio >= STRONG_CALL_RATIO * 3:  # ~2.25 → strong
-                ratio_conf = 0.8
+            if ratio >= STRONG_CALL_RATIO:
+                ratio_conf = 0.25
             else:
-                ratio_conf = 0.4 + 0.4 * min(1.0, (ratio - CALL_HEAVY_RATIO) / (3.0 - CALL_HEAVY_RATIO))
+                ratio_conf = 0.15 + 0.10 * min(1.0, (ratio - CALL_HEAVY_RATIO) / (STRONG_CALL_RATIO - CALL_HEAVY_RATIO))
         else:
-            ratio_conf = 0.0
+            ratio_conf = 0.15  # neutral zone — baseline
 
-        # Regime alignment bonus (bias-aware: +0.15 aligned, -0.10 misaligned)
-        regime_bonus = 0.0
-        if bias == "LONG" and regime == "POSITIVE":
-            regime_bonus = 0.15  # Aligned: put-heavy + positive regime
-        elif bias == "SHORT" and regime == "NEGATIVE":
-            regime_bonus = 0.15  # Aligned: call-heavy + negative regime
-        elif bias == "LONG" and regime == "NEGATIVE":
-            regime_bonus = -0.10  # Misaligned: penalize but don't block
-        elif bias == "SHORT" and regime == "POSITIVE":
-            regime_bonus = -0.10  # Misaligned: penalize but don't block
+        # 2. Bias strength (0.1–0.15)
+        bias_conf = 0.1 + 0.05 * bias_strength
 
-        # Data freshness bonus (0.0–0.1)
-        msg_conf = min(0.1, total_msgs / 10000)
+        # 3. Regime intensity (0.05–0.2) — magnitude-scaled
+        regime_conf = 0.05 + 0.15 * min(1.0, abs(regime_intensity) / 0.15) if regime_intensity else 0.05
 
-        # VWAP confirmation bonus (0.0–0.1)
-        vwap_bonus = 0.1 if vwap_confirmed else 0.0
+        # 4. ROC (0.05–0.15) — velocity confirmation
+        if roc is not None:
+            roc_conf = 0.05 + 0.10 * min(1.0, abs(roc) / RATIO_ROC_THRESHOLD)
+        else:
+            roc_conf = 0.05  # insufficient history → baseline
 
-        # Normalize each component to [0,1] and average
-        norm_ratio = (ratio_conf - 0.4) / (0.8 - 0.4) if 0.8 != 0.4 else 1.0
-        norm_regime = (regime_bonus + 0.10) / 0.25 if 0.25 != 0 else 0.0  # shift [-0.10, +0.15] → [0, 1]
-        norm_msg = msg_conf / 0.1 if 0.1 != 0 else 0.0
-        norm_vwap = vwap_bonus / 0.1 if 0.1 != 0 else 0.0
-        confidence = (norm_ratio + norm_regime + norm_msg + norm_vwap) / 4.0
-        return min(1.0, max(0.0, confidence))
+        # 5. Depth alignment (0.05–0.15)
+        if depth_alignment is not None:
+            depth_conf = 0.05 + 0.10 * depth_alignment
+        else:
+            depth_conf = 0.10  # no depth data → neutral (0.5 maps to 0.10)
+
+        # 6. VWAP deviation (0.05–0.15)
+        if vwap_dev is not None:
+            vwap_conf = 0.05 + 0.10 * min(1.0, vwap_dev / 3.0)
+        else:
+            vwap_conf = 0.05  # no data → baseline
+
+        return min(1.0, max(0.0, (ratio_conf + bias_conf + regime_conf + roc_conf + depth_conf + vwap_conf) / 6.0))
