@@ -81,8 +81,10 @@ class GammaWallBounce(BaseStrategy):
         if not vol_check["recommended"]:
             return []
 
-        # Get walls above and below price
-        walls = gex_calc.get_gamma_walls(threshold=MIN_WALL_GEX)
+        # Get walls above and below price — use classification to filter magnets
+        walls = gex_calc.get_wall_classifications(threshold=MIN_WALL_GEX)
+        # Filter out magnets and ghosts — gamma_wall_bounce only trades actual walls
+        walls = [w for w in walls if w.get("classification") == "wall"]
         if not walls:
             return []
 
@@ -130,6 +132,13 @@ class GammaWallBounce(BaseStrategy):
         """
         wall_strike = wall["strike"]
         wall_gex = wall["gex"]
+
+        # Extract gex_calc from data dict
+        gex_calc = data.get("gex_calculator") if data else None
+
+        # Freshness check — skip ghost walls
+        if wall.get("is_ghost", False):
+            return None
 
         # Check proximity: price must be within WALL_PROXIMITY_PCT below wall
         distance_pct = (wall_strike - price) / price
@@ -250,6 +259,13 @@ class GammaWallBounce(BaseStrategy):
         """
         wall_strike = wall["strike"]
         wall_gex = wall["gex"]
+
+        # Extract gex_calc from data dict
+        gex_calc = data.get("gex_calculator") if data else None
+
+        # Freshness check — skip ghost walls
+        if wall.get("is_ghost", False):
+            return None
 
         # Check proximity: price must be within WALL_PROXIMITY_PCT above wall
         distance_pct = (price - wall_strike) / price

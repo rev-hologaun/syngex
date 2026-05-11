@@ -76,6 +76,19 @@ class _StrikeBucket:
         """Net delta: call_delta_sum minus put_delta_sum."""
         return self.call_delta - self.put_delta
 
+    @property
+    def net_delta_density(self) -> float:
+        """Delta density: abs(net_delta) / total message count.
+
+        Measures how concentrated the delta is per message at this strike.
+        High density = aggressive positioning (magnet). Low density = passive
+        hedging (wall).
+        """
+        total_count = self.call_count + self.put_count
+        if total_count == 0:
+            return 0.0
+        return abs(self.net_delta) / total_count
+
     def normalized_gamma(self) -> float:
         """Return normalized (per-message average) net gamma.
 
@@ -256,7 +269,9 @@ class GEXCalculator:
             "quote_updates": self._quote_count,
         }
 
-    def get_gamma_walls(self, threshold: float = 1e6) -> List[Dict[str, Any]]:
+    def get_gamma_walls(
+        self, threshold: float = 1e6, include_ghosts: bool = True,
+    ) -> List[Dict[str, Any]]:
         """
         Identify Gamma Walls — strikes with massive GEX.
 
@@ -266,6 +281,11 @@ class GEXCalculator:
 
         The threshold is on the normalized GEX scale (e.g. 1e6).
         For total GEX magnitude across all strikes, use get_normalized_net_gamma().
+
+        Args:
+            threshold: Minimum |GEX| to consider a wall.
+            include_ghosts: If False, exclude walls with no recent updates
+                (older than 60 seconds). Default True for backward compatibility.
 
         Returns sorted list of wall dicts sorted by absolute GEX.
         """
@@ -279,6 +299,11 @@ class GEXCalculator:
             norm_net_gamma = bucket.normalized_gamma()
             gex = norm_net_gamma * 100 * price
             if abs(gex) >= threshold:
+                # Skip ghost walls unless explicitly requested
+                if not include_ghosts:
+                    age = time.perf_counter() - bucket.last_update
+                    if age > 60.0:
+                        continue
                 walls.append({
                     "strike": strike,
                     "net_gamma": norm_net_gamma,
@@ -523,6 +548,142 @@ class GEXCalculator:
                 total_iv = bucket.call_iv_sum + bucket.put_iv_sum
                 result[strike] = total_iv / total_count
         return result
+
+    # ------------------------------------------------------------------
+    # Delta Density & Wall Classification
+    # ------------------------------------------------------------------
+
+    def get_delta_density(self, strike: float) -> float:
+        """Return delta density for a specific strike.
+
+        Delta density = abs(net_delta) / (call_count + put_count).
+        Measures how concentrated the delta is per message at this strike.
+
+        Args:
+            strike: The strike price to look up.
+
+        Returns:
+            Delta density value (float). Returns 0.0 if no bucket exists.
+        """
+        bucket = self._ladder.get(strike)
+        if bucket is None:
+            return 0.0
+        return bucket.net_delta_density
+
+    def classify_wall(
+        self, bucket: _StrikeBucket, gex: float, price: float,
+        density_threshold: float = 0.5, magnet_threshold: float = 2.0,
+    ) -> str:
+        """Classify a strike bucket as a wall, magnet, or weak.
+
+        Classification logic:
+            - "wall"   — high GEX, low delta density → dealers are hedging passively,
+                         price repels (good for gamma_wall_bounce)
+            - "magnet" — high GEX, high delta density → dealers are heavily positioned,
+                         price attracts (NOT for gamma_wall_bounce)
+            - "weak"   — low GEX, high delta density → noise, not a real structure
+
+        Args:
+            bucket: The _StrikeBucket to classify.
+            gex: The GEX value at this strike.
+            price: Current underlying price (unused but kept for future extensibility).
+            density_threshold: Delta density below which we consider it "low".
+            magnet_threshold: Delta density above which we consider it "high".
+
+        Returns:
+            One of "wall", "magnet", or "weak".
+        """
+        density = bucket.net_delta_density
+        if density < density_threshold and abs(gex) > 0:
+            return "wall"
+        elif density > magnet_threshold and abs(gex) > 0:
+            return "magnet"
+        else:
+            return "weak"
+
+    def get_wall_classifications(
+        self, threshold: float = 1e6,
+        density_threshold: float = 0.5, magnet_threshold: float = 2.0,
+    ) -> List[Dict[str, Any]]:
+        """Return all gamma walls with classification added.
+
+        Reuses get_gamma_walls() logic and adds a "classification" key
+        to each wall dict: "wall", "magnet", or "weak".
+
+        Args:
+            threshold: Minimum |GEX| to consider a wall.
+            density_threshold: Delta density below which = "wall".
+            magnet_threshold: Delta density above which = "magnet".
+
+        Returns:
+            List of wall dicts with added "classification" key.
+        """
+        walls: List[Dict[str, Any]] = []
+        price = self.underlying_price
+        if price <= 0:
+            return walls
+
+        for strike, bucket in self._ladder.items():
+            norm_net_gamma = bucket.normalized_gamma()
+            gex = norm_net_gamma * 100 * price
+            if abs(gex) >= threshold:
+                classification = self.classify_wall(
+                    bucket, gex, price,
+                    density_threshold=density_threshold,
+                    magnet_threshold=magnet_threshold,
+                )
+                walls.append({
+                    "strike": strike,
+                    "net_gamma": norm_net_gamma,
+                    "gex": gex,
+                    "side": "call" if norm_net_gamma > 0 else "put",
+                    "total_contracts": bucket.call_count + bucket.put_count,
+                    "classification": classification,
+                })
+
+        walls.sort(key=lambda w: abs(w["gex"]), reverse=True)
+        return walls
+
+    def get_wall_with_freshness(
+        self, threshold: float = 1e6, max_age_seconds: float = 60.0,
+    ) -> List[Dict[str, Any]]:
+        """Return walls filtered by freshness.
+
+        Uses bucket.last_update (perf_counter timestamp) to check if a wall
+        is stale. Adds "is_ghost" and "last_update_age" to each wall dict.
+
+        Args:
+            threshold: Minimum |GEX| to consider a wall.
+            max_age_seconds: Maximum age in seconds before a wall is considered
+                a ghost.
+
+        Returns:
+            List of wall dicts with added "is_ghost" and "last_update_age" keys.
+        """
+        walls: List[Dict[str, Any]] = []
+        price = self.underlying_price
+        if price <= 0:
+            return walls
+
+        now = time.perf_counter()
+        for strike, bucket in self._ladder.items():
+            norm_net_gamma = bucket.normalized_gamma()
+            gex = norm_net_gamma * 100 * price
+            if abs(gex) >= threshold:
+                age = now - bucket.last_update
+                is_ghost = age > max_age_seconds
+                walls.append({
+                    "strike": strike,
+                    "net_gamma": norm_net_gamma,
+                    "gex": gex,
+                    "side": "call" if norm_net_gamma > 0 else "put",
+                    "total_contracts": bucket.call_count + bucket.put_count,
+                    "is_ghost": is_ghost,
+                    "last_update_age": age,
+                })
+
+        walls.sort(key=lambda w: abs(w["gex"]), reverse=True)
+        return walls
 
     def get_atm_strike(self, price: float) -> Optional[float]:
         """Find the nearest strike in the gamma ladder to the current price.

@@ -25,6 +25,10 @@ layer1:
       # Depth-aware params
       min_liquidity_validation_score: 0.25
       max_liquidity_decay_threshold: 0.40
+      # Wall classification params
+      filter_ghost_walls: true
+      ghost_max_age_seconds: 60
+      filter_magnets: true
 
   magnet_accelerate:
     enabled: true
