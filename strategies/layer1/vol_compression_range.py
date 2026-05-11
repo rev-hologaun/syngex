@@ -27,6 +27,9 @@ Confidence factors:
     - Range tightness (tighter = higher confidence)
     - Wall proximity (walls at range edges = stronger rejection)
     - Message count (more data = more reliable range)
+    - IV compression (low skew std = true compression)
+    - Delta density (hard walls get higher confidence)
+    - Order book depth (adequate liquidity at edge required)
 """
 
 from __future__ import annotations
@@ -37,7 +40,11 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
-from strategies.rolling_keys import KEY_PRICE_5M, KEY_PRICE_30M, KEY_VOLUME_5M
+from strategies.rolling_keys import (
+    KEY_PRICE_5M, KEY_PRICE_30M, KEY_VOLUME_5M,
+    KEY_IV_SKEW_5M,
+    KEY_DEPTH_BID_SIZE_5M, KEY_DEPTH_ASK_SIZE_5M,
+)
 from strategies.volume_filter import VolumeFilter
 
 logger = logging.getLogger("Syngex.Strategies.VolCompressionRange")
@@ -46,13 +53,18 @@ logger = logging.getLogger("Syngex.Strategies.VolCompressionRange")
 # Constants
 # ---------------------------------------------------------------------------
 
-COMPRESSION_PCT = 0.003       # 0.3% max range for compression
-MIN_RANGE_BARS = 20           # Minimum data points in rolling window
-WALL_EDGE_PROXIMITY = 0.004   # 0.4% from wall for edge trade
-MIN_CONFIDENCE = 0.45         # Minimum confidence to emit signal
-STOP_PCT = 0.006              # 0.6% stop (wider for scalping)
-TARGET_RISK_MULT = 1.5        # 1.5× risk for target
-STD_THRESHOLD = 0.002         # Max std of price for compression
+COMPRESSION_PCT = 0.003                          # 0.3% max range for compression
+MIN_RANGE_BARS = 20                              # Minimum data points in rolling window
+WALL_EDGE_PROXIMITY = 0.004                      # 0.4% from wall for edge trade
+MIN_CONFIDENCE = 0.45                            # Minimum confidence to emit signal
+STOP_PCT = 0.006                                 # 0.6% stop (wider for scalping)
+TARGET_RISK_MULT = 1.5                           # 1.5× risk for target
+STD_THRESHOLD = 0.002                            # Max std of price for compression
+IV_COMPRESSION_STD_THRESHOLD = 0.03              # Max rolling std of IV skew for compression
+DEPTH_SPIKE_THRESHOLD = 1.3                      # Current depth >= 1.3x rolling avg for edge validation
+REGIME_GAMMA_INTENSITY_THRESHOLD = 500000        # |net_gamma| for strong regime
+NEGATIVE_REGIME_STOP_MULT = 1.5                  # Wider stops (fallback, strategy requires POSITIVE)
+POSITIVE_REGIME_TIGHT_STOP_MULT = 0.7            # Tighter stops in strong positive gamma
 
 
 class VolCompressionRange(BaseStrategy):
@@ -92,6 +104,8 @@ class VolCompressionRange(BaseStrategy):
         ts = data.get("timestamp", time.time())
         symbol = data.get("symbol", "")
 
+        depth_snapshot = data.get("depth_snapshot")
+
         # Volume confirmation filter
         vol_filter = VolumeFilter.evaluate(rolling_data, MIN_CONFIDENCE)
         if not vol_filter["recommended"]:
@@ -103,7 +117,7 @@ class VolCompressionRange(BaseStrategy):
             return []
 
         # Check for compression
-        is_compressed = self._check_compression(price_window, underlying_price)
+        is_compressed = self._check_compression(price_window, underlying_price, rolling_data)
         if not is_compressed:
             return []
 
@@ -112,14 +126,16 @@ class VolCompressionRange(BaseStrategy):
         # Check range edges
         if price_window.max is not None:
             sig = self._check_upper_edge(
-                price_window, underlying_price, gex_calc, regime
+                price_window, underlying_price, gex_calc, regime,
+                depth_snapshot, rolling_data
             )
             if sig:
                 signals.append(sig)
 
         if price_window.min is not None:
             sig = self._check_lower_edge(
-                price_window, underlying_price, gex_calc, regime
+                price_window, underlying_price, gex_calc, regime,
+                depth_snapshot, rolling_data
             )
             if sig:
                 signals.append(sig)
@@ -134,25 +150,126 @@ class VolCompressionRange(BaseStrategy):
         self,
         price_window: Any,
         price: float,
+        rolling_data: Dict[str, Any],
     ) -> bool:
-        """
-        Check if price is in a compressed range.
+        """Check if price AND IV are in a compressed state.
 
-        Two criteria (either one suffices):
-        1. Range (max - min) < COMPRESSION_PCT of price
-        2. Rolling std < STD_THRESHOLD
+        Two criteria (both must pass):
+        1. Price range < COMPRESSION_PCT OR rolling std < STD_THRESHOLD
+        2. IV is also compressed (via skew rolling std)
         """
-        # Range check
+        # Price compression (existing logic)
         rng = price_window.range
         if rng is not None and rng / price <= COMPRESSION_PCT:
+            price_compressed = True
+        else:
+            std = price_window.std
+            price_compressed = std is not None and std / price <= STD_THRESHOLD
+
+        if not price_compressed:
+            return False
+
+        # IV compression (new)
+        return self._check_iv_compression(rolling_data)
+
+    def _check_iv_compression(self, rolling_data: Dict[str, Any]) -> bool:
+        """Check if IV is also compressed (not just price).
+
+        Uses rolling std of IV skew as a proxy for IV volatility.
+        Low skew std = IV is stable = true compression.
+        Graceful: returns True if no IV data (don't block on missing data).
+        """
+        iv_skew_rw = rolling_data.get(KEY_IV_SKEW_5M)
+        if iv_skew_rw is None or iv_skew_rw.count < 10:
+            return True
+        if iv_skew_rw.std is None or iv_skew_rw.std <= 0:
+            return True
+        return iv_skew_rw.std <= IV_COMPRESSION_STD_THRESHOLD
+
+    def _check_edge_liquidity(
+        self,
+        edge: str,
+        depth_snapshot: Optional[Dict[str, Any]],
+        rolling_data: Dict[str, Any],
+    ) -> bool:
+        """Check if order book depth at the edge shows adequate liquidity.
+
+        edge: 'upper' (ask side) or 'lower' (bid side)
+        Graceful: returns True if no depth data (don't block on missing data).
+        """
+        if not depth_snapshot:
             return True
 
-        # Std check
-        std = price_window.std
-        if std is not None and std / price <= STD_THRESHOLD:
+        if edge == "upper":
+            depth_key = "ask_size"
+            rolling_key = KEY_DEPTH_ASK_SIZE_5M
+        else:
+            depth_key = "bid_size"
+            rolling_key = KEY_DEPTH_BID_SIZE_5M
+
+        depth_info = depth_snapshot.get(depth_key)
+        if not depth_info:
             return True
 
-        return False
+        current_depth = depth_info.get("current", 0)
+        if current_depth <= 0:
+            return True
+
+        depth_rw = rolling_data.get(rolling_key)
+        if depth_rw is None or depth_rw.count < 10 or depth_rw.mean is None:
+            return True
+
+        avg_depth = depth_rw.mean
+        if avg_depth <= 0:
+            return True
+
+        return current_depth >= avg_depth * DEPTH_SPIKE_THRESHOLD
+
+    def _compute_regime_stop_mult(self, gex_calc: Any, regime: str) -> float:
+        """Compute regime-adjusted stop multiplier.
+
+        Strong positive gamma → tighter stops (0.7x).
+        Weak/no gamma → wider stops (1.0x).
+        """
+        if regime != "POSITIVE":
+            return NEGATIVE_REGIME_STOP_MULT
+
+        net_gamma = gex_calc.get_net_gamma()
+        if net_gamma is None:
+            return 1.0
+
+        abs_gamma = abs(net_gamma)
+        if abs_gamma >= REGIME_GAMMA_INTENSITY_THRESHOLD:
+            return POSITIVE_REGIME_TIGHT_STOP_MULT
+
+        # Linear interpolation between 1.0 (at 0) and 0.7 (at threshold)
+        ratio = abs_gamma / REGIME_GAMMA_INTENSITY_THRESHOLD
+        return 1.0 - (1.0 - POSITIVE_REGIME_TIGHT_STOP_MULT) * ratio
+
+    def _compute_wall_delta_density(
+        self,
+        gex_calc: Any,
+        strike: float,
+    ) -> float:
+        """Compute delta density for a specific wall strike.
+
+        High delta density = wall has real delta concentration = 'hard wall.'
+        Graceful: returns 0.0 if no delta data available.
+        """
+        delta_data = gex_calc.get_delta_by_strike(strike)
+        if not delta_data:
+            return 0.0
+
+        call_count = delta_data.get("call_count", 0)
+        put_count = delta_data.get("put_count", 0)
+        total_count = call_count + put_count
+
+        if total_count == 0:
+            return 0.0
+
+        net_delta = abs(delta_data.get("net_delta", 0.0))
+        density = net_delta / total_count
+        return min(1.0, density / 10.0)
 
     # ------------------------------------------------------------------
     # Upper edge: price near rolling max + call wall above → SHORT
@@ -164,6 +281,8 @@ class VolCompressionRange(BaseStrategy):
         price: float,
         gex_calc: Any,
         regime: str,
+        depth_snapshot: Optional[Dict[str, Any]],
+        rolling_data: Dict[str, Any],
     ) -> Optional[Signal]:
         """
         Check if price is near the upper edge of the range with a call wall.
@@ -195,19 +314,31 @@ class VolCompressionRange(BaseStrategy):
         if wall_distance > WALL_EDGE_PROXIMITY:
             return None  # Wall too far
 
-        # Compute confidence
-        confidence = self._edge_confidence(
-            position_in_range, wall_distance, nearest_wall["gex"],
-            rng / price, price_window.count, "short"
-        )
-        if confidence < MIN_CONFIDENCE:
-            return None
+        # === Liquidity check at edge (hard gate) ===
+        if not self._check_edge_liquidity("upper", depth_snapshot, rolling_data):
+            return None  # Thin book at edge — skip
 
-        # Stop above the wall (range edge)
-        stop = nearest_wall["strike"] * (1 + STOP_PCT)
+        # === Delta density for wall weighting ===
+        delta_density = self._compute_wall_delta_density(gex_calc, nearest_wall["strike"])
+
+        # === Regime-adjusted stop ===
+        stop_mult = self._compute_regime_stop_mult(gex_calc, regime)
+        stop = nearest_wall["strike"] * (1 + STOP_PCT * stop_mult)
         risk = stop - price
         target = price - risk * TARGET_RISK_MULT
         if risk <= 0:
+            return None
+
+        # === Updated confidence with new factors ===
+        confidence = self._edge_confidence(
+            position_in_range, wall_distance, nearest_wall["gex"],
+            rng / price, price_window.count, "short",
+            is_put_wall=False,
+            iv_compressed=self._check_iv_compression(rolling_data),
+            delta_density=delta_density,
+            regime_stop_mult=stop_mult,
+        )
+        if confidence < MIN_CONFIDENCE:
             return None
 
         trend = price_window.trend if price_window else "UNKNOWN"
@@ -233,6 +364,9 @@ class VolCompressionRange(BaseStrategy):
                 "risk_reward_ratio": round(abs(target - price) / risk, 2),
                 "regime": regime,
                 "trend": trend,
+                "delta_density": round(delta_density, 4),
+                "stop_mult": round(stop_mult, 4),
+                "iv_compressed": self._check_iv_compression(rolling_data),
             },
         )
 
@@ -246,6 +380,8 @@ class VolCompressionRange(BaseStrategy):
         price: float,
         gex_calc: Any,
         regime: str,
+        depth_snapshot: Optional[Dict[str, Any]],
+        rolling_data: Dict[str, Any],
     ) -> Optional[Signal]:
         """
         Check if price is near the lower edge of the range with a put wall.
@@ -278,19 +414,31 @@ class VolCompressionRange(BaseStrategy):
         if wall_distance > WALL_EDGE_PROXIMITY:
             return None  # Wall too far
 
-        # Compute confidence
-        confidence = self._edge_confidence(
-            position_in_range, wall_distance, nearest_wall["gex"],
-            rng / price, price_window.count, "long", is_put_wall=is_put_wall
-        )
-        if confidence < MIN_CONFIDENCE:
-            return None
+        # === Liquidity check at edge (hard gate) ===
+        if not self._check_edge_liquidity("lower", depth_snapshot, rolling_data):
+            return None  # Thin book at edge — skip
 
-        # Stop below the wall (range edge)
-        stop = nearest_wall["strike"] * (1 - STOP_PCT)
+        # === Delta density for wall weighting ===
+        delta_density = self._compute_wall_delta_density(gex_calc, nearest_wall["strike"])
+
+        # === Regime-adjusted stop ===
+        stop_mult = self._compute_regime_stop_mult(gex_calc, regime)
+        stop = nearest_wall["strike"] * (1 - STOP_PCT * stop_mult)
         risk = price - stop
         target = price + risk * TARGET_RISK_MULT
         if risk <= 0:
+            return None
+
+        # === Updated confidence with new factors ===
+        confidence = self._edge_confidence(
+            position_in_range, wall_distance, nearest_wall["gex"],
+            rng / price, price_window.count, "long",
+            is_put_wall=is_put_wall,
+            iv_compressed=self._check_iv_compression(rolling_data),
+            delta_density=delta_density,
+            regime_stop_mult=stop_mult,
+        )
+        if confidence < MIN_CONFIDENCE:
             return None
 
         trend = price_window.trend if price_window else "UNKNOWN"
@@ -318,6 +466,9 @@ class VolCompressionRange(BaseStrategy):
                 "risk_reward_ratio": round(abs(target - price) / risk, 2),
                 "regime": regime,
                 "trend": trend,
+                "delta_density": round(delta_density, 4),
+                "stop_mult": round(stop_mult, 4),
+                "iv_compressed": self._check_iv_compression(rolling_data),
             },
         )
 
@@ -334,55 +485,68 @@ class VolCompressionRange(BaseStrategy):
         window_count: int,
         direction: str,
         is_put_wall: bool = False,
+        iv_compressed: bool = True,
+        delta_density: float = 0.0,
+        regime_stop_mult: float = 1.0,
     ) -> float:
         """
         Compute confidence for a range edge signal.
 
-        Factors:
-        - Position in range: closer to edge = higher confidence (0.2–0.3)
-        - Wall proximity: closer = higher confidence (0.2–0.3)
-        - Range tightness: tighter = higher confidence (0.1–0.2)
-        - Wall strength: higher |GEX| = higher confidence (0.1–0.2)
-        - Data quality: more points = higher confidence (0.0–0.1)
-        - Regime alignment: positive regime = required, bonus if confirmed (0.1)
-        - Put wall bonus: put walls at lower edge get +0.05 confidence
+        8 components (was 6):
+        1. Position in range (0.2–0.3)
+        2. Wall proximity (0.2–0.3)
+        3. Range tightness (0.1–0.2)
+        4. Wall GEX strength (0.1–0.2)
+        5. Data quality (0.0–0.1)
+        6. Regime alignment (0.1)
+        7. IV compression (0.0–0.1) — NEW
+        8. Delta density (0.0–0.1) — NEW
         """
-        # Position confidence: how close to edge
+        # 1. Position confidence
         if direction == "short":
-            edge_proximity = 1.0 - position_in_range  # Closer to 1.0 = higher
+            edge_proximity = 1.0 - position_in_range
         else:
-            edge_proximity = position_in_range  # Closer to 0.0 = higher
-
+            edge_proximity = position_in_range
         position_conf = 0.2 + 0.1 * edge_proximity
 
-        # Wall proximity: closer to wall = higher confidence
+        # 2. Wall proximity
         wall_conf = 0.2 + 0.1 * (1 - wall_distance / WALL_EDGE_PROXIMITY)
 
-        # Range tightness: tighter range = higher confidence
+        # 3. Range tightness
         tightness_conf = 0.1 + 0.1 * max(0, 1 - range_pct / COMPRESSION_PCT)
 
-        # Wall strength
+        # 4. Wall strength
         strength_conf = 0.1 + 0.1 * min(1.0, abs(wall_gex) / 5_000_000)
 
-        # Data quality
+        # 5. Data quality
         data_conf = min(0.1, window_count / 200)
 
-        # Regime bonus (positive gamma regime already required)
+        # 6. Regime bonus
         regime_conf = 0.1
 
-        # Put wall bonus (only meaningful for LONG side)
-        put_wall_conf = 0.05 if is_put_wall else 0.0
+        # 7. IV compression bonus (NEW)
+        iv_conf = 0.1 if iv_compressed else 0.0
 
-        # Normalize each component to [0,1] and average
+        # 8. Delta density bonus (NEW)
+        delta_conf = 0.1 * delta_density
+
+        # Normalize each to [0,1] and average
         norm_pos = (position_conf - 0.2) / (0.3 - 0.2) if 0.3 != 0.2 else 1.0
         norm_wall = (wall_conf - 0.2) / (0.3 - 0.2) if 0.3 != 0.2 else 1.0
         norm_tight = (tightness_conf - 0.1) / (0.2 - 0.1) if 0.2 != 0.1 else 1.0
         norm_strength = (strength_conf - 0.1) / (0.2 - 0.1) if 0.2 != 0.1 else 1.0
         norm_data = data_conf / 0.1 if 0.1 != 0 else 0.0
         norm_regime = regime_conf / 0.1 if 0.1 != 0 else 0.0
-        confidence = (norm_pos + norm_wall + norm_tight + norm_strength + norm_data + norm_regime) / 6.0
-        # Add put wall bonus directly
-        confidence += put_wall_conf
+        norm_iv = iv_conf / 0.1 if 0.1 != 0 else 0.0
+        norm_delta = delta_conf / 0.1 if 0.1 != 0 else 0.0
+
+        confidence = (norm_pos + norm_wall + norm_tight + norm_strength +
+                      norm_data + norm_regime + norm_iv + norm_delta) / 8.0
+
+        # Put wall bonus (only meaningful for LONG side)
+        if is_put_wall:
+            confidence += 0.05
+
         return min(1.0, max(0.0, confidence))
 
     def _get_price_window(
