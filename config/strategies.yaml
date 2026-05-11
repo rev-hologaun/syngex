@@ -57,6 +57,9 @@ layer1:
       atr_threshold: 0.003
       volume_spike_ratio: 1.5
       min_confidence: 0.35
+      # Depth-aware params (Squeeze-Force v2)
+      liquidity_vacuum_threshold: 0.2
+      wall_strength_min: 0.3
 
   gex_imbalance:
     enabled: true

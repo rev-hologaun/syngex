@@ -255,6 +255,9 @@ class SyngexOrchestrator:
             KEY_DEPTH_SPREAD_5M: RollingWindow(window_type="time", window_size=300),
             KEY_DEPTH_BID_LEVELS_5M: RollingWindow(window_type="time", window_size=300),
             KEY_DEPTH_ASK_LEVELS_5M: RollingWindow(window_type="time", window_size=300),
+            # Squeeze depth rolling windows (liquidity vacuum detection)
+            KEY_DEPTH_BID_SIZE_ROLLING: RollingWindow(window_type="time", window_size=60),
+            KEY_DEPTH_ASK_SIZE_ROLLING: RollingWindow(window_type="time", window_size=60),
         }
 
         # Call/put update counters for volume_up/volume_down tracking
@@ -781,6 +784,12 @@ class SyngexOrchestrator:
                     self._rolling_data[KEY_DEPTH_BID_LEVELS_5M].push(len(bids), ts)
                 if KEY_DEPTH_ASK_LEVELS_5M in self._rolling_data:
                     self._rolling_data[KEY_DEPTH_ASK_LEVELS_5M].push(len(asks), ts)
+
+                # Squeeze-specific: track depth on the breakout side for liquidity vacuum detection
+                if KEY_DEPTH_BID_SIZE_ROLLING in self._rolling_data:
+                    self._rolling_data[KEY_DEPTH_BID_SIZE_ROLLING].push(total_bid_size, ts)
+                if KEY_DEPTH_ASK_SIZE_ROLLING in self._rolling_data:
+                    self._rolling_data[KEY_DEPTH_ASK_SIZE_ROLLING].push(total_ask_size, ts)
 
 
         except Exception as exc:

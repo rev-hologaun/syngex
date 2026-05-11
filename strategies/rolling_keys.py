@@ -28,6 +28,10 @@ KEY_DEPTH_SPREAD_5M = "depth_spread_5m"
 KEY_DEPTH_BID_LEVELS_5M = "depth_bid_levels_5m"
 KEY_DEPTH_ASK_LEVELS_5M = "depth_ask_levels_5m"
 
+# --- Squeeze depth rolling keys (liquidity vacuum detection) ---
+KEY_DEPTH_BID_SIZE_ROLLING = "depth_bid_size_rolling"
+KEY_DEPTH_ASK_SIZE_ROLLING = "depth_ask_size_rolling"
+
 # --- Strategy-specific keys (created by individual strategies) ---
 KEY_EXTRINSIC_PROXY_5M = "extrinsic_proxy_5m"
 KEY_PROB_MOMENTUM_5M = "prob_momentum_5m"
@@ -59,11 +63,14 @@ DEPTH_KEYS = (
     KEY_DEPTH_SPREAD_5M,
     KEY_DEPTH_BID_LEVELS_5M,
     KEY_DEPTH_ASK_LEVELS_5M,
+    KEY_DEPTH_BID_SIZE_ROLLING,
+    KEY_DEPTH_ASK_SIZE_ROLLING,
 )
 
 # All keys in one tuple for validation
 ALL_KEYS = (*CORE_KEYS, *DEPTH_KEYS, KEY_EXTRINSIC_PROXY_5M, KEY_PROB_MOMENTUM_5M,
-            KEY_CONSEC_LONG, KEY_CONSEC_SHORT)
+            KEY_CONSEC_LONG, KEY_CONSEC_SHORT,
+            KEY_DEPTH_BID_SIZE_ROLLING, KEY_DEPTH_ASK_SIZE_ROLLING)
 
 __all__ = [
     "KEY_PRICE_5M", "KEY_PRICE_30M",
@@ -73,6 +80,7 @@ __all__ = [
     "KEY_ATM_DELTA_5M", "KEY_ATM_IV_5M",
     "KEY_DEPTH_BID_SIZE_5M", "KEY_DEPTH_ASK_SIZE_5M", "KEY_DEPTH_SPREAD_5M",
     "KEY_DEPTH_BID_LEVELS_5M", "KEY_DEPTH_ASK_LEVELS_5M",
+    "KEY_DEPTH_BID_SIZE_ROLLING", "KEY_DEPTH_ASK_SIZE_ROLLING",
     "KEY_EXTRINSIC_PROXY_5M", "KEY_PROB_MOMENTUM_5M",
     "KEY_CONSEC_LONG", "KEY_CONSEC_SHORT",
     "CORE_KEYS", "DEPTH_KEYS", "ALL_KEYS",
