@@ -116,6 +116,16 @@ layer1:
       max_hold_seconds: 3600
     params:
       min_confidence: 0.35
+      # v2 Structural-Decay params
+      accel_window_short: 10
+      accel_window_long: 30
+      accel_min_gamma: 0.0003
+      accel_min_price: 0.0002
+      wall_proximity_pct: 0.005
+      wall_proximity_bonus: 0.15
+      liquidity_decay_threshold: 0.3
+      regime_intensity_threshold: 500000
+      strong_regime_conf_bonus: 0.1
 
 # Layer 2: Alpha Greeks — 5 strategies
 layer2:

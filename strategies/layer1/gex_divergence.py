@@ -58,6 +58,17 @@ TARGET_RISK_MULT = 1.5           # 1.5× risk for target
 MIN_DATA_POINTS = 15             # Minimum data points for slope calculation
 MIN_TOTAL_GEX = 1000000.0        # 1M — minimum GEX wall strength
 
+# v2 Structural-Decay params
+ACCEL_WINDOW_SHORT = 10
+ACCEL_WINDOW_LONG = 30
+ACCEL_MIN_GAMMA = 0.0003
+ACCEL_MIN_PRICE = 0.0002
+WALL_PROXIMITY_PCT = 0.005
+WALL_PROXIMITY_BONUS = 0.15
+LIQUIDITY_DECAY_THRESHOLD = 0.3
+REGIME_INTENSITY_THRESHOLD = 500000
+STRONG_REGIME_CONF_BONUS = 0.1
+
 
 class GEXDivergence(BaseStrategy):
     """
@@ -110,6 +121,16 @@ class GEXDivergence(BaseStrategy):
         if price_slope is None or gamma_slope is None:
             return []
 
+        # === v2: Acceleration (2nd derivative) check ===
+        price_accel = self._calculate_acceleration(price_window, ACCEL_WINDOW_SHORT, ACCEL_WINDOW_LONG)
+        gamma_accel = self._calculate_acceleration(gamma_window, ACCEL_WINDOW_SHORT, ACCEL_WINDOW_LONG)
+        if price_accel is None or gamma_accel is None:
+            return []
+        if abs(price_accel["acceleration"]) < ACCEL_MIN_PRICE:
+            return []
+        if abs(gamma_accel["acceleration"]) < ACCEL_MIN_GAMMA:
+            return []
+
         # Check for divergence: slopes must have opposite signs
         if (price_slope > 0 and gamma_slope > 0) or \
            (price_slope < 0 and gamma_slope < 0):
@@ -129,12 +150,21 @@ class GEXDivergence(BaseStrategy):
             # Bullish divergence: price down, GEX up → LONG
             divergence_type = "bullish"
 
+        # === v2: Liquidity decay filter (hard gate) ===
+        depth_snapshot = data.get("depth_snapshot")
+        if not self._check_liquidity_decay(depth_snapshot, divergence_type):
+            return []
+
         # Regime alignment: soft confidence factor, not a hard gate.
         regime_misaligned = False
         if divergence_type == "bullish" and regime != "POSITIVE":
             regime_misaligned = True
         if divergence_type == "bearish" and regime != "NEGATIVE":
             regime_misaligned = True
+
+        # === v2: Wall proximity and regime intensity ===
+        wall_bonus = self._check_wall_proximity(gex_calc, underlying_price, divergence_type)
+        regime_intensity = self._compute_regime_intensity(gex_calc, divergence_type)
 
         # Get confirmation from last price movement
         price_change = self._get_price_change(price_window)
@@ -146,7 +176,11 @@ class GEXDivergence(BaseStrategy):
         confidence = self._compute_confidence(
             price_slope, gamma_slope, divergence_type,
             price_window, gamma_window, regime, confirmed,
-            regime_misaligned
+            regime_misaligned,
+            price_accel=price_accel,
+            gamma_accel=gamma_accel,
+            wall_bonus=wall_bonus,
+            regime_intensity=regime_intensity,
         )
         if confidence < MIN_CONFIDENCE:
             return []
@@ -196,6 +230,11 @@ class GEXDivergence(BaseStrategy):
                 "risk": round(risk, 2),
                 "reward": round(reward, 2),
                 "risk_reward_ratio": round(reward / risk, 2) if risk > 0 else 0,
+                # v2 Structural-Decay fields
+                "price_acceleration": round(price_accel["acceleration"], 6) if price_accel else None,
+                "gamma_acceleration": round(gamma_accel["acceleration"], 6) if gamma_accel else None,
+                "wall_proximity_bonus": round(wall_bonus, 4),
+                "regime_intensity_bonus": round(regime_intensity, 4),
             },
         )]
 
@@ -221,6 +260,96 @@ class GEXDivergence(BaseStrategy):
 
         slope = (last_val - first_val) / abs(first_val)
         return slope
+
+    # ------------------------------------------------------------------
+    # Acceleration (2nd derivative)
+    # ------------------------------------------------------------------
+
+    def _calculate_acceleration(self, window: Any, short_window: int, long_window: int) -> Optional[Dict[str, float]]:
+        """Calculate acceleration (2nd derivative) for a rolling window."""
+        if window.count < long_window or not window.values:
+            return None
+        values = window.values
+        if len(values) < long_window:
+            return None
+        short_vals = values[-short_window:]
+        if len(short_vals) < 3 or short_vals[0] == 0:
+            return None
+        short_slope = (short_vals[-1] - short_vals[0]) / abs(short_vals[0])
+        if values[0] == 0:
+            return None
+        long_slope = (values[-1] - values[0]) / abs(values[0])
+        accel = short_slope - long_slope
+        return {"slope_short": short_slope, "slope_long": long_slope, "acceleration": accel}
+
+    # ------------------------------------------------------------------
+    # Wall proximity check
+    # ------------------------------------------------------------------
+
+    def _check_wall_proximity(self, gex_calc: Any, price: float, divergence_type: str) -> float:
+        """Check if price is near a major gamma wall in divergence direction."""
+        try:
+            walls = gex_calc.get_gamma_walls(threshold=500_000)
+        except Exception:
+            return 0.0
+        if not walls:
+            return 0.0
+        min_dist_pct = float('inf')
+        for wall in walls:
+            wall_strike = wall.get("strike", 0)
+            if wall_strike <= 0:
+                continue
+            if divergence_type == "bearish":
+                if wall_strike > price:
+                    dist_pct = abs(wall_strike - price) / price
+                    min_dist_pct = min(min_dist_pct, dist_pct)
+            else:
+                if wall_strike < price:
+                    dist_pct = abs(wall_strike - price) / price
+                    min_dist_pct = min(min_dist_pct, dist_pct)
+        if min_dist_pct == float('inf') or min_dist_pct > WALL_PROXIMITY_PCT:
+            return 0.0
+        proximity_ratio = 1.0 - (min_dist_pct / WALL_PROXIMITY_PCT)
+        return WALL_PROXIMITY_BONUS * proximity_ratio
+
+    # ------------------------------------------------------------------
+    # Liquidity decay check
+    # ------------------------------------------------------------------
+
+    def _check_liquidity_decay(self, depth_snapshot: Optional[Dict[str, Any]], divergence_type: str) -> bool:
+        """Check if liquidity decay supports divergence signal."""
+        if not depth_snapshot:
+            return True
+        bid_depth = depth_snapshot.get("bid_size", {}).get("current", 0)
+        ask_depth = depth_snapshot.get("ask_size", {}).get("current", 0)
+        if bid_depth <= 0 and ask_depth <= 0:
+            return True
+        if divergence_type == "bearish":
+            if ask_depth > 0:
+                return (bid_depth / ask_depth) < (1.0 + LIQUIDITY_DECAY_THRESHOLD)
+            return True
+        else:
+            if bid_depth > 0:
+                return (ask_depth / bid_depth) < (1.0 + LIQUIDITY_DECAY_THRESHOLD)
+            return True
+
+    # ------------------------------------------------------------------
+    # Regime intensity
+    # ------------------------------------------------------------------
+
+    def _compute_regime_intensity(self, gex_calc: Any, divergence_type: str) -> float:
+        """Compute regime intensity bonus based on |net_gamma| magnitude."""
+        try:
+            net_gamma = gex_calc.get_net_gamma()
+        except Exception:
+            return 0.0
+        if net_gamma is None:
+            return 0.0
+        abs_gamma = abs(net_gamma)
+        if abs_gamma < REGIME_INTENSITY_THRESHOLD:
+            return 0.0
+        ratio = min(1.0, abs_gamma / (REGIME_INTENSITY_THRESHOLD * 2))
+        return STRONG_REGIME_CONF_BONUS * ratio
 
     # ------------------------------------------------------------------
     # Price change detection
@@ -277,49 +406,43 @@ class GEXDivergence(BaseStrategy):
         regime: str,
         confirmed: bool,
         regime_misaligned: bool = False,
+        price_accel: Optional[Dict] = None,
+        gamma_accel: Optional[Dict] = None,
+        wall_bonus: float = 0.0,
+        regime_intensity: float = 0.0,
     ) -> float:
-        """
-        Compute divergence signal confidence.
-
-        Factors:
-        - Price slope magnitude: larger trend = bigger reversal potential (0.2–0.3)
-        - Gamma slope magnitude: larger GEX shift = stronger structural change (0.2–0.3)
-        - Slope ratio: balanced divergence = higher confidence (0.1–0.15)
-        - Data quality: more points = more reliable (0.05–0.1)
-        - Regime alignment: aligned regime adds bonus; misaligned zeroes it out
-          but does not block the signal (regime is a soft confidence factor)
-        """
-        # Price slope confidence
-        price_conf = 0.15 + 0.15 * min(1.0, abs(price_slope) / 0.01)
-
-        # Gamma slope confidence
-        gamma_conf = 0.15 + 0.15 * min(1.0, abs(gamma_slope) / 0.01)
-
-        # Slope balance: if both slopes are similarly strong, divergence is cleaner
-        slope_ratio = min(abs(price_slope), abs(gamma_slope)) / \
-                      max(abs(price_slope), abs(gamma_slope)) if max(
-                          abs(price_slope), abs(gamma_slope)) > 0 else 0
+        """Compute divergence signal confidence — 8 components (was 5)."""
+        price_conf = 0.15 + 0.10 * min(1.0, abs(price_slope) / 0.01)
+        gamma_conf = 0.15 + 0.10 * min(1.0, abs(gamma_slope) / 0.01)
+        slope_ratio = min(abs(price_slope), abs(gamma_slope)) / max(abs(price_slope), abs(gamma_slope)) if max(abs(price_slope), abs(gamma_slope)) > 0 else 0
         balance_conf = 0.1 + 0.05 * slope_ratio
-
-        # Data quality
         min_count = min(price_window.count, gamma_window.count)
         data_conf = min(0.1, (min_count - MIN_DATA_POINTS) / 100)
-
-        # Regime alignment: soft bonus when aligned, zero when misaligned
         regime_conf = 0.0
         if not regime_misaligned:
             if divergence_type == "bullish" and regime == "POSITIVE":
                 regime_conf = 0.1
             elif divergence_type == "bearish" and regime == "NEGATIVE":
                 regime_conf = 0.1
-
-        # Normalize each component to [0,1] and average
-        norm_price = (price_conf - 0.15) / (0.3 - 0.15) if 0.3 != 0.15 else 1.0
-        norm_gamma = (gamma_conf - 0.15) / (0.3 - 0.15) if 0.3 != 0.15 else 1.0
+        wall_conf = wall_bonus
+        intensity_conf = regime_intensity
+        accel_conf = 0.0
+        if price_accel and gamma_accel:
+            price_accel_ok = abs(price_accel.get("acceleration", 0)) >= ACCEL_MIN_PRICE
+            gamma_accel_ok = abs(gamma_accel.get("acceleration", 0)) >= ACCEL_MIN_GAMMA
+            if price_accel_ok and gamma_accel_ok:
+                accel_conf = 0.1
+            elif price_accel_ok or gamma_accel_ok:
+                accel_conf = 0.05
+        norm_price = (price_conf - 0.15) / (0.25 - 0.15) if 0.25 != 0.15 else 1.0
+        norm_gamma = (gamma_conf - 0.15) / (0.25 - 0.15) if 0.25 != 0.15 else 1.0
         norm_balance = (balance_conf - 0.1) / (0.15 - 0.1) if 0.15 != 0.1 else 1.0
         norm_data = data_conf / 0.1 if 0.1 != 0 else 0.0
         norm_regime = regime_conf / 0.1 if 0.1 != 0 else 0.0
-        confidence = (norm_price + norm_gamma + norm_balance + norm_data + norm_regime) / 5.0
+        norm_wall = wall_conf / WALL_PROXIMITY_BONUS if WALL_PROXIMITY_BONUS != 0 else 0.0
+        norm_intensity = intensity_conf / STRONG_REGIME_CONF_BONUS if STRONG_REGIME_CONF_BONUS != 0 else 0.0
+        norm_accel = accel_conf / 0.1 if 0.1 != 0 else 0.0
+        confidence = (norm_price + norm_gamma + norm_balance + norm_data + norm_regime + norm_wall + norm_intensity + norm_accel) / 8.0
         return min(1.0, max(0.0, confidence))
 
     # ------------------------------------------------------------------
