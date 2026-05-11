@@ -88,6 +88,13 @@ layer1:
       min_confluence_score: 2
       max_confidence: 0.80
       min_confidence: 0.35
+      velocity_min_zscore: 1.0
+      velocity_min_volume_mult: 1.2
+      iv_weight_max: 1.5
+      iv_weight_skew_threshold: 0.05
+      depth_spike_threshold: 1.5
+      negative_gamma_stop_mult: 1.5
+      positive_gamma_stop_mult: 0.75
 
   vol_compression_range:
     enabled: true

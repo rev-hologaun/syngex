@@ -42,7 +42,13 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
-from strategies.rolling_keys import KEY_PRICE_5M, KEY_PRICE_30M
+from strategies.rolling_keys import (
+    KEY_PRICE_5M,
+    KEY_PRICE_30M,
+    KEY_IV_SKEW_5M,
+    KEY_DEPTH_BID_SIZE_5M,
+    KEY_DEPTH_ASK_SIZE_5M,
+)
 from strategies.volume_filter import VolumeFilter
 
 logger = logging.getLogger("Syngex.Strategies.ConfluenceReversal")
@@ -57,6 +63,22 @@ MAX_CONFIDENCE_BASE = 0.6         # Base confidence for score 3
 MIN_CONFIDENCE = 0.65             # Minimum confidence to emit signal
 STOP_PCT = 0.008                  # 0.8% stop
 TARGET_RISK_MULT = 2.0            # 2× risk for target
+
+# Confluence Velocity (Phase 1)
+VELOCITY_MIN_ZSCORE = 1.0         # Minimum |z-score| for approach velocity
+VELOCITY_MIN_VOLUME_MULT = 1.2    # Volume must be >= 1.2x rolling average
+
+# IV-Skew Wall Quality (Phase 2)
+IV_WEIGHT_BASE = 1.0
+IV_WEIGHT_MAX = 1.5
+IV_WEIGHT_SKEW_THRESHOLD = 0.05
+
+# Liquidity Absorption (Phase 3)
+DEPTH_SPIKE_THRESHOLD = 1.5       # Current depth >= 1.5x rolling average
+
+# Regime-Adaptive Stops (Phase 4)
+NEGATIVE_GAMMA_STOP_MULT = 1.5    # Wider stops in negative gamma (more noise)
+POSITIVE_GAMMA_STOP_MULT = 0.75   # Tighter stops in positive gamma (cleaner)
 
 # Structural signals (independent sources of truth)
 # Only wall, flip, and VWAP count as structural — rolling extremes are technical, not structural
@@ -96,6 +118,7 @@ class ConfluenceReversal(BaseStrategy):
             return []
 
         regime = data.get("regime", "")
+        depth_snapshot = data.get("depth_snapshot")
 
         # Gather structural levels
         walls = gex_calc.get_gamma_walls(threshold=500_000)
@@ -119,7 +142,8 @@ class ConfluenceReversal(BaseStrategy):
             best_resist = max(resistance_levels, key=lambda x: x.get("structural_count", 0))
             if best_resist.get("structural_count", 0) >= MIN_STRUCTURAL_SIGNALS:
                 sig = self._build_short_signal(
-                    best_resist, underlying_price, regime, price_window
+                    best_resist, underlying_price, regime, price_window,
+                    depth_snapshot, rolling_data,
                 )
                 if sig:
                     signals.append(sig)
@@ -129,7 +153,8 @@ class ConfluenceReversal(BaseStrategy):
             best_support = max(support_levels, key=lambda x: x.get("structural_count", 0))
             if best_support.get("structural_count", 0) >= MIN_STRUCTURAL_SIGNALS:
                 sig = self._build_long_signal(
-                    best_support, underlying_price, regime, price_window
+                    best_support, underlying_price, regime, price_window,
+                    depth_snapshot, rolling_data,
                 )
                 if sig:
                     signals.append(sig)
@@ -282,45 +307,75 @@ class ConfluenceReversal(BaseStrategy):
         price: float,
         regime: str,
         price_window: Optional[Any],
+        depth_snapshot: Optional[Dict[str, Any]],
+        rolling_data: Dict[str, Any],
     ) -> Optional[Signal]:
         """Build a SHORT signal from a resistance confluence level."""
         strike = level["strike"]
         structural_count = level.get("structural_count", 0)
         gex = level.get("gex", 0)
+        wall_side = level.get("side", "call")
 
-        # Base confidence from structural signal count
-        if structural_count >= 3:
-            confidence = MAX_CONFIDENCE_BASE
-        else:
-            confidence = MAX_CONFIDENCE_BASE - 0.25
-
-        # Wall strength bonus (normalize to [0,1])
-        gex_bonus = min(0.15, abs(gex) / 10_000_000)
-        # Technical signal bonus (normalize to [0,1])
-        tech_bonus = 0.05 if level.get("has_technical") else 0.0
-        # Regime as soft confidence factor: aligned = +0.15, misaligned = -0.10
-        regime_aligned = regime == "NEGATIVE"
-        regime_bonus = 0.15 if regime_aligned else -0.10
-        # Trend as soft confidence factor: FLAT = no change, UP/DOWN = -0.05
-        trend = price_window.trend if price_window else "UNKNOWN"
-        trend_penalty = -0.05 if trend in ("UP", "DOWN") else 0.0
-
-        # Normalize and average with base
-        norm_base = (confidence - 0.25) / (0.6 - 0.25) if 0.6 != 0.25 else 1.0
-        norm_gex = gex_bonus / 0.15 if 0.15 != 0 else 0.0
-        norm_tech = tech_bonus / 0.05 if 0.05 != 0 else 0.0
-        norm_regime = (regime_bonus + 0.10) / 0.25  # map [-0.10, +0.15] → [0, 1]
-        confidence = (norm_base + norm_gex + norm_tech + norm_regime) / 4.0
-        # Apply trend penalty
-        confidence += trend_penalty
-        if confidence < MIN_CONFIDENCE:
+        # === Velocity check (hard gate) ===
+        velocity_score = self._check_confluence_velocity(price, rolling_data)
+        if velocity_score is None:
             return None
 
-        # Stop past the confluence level
-        stop = strike * (1 + STOP_PCT)
+        # === Liquidity absorption check (hard gate) ===
+        absorption_score = self._check_liquidity_absorption(
+            wall_side, depth_snapshot, rolling_data
+        )
+        if absorption_score is None:
+            return None
+
+        # === Regime-adaptive stop ===
+        regime_mult = (
+            NEGATIVE_GAMMA_STOP_MULT
+            if regime == "NEGATIVE"
+            else POSITIVE_GAMMA_STOP_MULT
+        )
+        stop = strike * (1 + STOP_PCT * regime_mult)
         risk = stop - price
         target = price - risk * TARGET_RISK_MULT
         if risk <= 0:
+            return None
+
+        # === 7-component confidence ===
+        # 1. Base from structural count
+        base_conf = 0.35 if structural_count >= 3 else 0.25
+
+        # 2. Wall integrity (IV-weighted)
+        wall_integrity = self._compute_wall_integrity(
+            abs(gex), wall_side, rolling_data
+        )
+        integrity_conf = wall_integrity * 0.20
+
+        # 3. Technical signal
+        tech_conf = 0.05 if level.get("has_technical") else 0.0
+
+        # 4. Regime alignment
+        if regime == "NEGATIVE":
+            regime_conf = 0.20
+        elif regime == "POSITIVE":
+            regime_conf = 0.05
+        else:
+            regime_conf = 0.10
+
+        # 5. Velocity
+        velocity_conf = 0.05 + 0.10 * velocity_score
+
+        # 6. Absorption
+        absorption_conf = 0.05 + 0.10 * absorption_score
+
+        # 7. Trend penalty
+        trend = price_window.trend if price_window else "UNKNOWN"
+        trend_conf = 0.0 if trend in ("FLAT", "UNKNOWN") else -0.05
+
+        confidence = (base_conf + integrity_conf + tech_conf + regime_conf
+                      + velocity_conf + absorption_conf + trend_conf)
+        confidence = min(1.0, max(0.0, confidence))
+
+        if confidence < MIN_CONFIDENCE:
             return None
 
         return Signal(
@@ -333,12 +388,14 @@ class ConfluenceReversal(BaseStrategy):
             reason=f"Confluence SHORT at {strike:.0f}: "
                    f"{structural_count} structural signals, type={level.get('type', 'unknown')}, "
                    f"has_flip={level.get('has_flip', False)}, "
+                   f"velocity={velocity_score:.3f}, absorption={absorption_score:.3f}, "
                    f"regime={regime}, trend={trend}",
             metadata={
                 "structural_count": structural_count,
                 "level_type": level.get("type", "unknown"),
                 "confluence_strike": strike,
                 "wall_gex": gex,
+                "wall_integrity": round(wall_integrity, 3),
                 "has_flip": level.get("has_flip", False),
                 "has_vwap": level.get("has_vwap", False),
                 "has_technical": level.get("has_technical", False),
@@ -346,6 +403,9 @@ class ConfluenceReversal(BaseStrategy):
                 "distance_pct": round(level["distance_pct"], 4),
                 "regime": regime,
                 "trend": trend,
+                "velocity_score": velocity_score,
+                "absorption_score": absorption_score,
+                "regime_stop_mult": regime_mult,
                 "risk": round(risk, 2),
                 "risk_reward_ratio": round(abs(target - price) / risk, 2),
             },
@@ -357,45 +417,65 @@ class ConfluenceReversal(BaseStrategy):
         price: float,
         regime: str,
         price_window: Optional[Any],
+        depth_snapshot: Optional[Dict[str, Any]],
+        rolling_data: Dict[str, Any],
     ) -> Optional[Signal]:
         """Build a LONG signal from a support confluence level."""
         strike = level["strike"]
         structural_count = level.get("structural_count", 0)
         gex = level.get("gex", 0)
+        wall_side = level.get("side", "put")
 
-        # Base confidence from structural signal count
-        if structural_count >= 3:
-            confidence = MAX_CONFIDENCE_BASE
-        else:
-            confidence = MAX_CONFIDENCE_BASE - 0.25
-
-        # Wall strength bonus (normalize to [0,1])
-        gex_bonus = min(0.15, abs(gex) / 10_000_000)
-        # Technical signal bonus (normalize to [0,1])
-        tech_bonus = 0.05 if level.get("has_technical") else 0.0
-        # Regime as soft confidence factor: aligned = +0.15, misaligned = -0.10
-        regime_aligned = regime == "POSITIVE"
-        regime_bonus = 0.15 if regime_aligned else -0.10
-        # Trend as soft confidence factor: FLAT = no change, UP/DOWN = -0.05
-        trend = price_window.trend if price_window else "UNKNOWN"
-        trend_penalty = -0.05 if trend in ("UP", "DOWN") else 0.0
-
-        # Normalize and average with base
-        norm_base = (confidence - 0.25) / (0.6 - 0.25) if 0.6 != 0.25 else 1.0
-        norm_gex = gex_bonus / 0.15 if 0.15 != 0 else 0.0
-        norm_tech = tech_bonus / 0.05 if 0.05 != 0 else 0.0
-        norm_regime = (regime_bonus + 0.10) / 0.25  # map [-0.10, +0.15] → [0, 1]
-        confidence = (norm_base + norm_gex + norm_tech + norm_regime) / 4.0
-        # Apply trend penalty
-        confidence += trend_penalty
-        if confidence < MIN_CONFIDENCE:
+        # === Velocity check (hard gate) ===
+        velocity_score = self._check_confluence_velocity(price, rolling_data)
+        if velocity_score is None:
             return None
 
-        # Stop past the confluence level
-        stop = strike * (1 - STOP_PCT)
+        # === Liquidity absorption check (hard gate) ===
+        absorption_score = self._check_liquidity_absorption(
+            wall_side, depth_snapshot, rolling_data
+        )
+        if absorption_score is None:
+            return None
+
+        # === Regime-adaptive stop ===
+        regime_mult = (
+            NEGATIVE_GAMMA_STOP_MULT
+            if regime == "NEGATIVE"
+            else POSITIVE_GAMMA_STOP_MULT
+        )
+        stop = strike * (1 - STOP_PCT * regime_mult)
         risk = price - stop
         target = price + risk * TARGET_RISK_MULT
         if risk <= 0:
+            return None
+
+        # === 7-component confidence ===
+        base_conf = 0.35 if structural_count >= 3 else 0.25
+        wall_integrity = self._compute_wall_integrity(
+            abs(gex), wall_side, rolling_data
+        )
+        integrity_conf = wall_integrity * 0.20
+        tech_conf = 0.05 if level.get("has_technical") else 0.0
+
+        if regime == "POSITIVE":
+            regime_conf = 0.20
+        elif regime == "NEGATIVE":
+            regime_conf = 0.05
+        else:
+            regime_conf = 0.10
+
+        velocity_conf = 0.05 + 0.10 * velocity_score
+        absorption_conf = 0.05 + 0.10 * absorption_score
+
+        trend = price_window.trend if price_window else "UNKNOWN"
+        trend_conf = 0.0 if trend in ("FLAT", "UNKNOWN") else -0.05
+
+        confidence = (base_conf + integrity_conf + tech_conf + regime_conf
+                      + velocity_conf + absorption_conf + trend_conf)
+        confidence = min(1.0, max(0.0, confidence))
+
+        if confidence < MIN_CONFIDENCE:
             return None
 
         return Signal(
@@ -408,12 +488,14 @@ class ConfluenceReversal(BaseStrategy):
             reason=f"Confluence LONG at {strike:.0f}: "
                    f"{structural_count} structural signals, type={level.get('type', 'unknown')}, "
                    f"has_flip={level.get('has_flip', False)}, "
+                   f"velocity={velocity_score:.3f}, absorption={absorption_score:.3f}, "
                    f"regime={regime}, trend={trend}",
             metadata={
                 "structural_count": structural_count,
                 "level_type": level.get("type", "unknown"),
                 "confluence_strike": strike,
                 "wall_gex": gex,
+                "wall_integrity": round(wall_integrity, 3),
                 "has_flip": level.get("has_flip", False),
                 "has_vwap": level.get("has_vwap", False),
                 "has_technical": level.get("has_technical", False),
@@ -421,10 +503,129 @@ class ConfluenceReversal(BaseStrategy):
                 "distance_pct": round(level["distance_pct"], 4),
                 "regime": regime,
                 "trend": trend,
+                "velocity_score": velocity_score,
+                "absorption_score": absorption_score,
+                "regime_stop_mult": regime_mult,
                 "risk": round(risk, 2),
                 "risk_reward_ratio": round(abs(target - price) / risk, 2),
             },
         )
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Confluence Velocity
+    # ------------------------------------------------------------------
+
+    def _check_confluence_velocity(
+        self, price: float, rolling_data: Dict[str, Any]
+    ) -> Optional[float]:
+        """Check if price is approaching with sufficient velocity.
+
+        Returns velocity score 0.0-1.0, or None if insufficient data.
+        Hard gate: None means skip signal.
+        """
+        price_window = self._get_price_window(rolling_data)
+        if price_window is None or price_window.count < 5:
+            return None
+        if price_window.std is None or price_window.std <= 0:
+            return None
+        if price_window.mean is None:
+            return None
+
+        z_score = (price - price_window.mean) / price_window.std
+
+        vol_filter = VolumeFilter.evaluate(rolling_data, 0.0)
+        vol_mult = vol_filter.get("volume_multiplier", 1.0)
+
+        if vol_mult < VELOCITY_MIN_VOLUME_MULT:
+            return None
+
+        velocity_score = min(1.0, abs(z_score) / 3.0)
+        return round(velocity_score, 3)
+
+    # ------------------------------------------------------------------
+    # IV-Skew Wall Quality
+    # ------------------------------------------------------------------
+
+    def _compute_wall_integrity(
+        self,
+        gex: float,
+        wall_side: str,
+        rolling_data: Dict[str, Any],
+    ) -> float:
+        """Compute IV-weighted structural integrity of a wall.
+
+        Returns integrity score 0.0-1.0.
+        High IV skew = wall is more "sticky" = higher structural integrity.
+        """
+        iv_skew_rw = rolling_data.get(KEY_IV_SKEW_5M)
+        iv_skew = (
+            iv_skew_rw.mean
+            if iv_skew_rw and iv_skew_rw.mean is not None
+            else 0.0
+        )
+
+        # For resistance walls (call): positive skew = calls expensive = sticky
+        # For support walls (put): negative skew = puts expensive = sticky
+        if wall_side == "call":
+            iv_weight = IV_WEIGHT_BASE + min(
+                IV_WEIGHT_MAX - IV_WEIGHT_BASE,
+                max(0.0, iv_skew) / IV_WEIGHT_SKEW_THRESHOLD,
+            )
+        else:
+            iv_weight = IV_WEIGHT_BASE + min(
+                IV_WEIGHT_MAX - IV_WEIGHT_BASE,
+                max(0.0, -iv_skew) / IV_WEIGHT_SKEW_THRESHOLD,
+            )
+
+        iv_weight = min(IV_WEIGHT_MAX, iv_weight)
+        gex_strength = min(1.0, abs(gex) / 10_000_000)
+        return gex_strength * iv_weight
+
+    # ------------------------------------------------------------------
+    # Liquidity Absorption
+    # ------------------------------------------------------------------
+
+    def _check_liquidity_absorption(
+        self,
+        level_side: str,
+        depth_snapshot: Optional[Dict[str, Any]],
+        rolling_data: Dict[str, Any],
+    ) -> Optional[float]:
+        """Check if order book depth shows absorption at the level.
+
+        Returns absorption score 0.0-1.0, or None if insufficient depth data.
+        Hard gate: None means skip signal.
+        """
+        if not depth_snapshot:
+            return None
+
+        if level_side == "call":
+            current_depth = depth_snapshot.get("total_ask_size", 0)
+            key = KEY_DEPTH_ASK_SIZE_5M
+        else:
+            current_depth = depth_snapshot.get("total_bid_size", 0)
+            key = KEY_DEPTH_BID_SIZE_5M
+
+        depth_rw = rolling_data.get(key)
+        if depth_rw is None or depth_rw.count < 10 or depth_rw.mean is None:
+            return None
+
+        avg_depth = depth_rw.mean
+        if avg_depth <= 0:
+            return None
+
+        spike_ratio = current_depth / avg_depth
+
+        if spike_ratio >= DEPTH_SPIKE_THRESHOLD:
+            return min(1.0, spike_ratio / 3.0)
+        elif spike_ratio >= 1.0:
+            return spike_ratio / DEPTH_SPIKE_THRESHOLD * 0.5
+        else:
+            return None
 
     # ------------------------------------------------------------------
     # Helpers
