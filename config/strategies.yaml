@@ -48,6 +48,11 @@ layer1:
       flip_buffer_pct: 0.5
       atr_mult: 1.5
       min_confidence: 0.35
+      # v2 Regime-Boundary params
+      flip_zone_pct: 0.015
+      negative_gamma_stop_mult: 2.5
+      positive_gamma_stop_mult: 0.75
+      min_confirmation_score: 0.3
 
   gamma_squeeze:
     enabled: true
