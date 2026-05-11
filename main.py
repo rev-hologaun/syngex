@@ -59,6 +59,13 @@ _handler.setFormatter(
 logger.addHandler(_handler)
 
 # ---------------------------------------------------------------------------
+# Safety — READ-ONLY enforcement (blocks all order placement)
+# ---------------------------------------------------------------------------
+from config.trade_guard import READ_ONLY
+if READ_ONLY:
+    logger.info("🔒 SAFETY: READ-ONLY mode active — all order placement blocked")
+
+# ---------------------------------------------------------------------------
 # Components
 # ---------------------------------------------------------------------------
 
@@ -242,6 +249,12 @@ class SyngexOrchestrator:
             KEY_IV_SKEW_5M: RollingWindow(window_type="time", window_size=300),
             KEY_EXTRINSIC_PROXY_5M: RollingWindow(window_type="time", window_size=300),
             KEY_PROB_MOMENTUM_5M: RollingWindow(window_type="time", window_size=300),
+            # Depth / L2 rolling windows
+            KEY_DEPTH_BID_SIZE_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_DEPTH_ASK_SIZE_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_DEPTH_SPREAD_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_DEPTH_BID_LEVELS_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_DEPTH_ASK_LEVELS_5M: RollingWindow(window_type="time", window_size=300),
         }
 
         # Call/put update counters for volume_up/volume_down tracking
@@ -257,6 +270,9 @@ class SyngexOrchestrator:
         # Register subscriptions — quotes feed underlying price, option chain feeds contracts
         self._client.subscribe_to_quotes(self.symbol)
         self._client.subscribe_to_option_chain(self.symbol)
+        # L2 market depth streams
+        self._client.subscribe_to_market_depth_quotes(self.symbol)
+        self._client.subscribe_to_market_depth_aggregates(self.symbol)
 
         logger.info("Components initialized. Symbol: %s", self.symbol)
 
@@ -733,6 +749,39 @@ class SyngexOrchestrator:
                     if atm_iv is not None and KEY_ATM_IV_5M in self._rolling_data:
                         self._rolling_data[KEY_ATM_IV_5M].push(atm_iv)
 
+            # ── Depth data capture (L2/TotalView) ──
+            msg_type = data.get("type", "")
+            if msg_type in ("market_depth_quotes", "market_depth_agg"):
+                bids = data.get("Bids", [])
+                asks = data.get("Asks", [])
+
+                # Aggregate size from all bid/ask levels
+                if msg_type == "market_depth_quotes":
+                    # Per-exchange: Size field is string → int
+                    total_bid_size = sum(int(b.get("Size", 0)) for b in bids)
+                    total_ask_size = sum(int(a.get("Size", 0)) for a in asks)
+                else:
+                    # Aggregated: TotalSize field
+                    total_bid_size = sum(int(b.get("TotalSize", 0)) for b in bids)
+                    total_ask_size = sum(int(a.get("TotalSize", 0)) for a in asks)
+
+                # Best bid/ask for spread
+                best_bid = float(bids[0].get("Price", 0)) if bids else 0.0
+                best_ask = float(asks[0].get("Price", 0)) if asks else 0.0
+                spread = best_ask - best_bid if best_bid > 0 and best_ask > 0 else 0.0
+
+                ts = time.time()
+                if KEY_DEPTH_BID_SIZE_5M in self._rolling_data:
+                    self._rolling_data[KEY_DEPTH_BID_SIZE_5M].push(total_bid_size, ts)
+                if KEY_DEPTH_ASK_SIZE_5M in self._rolling_data:
+                    self._rolling_data[KEY_DEPTH_ASK_SIZE_5M].push(total_ask_size, ts)
+                if KEY_DEPTH_SPREAD_5M in self._rolling_data:
+                    self._rolling_data[KEY_DEPTH_SPREAD_5M].push(spread, ts)
+                if KEY_DEPTH_BID_LEVELS_5M in self._rolling_data:
+                    self._rolling_data[KEY_DEPTH_BID_LEVELS_5M].push(len(bids), ts)
+                if KEY_DEPTH_ASK_LEVELS_5M in self._rolling_data:
+                    self._rolling_data[KEY_DEPTH_ASK_LEVELS_5M].push(len(asks), ts)
+
 
         except Exception as exc:
             logger.error("Error processing message: %s", exc, exc_info=True)
@@ -763,6 +812,10 @@ class SyngexOrchestrator:
             "gamma_flip": flip,
             "greeks_summary": self._calculator.get_greeks_summary(),
         }
+
+        # Build depth snapshot for strategies
+        depth_snapshot = self._build_depth_snapshot()
+        data["depth_snapshot"] = depth_snapshot
 
         # Inject per-strategy config params into data dict
         # Strategies can read params from data["params"][strategy_id] in evaluate()
@@ -1197,6 +1250,29 @@ class SyngexOrchestrator:
                 json.dump(export, f, indent=2)
         except Exception as exc:
             logger.warning("Failed to export GEX state: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Depth snapshot builder
+    # ------------------------------------------------------------------
+
+    def _build_depth_snapshot(self) -> Dict[str, Any]:
+        """Build current depth snapshot from rolling windows."""
+        snap: Dict[str, Any] = {}
+        for rw_key, short_key in [
+            (KEY_DEPTH_BID_SIZE_5M, "bid_size"),
+            (KEY_DEPTH_ASK_SIZE_5M, "ask_size"),
+            (KEY_DEPTH_SPREAD_5M, "spread"),
+            (KEY_DEPTH_BID_LEVELS_5M, "bid_levels"),
+            (KEY_DEPTH_ASK_LEVELS_5M, "ask_levels"),
+        ]:
+            rw = self._rolling_data.get(rw_key)
+            if rw and rw.count > 0:
+                snap[short_key] = {
+                    "current": rw.values[-1] if rw.values else 0,
+                    "mean": sum(rw.values) / len(rw.values) if rw.values else 0,
+                    "count": rw.count,
+                }
+        return snap
 
 
 # ---------------------------------------------------------------------------

@@ -22,6 +22,9 @@ layer1:
       min_wall_gex: 500000
       min_confidence: 0.35
       max_confidence: 0.85
+      # Depth-aware params
+      min_liquidity_validation_score: 0.25
+      max_liquidity_decay_threshold: 0.40
 
   magnet_accelerate:
     enabled: true

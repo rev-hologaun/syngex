@@ -95,13 +95,15 @@ class GammaWallBounce(BaseStrategy):
 
         # Check call walls above price → potential SHORT bounce
         for wall in price_above_walls:
-            sig = self._check_call_wall(wall, underlying_price, walls, rolling_data, data.get("regime", ""))
+            sig = self._check_call_wall(wall, underlying_price, walls, rolling_data,
+                                        data.get("regime", ""), data)
             if sig:
                 signals.append(sig)
 
         # Check put walls below price → potential LONG bounce
         for wall in price_below_walls:
-            sig = self._check_put_wall(wall, underlying_price, walls, rolling_data, data.get("regime", ""))
+            sig = self._check_put_wall(wall, underlying_price, walls, rolling_data,
+                                       data.get("regime", ""), data)
             if sig:
                 signals.append(sig)
 
@@ -118,6 +120,7 @@ class GammaWallBounce(BaseStrategy):
         all_walls: List[Dict[str, Any]],
         rolling_data: Dict[str, Any] = None,
         regime: str = "",
+        data: Dict[str, Any] = None,
     ) -> Optional[Signal]:
         """
         Evaluate a call wall for SHORT bounce opportunity.
@@ -152,9 +155,32 @@ class GammaWallBounce(BaseStrategy):
         pw = rolling_data.get(KEY_PRICE_5M) if rolling_data else None
         trend = pw.trend if pw else "UNKNOWN"
 
+        # ── NEW: Liquidity decay check ──
+        depth_snapshot = data.get("depth_snapshot") if "data" in dir() else None
+        if depth_snapshot and not self._check_liquidity_decay(wall, depth_snapshot):
+            logger.debug("Call wall at %s: liquidity decay detected, skipping",
+                         wall_strike)
+            return None
+
+        # ── NEW: Liquidity validation ──
+        liq_score = 0.5  # default neutral
+        if depth_snapshot:
+            liq_score = self._check_liquidity_validation(wall, price, depth_snapshot)
+            if liq_score < 0.25:
+                logger.debug("Call wall at %s: insufficient liquidity validation "
+                             "(score=%.2f), skipping", wall_strike, liq_score)
+                return None
+
+        # ── NEW: Vol support score ──
+        vol_score = 0.5  # default neutral
+        if depth_snapshot:
+            vol_score = self._compute_vol_support_score(wall, gex_calc, price)
+
         # Calculate confidence
         confidence = self._compute_confidence(
-            distance_pct, wall_gex, rejection_score, "call", regime
+            distance_pct, wall_gex, rejection_score, "call", regime,
+            depth_snapshot=depth_snapshot, liq_score=liq_score, vol_score=vol_score,
+            gex_calc=gex_calc, price=price,
         )
         if confidence < MIN_CONFIDENCE:
             return None
@@ -166,6 +192,15 @@ class GammaWallBounce(BaseStrategy):
 
         # Also consider midpoint to next wall as target
         target = self._better_target(price, target, stop, all_walls, "call")
+
+        # Depth snapshot helpers for metadata
+        depth_bid_current = 0
+        depth_ask_current = 0
+        depth_spread_current = 0.0
+        if depth_snapshot:
+            depth_bid_current = depth_snapshot.get("bid_size", {}).get("current", 0)
+            depth_ask_current = depth_snapshot.get("ask_size", {}).get("current", 0)
+            depth_spread_current = depth_snapshot.get("spread", {}).get("current", 0.0)
 
         return Signal(
             direction=Direction.SHORT,
@@ -186,6 +221,11 @@ class GammaWallBounce(BaseStrategy):
                 "risk_reward_ratio": round(abs(target - price) / risk, 2) if risk > 0 else 0,
                 "regime": regime,
                 "trend": trend,
+                "liquidity_validation_score": round(liq_score, 3),
+                "vol_support_score": round(vol_score, 3),
+                "depth_bid_size": depth_bid_current,
+                "depth_ask_size": depth_ask_current,
+                "depth_spread": round(depth_spread_current, 4),
             },
         )
 
@@ -200,6 +240,7 @@ class GammaWallBounce(BaseStrategy):
         all_walls: List[Dict[str, Any]],
         rolling_data: Dict[str, Any] = None,
         regime: str = "",
+        data: Dict[str, Any] = None,
     ) -> Optional[Signal]:
         """
         Evaluate a put wall for LONG bounce opportunity.
@@ -231,8 +272,31 @@ class GammaWallBounce(BaseStrategy):
         pw = rolling_data.get(KEY_PRICE_5M) if rolling_data else None
         trend = pw.trend if pw else "UNKNOWN"
 
+        # ── NEW: Liquidity decay check ──
+        depth_snapshot = data.get("depth_snapshot") if "data" in dir() else None
+        if depth_snapshot and not self._check_liquidity_decay(wall, depth_snapshot):
+            logger.debug("Put wall at %s: liquidity decay detected, skipping",
+                         wall_strike)
+            return None
+
+        # ── NEW: Liquidity validation ──
+        liq_score = 0.5  # default neutral
+        if depth_snapshot:
+            liq_score = self._check_liquidity_validation(wall, price, depth_snapshot)
+            if liq_score < 0.25:
+                logger.debug("Put wall at %s: insufficient liquidity validation "
+                             "(score=%.2f), skipping", wall_strike, liq_score)
+                return None
+
+        # ── NEW: Vol support score ──
+        vol_score = 0.5  # default neutral
+        if depth_snapshot:
+            vol_score = self._compute_vol_support_score(wall, gex_calc, price)
+
         confidence = self._compute_confidence(
-            distance_pct, abs(wall_gex), rejection_score, "put", regime
+            distance_pct, abs(wall_gex), rejection_score, "put", regime,
+            depth_snapshot=depth_snapshot, liq_score=liq_score, vol_score=vol_score,
+            gex_calc=gex_calc, price=price,
         )
         if confidence < MIN_CONFIDENCE:
             return None
@@ -242,6 +306,15 @@ class GammaWallBounce(BaseStrategy):
         target = price + (risk * TARGET_RISK_MULT)
 
         target = self._better_target(price, target, stop, all_walls, "put")
+
+        # Depth snapshot helpers for metadata
+        depth_bid_current = 0
+        depth_ask_current = 0
+        depth_spread_current = 0.0
+        if depth_snapshot:
+            depth_bid_current = depth_snapshot.get("bid_size", {}).get("current", 0)
+            depth_ask_current = depth_snapshot.get("ask_size", {}).get("current", 0)
+            depth_spread_current = depth_snapshot.get("spread", {}).get("current", 0.0)
 
         return Signal(
             direction=Direction.LONG,
@@ -262,6 +335,11 @@ class GammaWallBounce(BaseStrategy):
                 "risk_reward_ratio": round(abs(target - price) / risk, 2) if risk > 0 else 0,
                 "regime": regime,
                 "trend": trend,
+                "liquidity_validation_score": round(liq_score, 3),
+                "vol_support_score": round(vol_score, 3),
+                "depth_bid_size": depth_bid_current,
+                "depth_ask_size": depth_ask_current,
+                "depth_spread": round(depth_spread_current, 4),
             },
         )
 
@@ -343,9 +421,15 @@ class GammaWallBounce(BaseStrategy):
         rejection_score: float,
         side: str,
         regime: str = "",
+        depth_snapshot: Optional[Dict[str, Any]] = None,
+        liq_score: float = 0.5,
+        vol_score: float = 0.5,
+        gex_calc: Any = None,
+        price: float = 0.0,
     ) -> float:
         """
-        Combine proximity, wall strength, and rejection into confidence.
+        Combine proximity, wall strength, rejection, liquidity validation,
+        and vol support into confidence.
 
         Returns 0.0–1.0.
         """
@@ -359,10 +443,12 @@ class GammaWallBounce(BaseStrategy):
         # Rejection component: 0.2–0.3
         rejection_conf = 0.2 + 0.1 * rejection_score
 
-        # Normalize each component to [0,1] and average
+        # Normalize each component to [0,1]
         norm_prox = (proximity_conf - 0.3) / (0.5 - 0.3) if 0.5 != 0.3 else 1.0
         norm_strength = (strength_conf - 0.2) / (0.5 - 0.2) if 0.5 != 0.2 else 1.0
         norm_reject = (rejection_conf - 0.2) / (0.3 - 0.2) if 0.3 != 0.2 else 1.0
+
+        # Regime component
         regime_bonus = 0.0
         if side == "call" and regime == "POSITIVE":
             regime_bonus = 0.15  # dealers sell rallies in positive regime
@@ -371,8 +457,131 @@ class GammaWallBounce(BaseStrategy):
         elif regime_bonus == 0:
             regime_bonus = -0.10  # misaligned regime — still fire but penalize
         norm_regime = regime_bonus / 0.15 if regime_bonus > 0 else 0.0
-        confidence = (norm_prox + norm_strength + norm_reject + norm_regime) / 4.0
+
+        # Liquidity validation component: 0.0–0.2 weight
+        norm_liquidity = liq_score
+
+        # Vol support component: 0.0–0.15 weight
+        norm_vol_support = vol_score
+
+        # Weighted average with depth-aware components
+        confidence = (
+            0.25 * norm_prox +
+            0.21 * norm_strength +
+            0.18 * norm_reject +
+            0.15 * norm_regime +
+            0.12 * norm_liquidity +
+            0.09 * norm_vol_support
+        )
         return min(MAX_CONFIDENCE, max(0.0, confidence))
+
+    # ------------------------------------------------------------------
+    # Depth-aware helpers
+    # ------------------------------------------------------------------
+
+    def _check_liquidity_validation(
+        self, wall: Dict[str, Any], price: float, depth_snapshot: Optional[Dict[str, Any]]
+    ) -> float:
+        """Score how well liquidity validates a wall (0.0–1.0).
+
+        A true wall bounce should show:
+        - Increasing bid size (for call walls = resistance, MMs selling)
+        - Increasing ask size (for put walls = support, MMs buying)
+        - Tightening spread as price approaches the wall
+
+        Returns 0.5 (neutral) if depth_snapshot is None.
+        """
+        if depth_snapshot is None:
+            return 0.5
+        wall_side = wall.get("side", "call")
+
+        # Check spread behavior: tightening = support building
+        spread_data = depth_snapshot.get("spread", {})
+        current_spread = spread_data.get("current", 0)
+        mean_spread = spread_data.get("mean", 0)
+
+        spread_tightening = 0.0
+        if mean_spread > 0 and current_spread < mean_spread:
+            spread_tightening = min(1.0, (mean_spread - current_spread) / mean_spread)
+
+        # Check depth on the relevant side
+        bid_data = depth_snapshot.get("bid_size", {})
+        ask_data = depth_snapshot.get("ask_size", {})
+
+        current_bid = bid_data.get("current", 0)
+        current_ask = ask_data.get("current", 0)
+        mean_bid = bid_data.get("mean", 0)
+        mean_ask = ask_data.get("mean", 0)
+
+        # For call wall (resistance): need strong ASK side (MMs selling)
+        # For put wall (support): need strong BID side (MMs buying)
+        if wall_side == "call":
+            depth_ratio = current_ask / mean_ask if mean_ask > 0 else 1.0
+        else:
+            depth_ratio = current_bid / mean_bid if mean_bid > 0 else 1.0
+
+        # Weighted combination: 40% spread tightening, 60% depth ratio
+        score = 0.4 * spread_tightening + 0.6 * min(1.0, depth_ratio)
+        return round(score, 3)
+
+    def _check_liquidity_decay(
+        self, wall: Dict[str, Any], depth_snapshot: Optional[Dict[str, Any]]
+    ) -> bool:
+        """Returns True if decay is acceptable (wall intact), False if wall is being eaten.
+
+        Returns True (intact) if depth_snapshot is None.
+        """
+        if depth_snapshot is None:
+            return True
+        wall_side = wall.get("side", "call")
+
+        bid_data = depth_snapshot.get("bid_size", {})
+        ask_data = depth_snapshot.get("ask_size", {})
+
+        current_bid = bid_data.get("current", 0)
+        current_ask = ask_data.get("current", 0)
+        mean_bid = bid_data.get("mean", 0)
+        mean_ask = ask_data.get("mean", 0)
+
+        # For call wall: check ASK decay (MMs need to defend the wall)
+        # For put wall: check BID decay
+        if wall_side == "call":
+            decay = 1.0 - (current_ask / mean_ask) if mean_ask > 0 else 0.0
+        else:
+            decay = 1.0 - (current_bid / mean_bid) if mean_bid > 0 else 0.0
+
+        # If more than 40% of liquidity gone, wall is permeable
+        return decay <= 0.40
+
+    def _compute_vol_support_score(
+        self, wall: Dict[str, Any], gex_calc: Any, price: float
+    ) -> float:
+        """Score wall strength based on IV at wall strike vs ATM IV.
+
+        IV premium at wall = active hedging = strong wall.
+
+        Returns 0.5 (neutral) if gex_calc is None.
+        """
+        if gex_calc is None:
+            return 0.5
+        wall_strike = wall.get("strike", 0)
+
+        wall_iv = gex_calc.get_iv_by_strike(wall_strike)
+        if wall_iv is None:
+            return 0.5  # no IV data
+
+        atm_strike = gex_calc.get_atm_strike(price)
+        atm_iv = gex_calc.get_iv_by_strike(atm_strike) if atm_strike else None
+
+        if atm_iv is None or atm_iv <= 0:
+            return 0.5  # no ATM IV
+
+        # IV premium at wall = active hedging = strong wall
+        iv_premium = (wall_iv - atm_iv) / atm_iv
+
+        # Score: premium > 0 means active hedging at wall
+        score = 0.5 + 0.5 * min(1.0, max(-1.0, iv_premium))
+        return round(score, 3)
 
     def _better_target(
         self,

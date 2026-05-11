@@ -21,6 +21,13 @@ KEY_IV_SKEW_5M = "iv_skew_5m"
 KEY_ATM_DELTA_5M = "atm_delta_5m"
 KEY_ATM_IV_5M = "atm_iv_5m"
 
+# --- Depth / L2 keys (market depth streams) ---
+KEY_DEPTH_BID_SIZE_5M = "depth_bid_size_5m"
+KEY_DEPTH_ASK_SIZE_5M = "depth_ask_size_5m"
+KEY_DEPTH_SPREAD_5M = "depth_spread_5m"
+KEY_DEPTH_BID_LEVELS_5M = "depth_bid_levels_5m"
+KEY_DEPTH_ASK_LEVELS_5M = "depth_ask_levels_5m"
+
 # --- Strategy-specific keys (created by individual strategies) ---
 KEY_EXTRINSIC_PROXY_5M = "extrinsic_proxy_5m"
 KEY_PROB_MOMENTUM_5M = "prob_momentum_5m"
@@ -45,8 +52,17 @@ CORE_KEYS = (
     KEY_ATM_IV_5M,
 )
 
+# Depth keys tuple
+DEPTH_KEYS = (
+    KEY_DEPTH_BID_SIZE_5M,
+    KEY_DEPTH_ASK_SIZE_5M,
+    KEY_DEPTH_SPREAD_5M,
+    KEY_DEPTH_BID_LEVELS_5M,
+    KEY_DEPTH_ASK_LEVELS_5M,
+)
+
 # All keys in one tuple for validation
-ALL_KEYS = (*CORE_KEYS, KEY_EXTRINSIC_PROXY_5M, KEY_PROB_MOMENTUM_5M,
+ALL_KEYS = (*CORE_KEYS, *DEPTH_KEYS, KEY_EXTRINSIC_PROXY_5M, KEY_PROB_MOMENTUM_5M,
             KEY_CONSEC_LONG, KEY_CONSEC_SHORT)
 
 __all__ = [
@@ -55,7 +71,9 @@ __all__ = [
     "KEY_VOLUME_5M", "KEY_VOLUME_DOWN_5M", "KEY_VOLUME_UP_5M",
     "KEY_TOTAL_DELTA_5M", "KEY_WALL_DELTA_5M", "KEY_TOTAL_GAMMA_5M", "KEY_IV_SKEW_5M",
     "KEY_ATM_DELTA_5M", "KEY_ATM_IV_5M",
+    "KEY_DEPTH_BID_SIZE_5M", "KEY_DEPTH_ASK_SIZE_5M", "KEY_DEPTH_SPREAD_5M",
+    "KEY_DEPTH_BID_LEVELS_5M", "KEY_DEPTH_ASK_LEVELS_5M",
     "KEY_EXTRINSIC_PROXY_5M", "KEY_PROB_MOMENTUM_5M",
     "KEY_CONSEC_LONG", "KEY_CONSEC_SHORT",
-    "CORE_KEYS", "ALL_KEYS",
+    "CORE_KEYS", "DEPTH_KEYS", "ALL_KEYS",
 ]
