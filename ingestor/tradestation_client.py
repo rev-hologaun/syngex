@@ -49,7 +49,10 @@ class TradeStationClient:
     def __init__(self, base_url: str | None = None) -> None:
         self.base_url = base_url or self.BASE_URL
         self.token_manager = TokenManager()
-        self._session: aiohttp.ClientSession | None = None
+        self._quote_session: aiohttp.ClientSession | None = None
+        self._option_chain_session: aiohttp.ClientSession | None = None
+        self._depth_quote_session: aiohttp.ClientSession | None = None
+        self._depth_agg_session: aiohttp.ClientSession | None = None
         self._on_message_callback: Optional[Callable[[dict], Any]] = None
         self._is_running = False
         self._headers: Dict[str, str] = {}
@@ -58,7 +61,6 @@ class TradeStationClient:
         self._depth_quote_symbols: List[str] = []
         self._depth_agg_symbols: List[str] = []
         self._option_chain_failed = False
-        self._session_lock = asyncio.Lock()
         self._watched_symbol: str = ""  # Symbol whose quotes feed the underlying price
         self._stream_tasks: list[asyncio.Task] = []
 
@@ -114,8 +116,10 @@ class TradeStationClient:
                 task.cancel()
         if self._stream_tasks:
             await asyncio.gather(*self._stream_tasks, return_exceptions=True)
-        if self._session and not self._session.closed:
-            await self._session.close()
+        for attr in ("_quote_session", "_option_chain_session", "_depth_quote_session", "_depth_agg_session"):
+            session = getattr(self, attr)
+            if session and not session.closed:
+                await session.close()
         logger.info("TradeStationClient stopped.")
 
     # ------------------------------------------------------------------
@@ -182,11 +186,29 @@ class TradeStationClient:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    async def _ensure_session(self) -> aiohttp.ClientSession:
-        if self._session is None or self._session.closed:
-            timeout = aiohttp.ClientTimeout(total=30)
-            self._session = aiohttp.ClientSession(timeout=timeout)
-        return self._session
+    async def _ensure_quote_session(self) -> aiohttp.ClientSession:
+        if self._quote_session is None or self._quote_session.closed:
+            timeout = aiohttp.ClientTimeout(sock_read=60)
+            self._quote_session = aiohttp.ClientSession(timeout=timeout)
+        return self._quote_session
+
+    async def _ensure_option_chain_session(self) -> aiohttp.ClientSession:
+        if self._option_chain_session is None or self._option_chain_session.closed:
+            timeout = aiohttp.ClientTimeout(sock_read=60)
+            self._option_chain_session = aiohttp.ClientSession(timeout=timeout)
+        return self._option_chain_session
+
+    async def _ensure_depth_quote_session(self) -> aiohttp.ClientSession:
+        if self._depth_quote_session is None or self._depth_quote_session.closed:
+            timeout = aiohttp.ClientTimeout(sock_read=60)
+            self._depth_quote_session = aiohttp.ClientSession(timeout=timeout)
+        return self._depth_quote_session
+
+    async def _ensure_depth_agg_session(self) -> aiohttp.ClientSession:
+        if self._depth_agg_session is None or self._depth_agg_session.closed:
+            timeout = aiohttp.ClientTimeout(sock_read=60)
+            self._depth_agg_session = aiohttp.ClientSession(timeout=timeout)
+        return self._depth_agg_session
 
     async def _refresh_token_if_needed(self) -> None:
         token = self.token_manager.get_access_token()
@@ -216,15 +238,13 @@ class TradeStationClient:
         retry_delay = 1
         while self._is_running:
             try:
-                async with self._session_lock:
-                    await self._refresh_token_if_needed()
+                await self._refresh_token_if_needed()
 
-                session = await self._ensure_session()
+                session = await self._ensure_quote_session()
                 async with session.get(url, headers=self._headers) as resp:
                     if resp.status == 401:
                         logger.error("401 Unauthorized — token expired.")
-                        async with self._session_lock:
-                            await self._refresh_token_if_needed()
+                        await self._refresh_token_if_needed()
                         await asyncio.sleep(5)
                         continue
                     if resp.status == 404:
@@ -285,10 +305,9 @@ class TradeStationClient:
 
         while self._is_running:
             try:
-                async with self._session_lock:
-                    await self._refresh_token_if_needed()
+                await self._refresh_token_if_needed()
 
-                session = await self._ensure_session()
+                session = await self._ensure_option_chain_session()
                 params = {"strikeProximity": 16}
 
                 async with session.get(url, headers=self._headers, params=params) as resp:
@@ -365,15 +384,13 @@ class TradeStationClient:
         retry_delay = 1
         while self._is_running:
             try:
-                async with self._session_lock:
-                    await self._refresh_token_if_needed()
+                await self._refresh_token_if_needed()
 
-                session = await self._ensure_session()
+                session = await self._ensure_depth_quote_session()
                 async with session.get(url, headers=self._headers, params=params) as resp:
                     if resp.status == 401:
                         logger.error("401 Unauthorized on depth-quotes for %s. Refreshing token.", symbol)
-                        async with self._session_lock:
-                            await self._refresh_token_if_needed()
+                        await self._refresh_token_if_needed()
                         await asyncio.sleep(5)
                         continue
                     if resp.status == 404:
@@ -506,15 +523,13 @@ class TradeStationClient:
         retry_delay = 1
         while self._is_running:
             try:
-                async with self._session_lock:
-                    await self._refresh_token_if_needed()
+                await self._refresh_token_if_needed()
 
-                session = await self._ensure_session()
+                session = await self._ensure_depth_agg_session()
                 async with session.get(url, headers=self._headers, params=params) as resp:
                     if resp.status == 401:
                         logger.error("401 Unauthorized on depth-aggregates for %s. Refreshing token.", symbol)
-                        async with self._session_lock:
-                            await self._refresh_token_if_needed()
+                        await self._refresh_token_if_needed()
                         await asyncio.sleep(5)
                         continue
                     if resp.status == 404:
