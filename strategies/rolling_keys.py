@@ -137,6 +137,14 @@ KEY_BATS_VOL_RATIO_5M = "bats_vol_ratio_5m"
 KEY_ESI_BASELINE_MEMX_1H = "esi_baseline_memx_1h"
 KEY_ESI_BASELINE_BATS_1H = "esi_baseline_bats_1h"
 
+# --- Order Book Stacking (Structural Concentration) ---
+KEY_DEPTH_BID_LEVEL_AVG_5M = "depth_bid_level_avg_5m"
+KEY_DEPTH_ASK_LEVEL_AVG_5M = "depth_ask_level_avg_5m"
+KEY_SIS_BID_5M = "sis_bid_5m"
+KEY_SIS_ASK_5M = "sis_ask_5m"
+KEY_SIS_BID_ROC_5M = "sis_bid_roc_5m"
+KEY_SIS_ASK_ROC_5M = "sis_ask_roc_5m"
+
 # --- Convenience: all core keys in one tuple ---
 CORE_KEYS = (
     KEY_PRICE_5M,
@@ -229,7 +237,10 @@ ALL_KEYS = (*CORE_KEYS, *DEPTH_KEYS, KEY_FLOW_RATIO_5M,
             KEY_ESI_MEMX_5M, KEY_ESI_MEMX_ROC_5M,
             KEY_ESI_BATS_5M, KEY_ESI_BATS_ROC_5M,
             KEY_MEMX_VOL_RATIO_5M, KEY_BATS_VOL_RATIO_5M,
-            KEY_ESI_BASELINE_MEMX_1H, KEY_ESI_BASELINE_BATS_1H,)
+            KEY_ESI_BASELINE_MEMX_1H, KEY_ESI_BASELINE_BATS_1H,
+            KEY_DEPTH_BID_LEVEL_AVG_5M, KEY_DEPTH_ASK_LEVEL_AVG_5M,
+            KEY_SIS_BID_5M, KEY_SIS_ASK_5M,
+            KEY_SIS_BID_ROC_5M, KEY_SIS_ASK_ROC_5M,)
 
 __all__ = [
     "KEY_PRICE_5M", "KEY_PRICE_30M",
@@ -273,5 +284,8 @@ __all__ = [
     "KEY_ESI_BATS_5M", "KEY_ESI_BATS_ROC_5M",
     "KEY_MEMX_VOL_RATIO_5M", "KEY_BATS_VOL_RATIO_5M",
     "KEY_ESI_BASELINE_MEMX_1H", "KEY_ESI_BASELINE_BATS_1H",
+    "KEY_DEPTH_BID_LEVEL_AVG_5M", "KEY_DEPTH_ASK_LEVEL_AVG_5M",
+    "KEY_SIS_BID_5M", "KEY_SIS_ASK_5M",
+    "KEY_SIS_BID_ROC_5M", "KEY_SIS_ASK_ROC_5M",
     "CORE_KEYS", "DEPTH_KEYS", "DEPTH_DECAY_KEYS", "ALL_KEYS", "OBI_KEYS",
 ]

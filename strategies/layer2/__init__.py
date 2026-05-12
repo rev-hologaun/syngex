@@ -28,6 +28,7 @@ from .participant_divergence_scalper import ParticipantDivergenceScalper
 from .exchange_flow_imbalance import ExchangeFlowImbalance
 from .exchange_flow_asymmetry import ExchangeFlowAsymmetry
 from .order_book_fragmentation import OrderBookFragmentation
+from .order_book_stacking import OrderBookStacking
 
 __all__ = [
     "DeltaGammaSqueeze",
@@ -45,4 +46,5 @@ __all__ = [
     "ExchangeFlowImbalance",
     "ExchangeFlowAsymmetry",
     "OrderBookFragmentation",
+    "OrderBookStacking",
 ]

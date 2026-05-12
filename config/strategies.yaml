@@ -461,6 +461,23 @@ layer2:
       stop_pct: 0.003
       target_risk_mult: 3.0
 
+  order_book_stacking:
+    enabled: true
+    tracker:
+      max_hold_seconds: 300
+    params:
+      sis_threshold: 4.0
+      magnitude_factor: 3.0
+      min_participants: 2
+      price_tolerance: 0.001
+      roc_threshold: -0.5
+      vol_ratio_breach: 0.15
+      max_spread_mult: 2.0
+      min_confidence: 0.55
+      max_confidence: 0.90
+      stop_pct: 0.003
+      target_risk_mult: 3.0
+
 # Layer 3: Micro-Signal (1Hz) — 4 strategies
 layer3:
   gamma_volume_convergence:

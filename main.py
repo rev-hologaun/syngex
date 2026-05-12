@@ -158,6 +158,12 @@ from strategies.rolling_keys import (
     KEY_BATS_VOL_RATIO_5M,
     KEY_ESI_BASELINE_MEMX_1H,
     KEY_ESI_BASELINE_BATS_1H,
+    KEY_DEPTH_BID_LEVEL_AVG_5M,
+    KEY_DEPTH_ASK_LEVEL_AVG_5M,
+    KEY_SIS_BID_5M,
+    KEY_SIS_ASK_5M,
+    KEY_SIS_BID_ROC_5M,
+    KEY_SIS_ASK_ROC_5M,
 )
 from strategies.layer1 import (
     GammaWallBounce,
@@ -186,6 +192,7 @@ from strategies.layer2.delta_iv_divergence import DeltaIVDivergence
 from strategies.layer2.exchange_flow_imbalance import ExchangeFlowImbalance
 from strategies.layer2.exchange_flow_asymmetry import ExchangeFlowAsymmetry
 from strategies.layer2.order_book_fragmentation import OrderBookFragmentation
+from strategies.layer2.order_book_stacking import OrderBookStacking
 from strategies.layer3 import (
     GammaVolumeConvergence,
     IVBandBreakout,
@@ -395,6 +402,13 @@ class SyngexOrchestrator:
             KEY_IR_5M: RollingWindow(window_type="time", window_size=300),
             KEY_IR_ROC_5M: RollingWindow(window_type="time", window_size=300),
             KEY_IR_PARTICIPANTS_5M: RollingWindow(window_type="time", window_size=300),
+            # Order Book Stacking rolling windows
+            KEY_DEPTH_BID_LEVEL_AVG_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_DEPTH_ASK_LEVEL_AVG_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_SIS_BID_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_SIS_ASK_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_SIS_BID_ROC_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_SIS_ASK_ROC_5M: RollingWindow(window_type="time", window_size=300),
         }
 
         # Call/put update counters for volume_up/volume_down tracking
@@ -671,6 +685,7 @@ class SyngexOrchestrator:
                 "exchange_flow_imbalance": ExchangeFlowImbalance,
                 "exchange_flow_asymmetry": ExchangeFlowAsymmetry,
                 "order_book_fragmentation": OrderBookFragmentation,
+                "order_book_stacking": OrderBookStacking,
             },
             "layer3": {
                 "gamma_volume_convergence": GammaVolumeConvergence,
@@ -1761,6 +1776,67 @@ class SyngexOrchestrator:
                     ts = time.time()
                     if KEY_OBI_5M in self._rolling_data:
                         self._rolling_data[KEY_OBI_5M].push(obi, ts)
+
+                    # ── Order Book Stacking: SIS computation ──
+                    N_TOP_LEVELS = 10
+                    top_n = min(N_TOP_LEVELS, len(bids)) if bids else 0
+                    top_n_ask = min(N_TOP_LEVELS, len(asks)) if asks else 0
+
+                    # Compute rolling avg of top N level sizes
+                    bid_sizes = [int(b.get("Size", 0)) for b in bids[:top_n]] if bids else []
+                    ask_sizes = [int(a.get("Size", 0)) for a in asks[:top_n_ask]] if asks else []
+
+                    bid_avg = sum(bid_sizes) / len(bid_sizes) if bid_sizes else 0
+                    ask_avg = sum(ask_sizes) / len(ask_sizes) if ask_sizes else 0
+
+                    # Push level averages to rolling windows
+                    if KEY_DEPTH_BID_LEVEL_AVG_5M in self._rolling_data:
+                        self._rolling_data[KEY_DEPTH_BID_LEVEL_AVG_5M].push(bid_avg, ts)
+                    if KEY_DEPTH_ASK_LEVEL_AVG_5M in self._rolling_data:
+                        self._rolling_data[KEY_DEPTH_ASK_LEVEL_AVG_5M].push(ask_avg, ts)
+
+                    # Compute SIS = max(level_size) / rolling_avg(level_size)
+                    if bid_avg > 0 and bid_sizes:
+                        max_bid_size = max(bid_sizes)
+                        sis_bid = max_bid_size / bid_avg
+                    else:
+                        sis_bid = 0.0
+
+                    if ask_avg > 0 and ask_sizes:
+                        max_ask_size = max(ask_sizes)
+                        sis_ask = max_ask_size / ask_avg
+                    else:
+                        sis_ask = 0.0
+
+                    # Push SIS to rolling windows
+                    if KEY_SIS_BID_5M in self._rolling_data:
+                        self._rolling_data[KEY_SIS_BID_5M].push(sis_bid, ts)
+                    if KEY_SIS_ASK_5M in self._rolling_data:
+                        self._rolling_data[KEY_SIS_ASK_5M].push(sis_ask, ts)
+
+                    # Compute ROC of max sizes for decay detection
+                    # Track max bid/ask sizes separately for ROC
+                    bid_max_rw = self._rolling_data.get(KEY_TOP_WALL_BID_SIZE_5M)
+                    ask_max_rw = self._rolling_data.get(KEY_TOP_WALL_ASK_SIZE_5M)
+
+                    bid_max_roc = 0.0
+                    ask_max_roc = 0.0
+                    if bid_max_rw and bid_max_rw.count >= 5 and bid_sizes:
+                        current_max_bid = max(bid_sizes)
+                        past_max = bid_max_rw.values[-5]
+                        if past_max > 0:
+                            bid_max_roc = (current_max_bid - past_max) / past_max
+                    if ask_max_rw and ask_max_rw.count >= 5 and ask_sizes:
+                        current_max_ask = max(ask_sizes)
+                        past_max = ask_max_rw.values[-5]
+                        if past_max > 0:
+                            ask_max_roc = (current_max_ask - past_max) / past_max
+
+                    # Push ROC of max sizes to rolling windows
+                    if KEY_SIS_BID_ROC_5M in self._rolling_data:
+                        self._rolling_data[KEY_SIS_BID_ROC_5M].push(bid_max_roc, ts)
+                    if KEY_SIS_ASK_ROC_5M in self._rolling_data:
+                        self._rolling_data[KEY_SIS_ASK_ROC_5M].push(ask_max_roc, ts)
 
             # Aggression Flow from quotes stream — detect aggressive trades
             if data.get("type") == "quote_update":

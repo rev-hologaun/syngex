@@ -162,6 +162,11 @@ strategies:
     col: 1
     span_cols: 1
     span_rows: 1
+  order_book_stacking:
+    row: 6
+    col: 2
+    span_cols: 1
+    span_rows: 1
 
 # System widgets (non-strategy cells)
 widgets:
