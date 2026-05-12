@@ -83,6 +83,26 @@ class TradeStationClient:
                 symbol, strike_proximity,
             )
 
+    def subscribe_to_market_depth_quotes(self, symbol: str) -> None:
+        """Register a symbol for market-depth-quotes streaming.
+
+        TradeStation HTTP streaming does not have a dedicated market-depth
+        endpoint.  This method is a no-op stub — depth data is derived from
+        the regular quote stream (Bid/Ask fields) and dispatched by
+        ``_on_message`` with type="market_depth_quotes".
+        """
+        logger.debug("Market-depth-quotes subscription for %s (no-op stub)", symbol)
+
+    def subscribe_to_market_depth_aggregates(self, symbol: str) -> None:
+        """Register a symbol for aggregated market-depth streaming.
+
+        TradeStation HTTP streaming does not have a dedicated market-depth
+        endpoint.  This method is a no-op stub — depth data is derived from
+        the regular quote stream and dispatched by ``_on_message`` with
+        type="market_depth_agg".
+        """
+        logger.debug("Market-depth-aggregates subscription for %s (no-op stub)", symbol)
+
     async def stop(self) -> None:
         """Gracefully stop the client, cancel stream tasks, and close the session."""
         self._is_running = False
