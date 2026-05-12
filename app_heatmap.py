@@ -294,7 +294,10 @@ def handle_disconnect():
 @app.route("/")
 def index():
     """Serve the heatmap HTML page."""
-    return render_template("heatmap.html", symbol=SYMBOL, port=PORT)
+    try:
+        return render_template("heatmap.html", symbol=SYMBOL, port=PORT)
+    except Exception:
+        return json.dumps({"symbol": SYMBOL, "port": PORT, "status": "no_template"}), 200, {"Content-Type": "application/json"}
 
 
 # ---------------------------------------------------------------------------
