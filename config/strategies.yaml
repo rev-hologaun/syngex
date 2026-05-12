@@ -139,6 +139,14 @@ layer2:
       volume_spike_ratio: 1.2
       min_data_points: 3
       min_confidence: 0.35
+      # v2 Gamma-Velocity params
+      gex_accel_ratio: 1.10
+      delta_accel_min: 1.05
+      gex_accel_min: 1.05
+      liquidity_vacuum_depth_ratio: 0.8
+      iv_roc_threshold: 0.02
+      iv_conf_bonus: 0.08
+      accel_stop_widen_mult: 1.5
 
   delta_volume_exhaustion:
     enabled: true
