@@ -8,197 +8,240 @@
 
 ## Problem Statement
 
-Current `strike_concentration` is a solid "price-action at OI levels" strategy but has 3 blind spots:
-1. **Slice mode is blind to order book** — a volume spike can be a "fake" large limit fill. Need liquidity vacuum confirmation.
-2. **Delta sign flip is weak** — delta turning positive/negative is just a direction, not conviction. Need acceleration (ROC).
-3. **OI magnitude is secondary** — a bounce off 10K OI is noise; 1M OI is structural. OI should weight confidence more heavily.
-4. **Fixed 1.5× risk target** — doesn't adapt to market speed. In fast markets, 1.5× may be too tight; in slow markets, too loose.
+Current `strike_concentration` is a solid OI-strike strategy but has 4 blind spots:
+1. **Slice "fake-out" vulnerability** — Volume spike alone can't distinguish a real liquidity vacuum breakout from a large limit order fill.
+2. **Delta sign flip is too weak** — Delta turning positive/negative is just a direction check, not a conviction check. We need **Delta Acceleration (ROC)**.
+3. **Bounce confidence blind to gamma magnitude** — A bounce off a strike with 10K OI is noise; a bounce off a strike with 1M OI is structural. Current code only uses OI rank, not absolute gamma magnitude.
+4. **Fixed 1.5× risk target** — Doesn't scale with market speed. High-vol environments need wider targets; low-vol needs tighter.
 
-Synapse's proposal: upgrade with **Liquidity Vacuum**, **Delta-Surge Validation**, **Gamma-Magnitude Weighting**, and **ATR-Normalized Targets**.
+Synapse's proposal: upgrade to **Liquidity Vacuum Slice Confirmation**, **Delta-Surge Validation**, **Gamma-Magnitude Bounce Weighting**, and **ATR-Normalized Micro-Scalp Targets**.
 
 ---
 
 ## v2 Architecture
 
-### New Confidence Components (8 total for Bounce, 8 for Slice)
+### New Confidence Components
 
-| # | Component | Bounce Weight | Slice Weight | Type | Source |
-|---|-----------|---------------|--------------|------|--------|
-| 1 | Strike OI Rank | 0.10–0.15 | 0.10–0.15 | soft | existing |
-| 2 | Proximity | 0.10–0.20 | 0.10–0.20 | soft | existing |
-| 3 | Gamma Magnitude | 0.05–0.10 | 0.05–0.10 | soft | **NEW** (gex_calculator) |
-| 4 | Signal Strength | 0.10–0.15 | 0.15–0.25 | soft | upgraded |
-| 5 | Liquidity Vacuum | — | 0.10–0.15 | **hard gate** | **NEW** (market_depth_agg) |
-| 6 | Delta Surge | — | 0.10–0.15 | **hard gate** | **NEW** (d(Delta)/dt) |
-| 7 | Regime Alignment | 0.05–0.10 | 0.05–0.10 | soft | existing |
-| 8 | ATR Target Quality | 0.05–0.10 | 0.05–0.10 | soft | **NEW** (ATR scaling) |
+| Mode | Component | Weight | Type | Source |
+|------|-----------|--------|------|--------|
+| **Bounce** | OI Rank | 0.15–0.25 | soft | greeks_summary (existing) |
+| **Bounce** | Proximity | 0.15–0.25 | soft | price vs strike (existing) |
+| **Bounce** | Signal Strength | 0.15–0.20 | soft | candle/divergence (existing) |
+| **Bounce** | **Gamma Magnitude** | 0.10–0.20 | **soft** | greeks_summary net_gamma at strike |
+| **Bounce** | Regime Alignment | 0.10–0.15 | soft | regime (existing) |
+| **Slice** | OI Rank | 0.15–0.25 | soft | greeks_summary (existing) |
+| **Slice** | **Liquidity Vacuum** | 0.20–0.30 | **hard gate** | market_depth_agg |
+| **Slice** | **Delta Acceleration** | 0.15–0.20 | **hard gate** | KEY_DELTA_ROC_5M (new key) |
+| **Slice** | Body Ratio | 0.20–0.30 | soft | candle (existing) |
+| **Slice** | Volume Spike | 0.10–0.15 | soft | volume (existing) |
 
-**New min confidence: 0.35** (up from 0.25 — higher bar for strike interactions)
+**New min confidence: 0.35** (up from 0.25 — higher bar for strike signals)
 
 ---
 
-## Phase 1: Liquidity Vacuum for Slice — The Order Book Confirmation
+## Phase 1: Liquidity Vacuum Slice Confirmation — The Hard Gate
 
-**Goal:** Add `market_depth_agg` bid/ask size ratio check as a **hard gate** for slice signals.
+**Goal:** Replace volume-only slice confirmation with **market depth liquidity vacuum detection**.
 
 **Logic:**
-1. Get `market_depth_agg` from `rolling_data` — contains aggregated bid/ask size by price level
-2. For **LONG slice** (price breaking above Call strike): check that **ask side depth** is collapsing (liquidity vacuum above the strike)
-3. For **SHORT slice** (price breaking below Put strike): check that **bid side depth** is collapsing (liquidity vacuum below the strike)
-4. **Hard gate:** bid/ask ratio must be extreme:
-   - LONG slice: `bid_size / ask_size > 3.0` (massive bid wall, tiny ask wall = vacuum above)
-   - SHORT slice: `ask_size / bid_size > 3.0` (massive ask wall, tiny bid wall = vacuum below)
-5. If depth data unavailable, fall back to volume-only check (backwards compat)
+1. Read `market_depth_agg` from `data` dict (contains aggregated bid/ask size data)
+2. For **LONG slice** (through Call above): check that **ask side depth has collapsed** (liquidity vacuum above)
+3. For **SHORT slice** (through Put below): check that **bid side depth has collapsed** (liquidity vacuum below)
+4. **Hard gate:** bid/ask depth ratio must be extreme on the breakout side
 
-**Why this works:** A real "slice" through a strike requires the opposing liquidity to be thin. If there's a thick wall of orders on the breakout side, price can't slice through — it bounces or stalls. A liquidity vacuum means the path is clear for momentum to carry through.
-
-**Config params to add:**
-```yaml
-liquidity_vacuum_ratio: 3.0           # bid/ask ratio threshold for vacuum
+**Implementation details:**
+```python
+def _check_liquidity_vacuum(self, data, direction):
+    depth = data.get("market_depth_agg", {})
+    if not depth:
+        return False
+    
+    bid_levels = depth.get("bids", [])  # list of {price, size}
+    ask_levels = depth.get("asks", [])  # list of {price, size}
+    
+    if direction == "LONG":
+        # Check ask side (above price) — should be thin
+        near_ask = [a for a in ask_levels if a["price"] <= price * 1.002]
+        near_bid = [b for b in bid_levels if b["price"] >= price * 0.998]
+        ask_total = sum(a["size"] for a in near_ask)
+        bid_total = sum(b["size"] for b in near_bid)
+        if bid_total == 0:
+            return True  # No bids = free run up
+        ratio = ask_total / bid_total
+        return ratio < 0.30  # Ask side < 30% of bid side = vacuum
+    else:
+        # Check bid side (below price) — should be thin
+        near_bid = [b for b in bid_levels if b["price"] <= price * 1.002]
+        near_ask = [a for a in ask_levels if a["price"] >= price * 0.998]
+        bid_total = sum(b["size"] for b in near_bid)
+        ask_total = sum(a["size"] for a in near_ask)
+        if ask_total == 0:
+            return True  # No asks = free run down
+        ratio = bid_total / ask_total
+        return ratio < 0.30  # Bid side < 30% of ask side = vacuum
 ```
 
-**Data reference (from LEVEL2_DATA_SAMPLES.jsonl):**
-- `market_depth_agg` stream: `{"bid_levels": [{"price": 418.0, "size": 500}, ...], "ask_levels": [{"price": 420.0, "size": 50}, ...]}`
-- If ask size at breakout level is 50 vs bid size 5000 → ratio = 100 → vacuum confirmed
-- If ask size at breakout level is 3000 vs bid size 500 → ratio = 0.167 → NO vacuum → reject
+**Config params:**
+```yaml
+liquidity_vacuum_ratio: 0.30        # bid/ask ratio threshold for vacuum
+depth_window_pct: 0.002             # ±0.2% price window for depth check
+```
 
 ---
 
-## Phase 2: Delta-Surge Validation — The Conviction Check
+## Phase 2: Delta-Surge Validation — The Snap Detection
 
-**Goal:** Replace "delta sign flip" with **Delta Acceleration (ROC)** for slice signals.
+**Goal:** Replace delta sign flip with **Delta Acceleration (Rate of Change)**.
 
-**Current behavior:** `_check_delta_positive_at_strike()` / `_check_delta_negative_at_strike()` — just checks if net delta > 0 or < 0.
+**Current behavior:** `_check_delta_positive_at_strike()` / `_check_delta_negative_at_strike()` — just checks if net_delta > 0 or < 0.
 
 **New behavior:**
-1. Get `gex_calculator.get_delta_by_strike(strike)` for current net_delta
-2. Get previous net_delta from rolling window (new key `KEY_STRIKE_DELTA_5M`)
-3. Compute `delta_accel = current_delta / previous_delta`
-4. For **LONG slice:** `delta_accel > 1.15` (delta accelerated ≥15%)
-5. For **SHORT slice:** `delta_accel < 0.85` (delta decelerated ≥15%)
-6. **Hard gate:** delta_accel must exceed threshold
+1. Compute delta ROC: `delta_accel = (current_delta - delta_5_ticks_ago) / abs(delta_5_ticks_ago)`
+2. For **LONG slice:** delta_accel > 0.10 (delta accelerated ≥10%)
+3. For **SHORT slice:** delta_accel < -0.10 (delta decelerated ≥10%)
+4. **Hard gate:** delta_accel must exceed threshold (confirms the snap)
 
-**Why this works:** Delta sign flip just says "delta is positive/negative" — which could be a slow drift. Delta acceleration says "delta is CHANGING fast" — which is the smoking gun for dealer hedging forcing a move through a strike. This catches the moment dealers are forced to buy/sell aggressively.
-
-**Config params to add:**
-```yaml
-delta_accel_threshold: 1.15           # delta must accelerate ≥15% at slice
+**Implementation details:**
+```python
+def _check_delta_surge(self, rolling_data, direction):
+    window = rolling_data.get(KEY_DELTA_ROC_5M)
+    if window is None or window.count < MIN_DATA_POINTS:
+        return False
+    
+    roc = window.latest
+    if roc is None:
+        return False
+    
+    if direction == "LONG":
+        return roc > 0.10  # Delta accelerating up
+    else:
+        return roc < -0.10  # Delta accelerating down
 ```
 
-**Rolling key to add:** `KEY_STRIKE_DELTA_5M` in `rolling_keys.py`
-**main.py change:** Track net delta at top-OI strikes in rolling window
+**Rolling key to add:** `KEY_DELTA_ROC_5M` in `rolling_keys.py`
+**main.py change:** Compute delta ROC = (current_net_delta - delta_5_ago) / abs(delta_5_ago), push to rolling window
 
 ---
 
-## Phase 3: Gamma-Magnitude Weighting — The Structural Weight
+## Phase 3: Gamma-Magnitude Bounce Weighting — The Structural Signal
 
-**Goal:** Use **Gamma Magnitude** at the strike as a confidence weight, not just OI rank.
+**Goal:** Replace OI-only bounce confidence with **gamma magnitude at the strike**.
 
-**Current behavior:** OI rank (0.20–0.30) and OI volume (0.05–0.10) are the only magnitude signals.
+**Current behavior:** `_compute_bounce_confidence()` uses OI rank (0.20–0.30) and OI volume (0.05–0.10). No gamma magnitude.
 
 **New behavior:**
-1. Get gamma magnitude at the strike: `gex_calculator.get_strike_net_gamma(strike)`
-2. Normalize gamma magnitude: `gamma_weight = min(1.0, abs(gamma_at_strike) / gamma_threshold)`
-3. Use gamma_weight to scale bounce confidence (0.05–0.10 component)
-4. A strike with gamma magnitude > 0.50 gets maximum weight; < 0.10 gets minimum
+1. Get net_gamma at the bounce strike from `greeks_summary[strike]["net_gamma"]`
+2. Compute gamma confidence: `gamma_conf = min(0.20, abs(net_gamma) * gamma_scale)`
+3. Scale gamma_scale so that gamma of 1.0 → 0.20 confidence (high conviction)
+4. Replace the OI volume component (0.05–0.10) with gamma magnitude (0.10–0.20)
 
-**Why this works:** OI alone doesn't tell the whole story. A strike with 10K OI but high gamma is a "magnet" — price will be drawn to it. A strike with 10K OI and low gamma is noise. Gamma magnitude captures the dealer hedging pressure at that specific strike, which is what actually causes bounces and slices.
-
-**Config params to add:**
-```yaml
-gamma_magnitude_threshold: 0.50       # gamma threshold for max weight
+**Implementation details:**
+```python
+def _gamma_bounce_confidence(self, strike, greeks_summary):
+    """Get gamma magnitude confidence for a bounce at a specific strike."""
+    strike_data = greeks_summary.get(strike, {})
+    net_gamma = strike_data.get("net_gamma", 0)
+    if net_gamma is None:
+        net_gamma = 0
+    
+    # Gamma magnitude → confidence: abs(0.5) → 0.10, abs(2.0+) → 0.20
+    abs_gamma = abs(net_gamma)
+    if abs_gamma < 0.5:
+        return 0.05
+    elif abs_gamma >= 2.0:
+        return 0.20
+    else:
+        # Linear interpolation between 0.5 and 2.0
+        return 0.05 + 0.15 * ((abs_gamma - 0.5) / 1.5)
 ```
 
 ---
 
-## Phase 4: ATR-Normalized Targets — The Speed-Adaptive Exit
+## Phase 4: ATR-Normalized Micro-Scalp Targets — The Dynamic Exit
 
 **Goal:** Replace fixed 1.5× risk target with **ATR-normalized targets**.
 
-**Current behavior:** `target = entry + risk * 1.5` — fixed regardless of market speed.
+**Current behavior:** `target = entry + risk * TARGET_RISK_MULT` (fixed 1.5×)
 
 **New behavior:**
-1. Compute ATR from price rolling window: `ATR = std_dev of price_5m * sqrt(5)` (approximate ATR)
-2. Get rolling mean ATR from `KEY_ATR_5M` rolling window
-3. Compute `atr_ratio = current_atr / mean_atr`
-4. For **bounce:** `target_mult = 1.5 × atr_ratio`
-5. For **slice:** `target_mult = 2.0 × atr_ratio` (slices have more momentum)
-6. Cap target_mult at 3.0 (don't overextend)
-7. Minimum target: 0.3% from entry (don't scalp for less than 0.3%)
+1. Compute ATR from `KEY_PRICE_5M` rolling window: `atr = price_window.std * sqrt(5)` (5-min ATR proxy)
+2. Normalize ATR to percentage: `atr_pct = atr / price`
+3. Determine ATR multiplier based on volatility regime:
+   - High vol (ATR > 0.5%): target_mult = 2.0 × risk (wider scalp)
+   - Medium vol (ATR 0.2–0.5%): target_mult = 1.5 × risk (baseline)
+   - Low vol (ATR < 0.2%): target_mult = 1.0 × risk (tight scalp)
+4. Cap minimum target: 0.2% from entry (don't scalp for pennies)
 
-**Why this works:** In fast markets (high ATR), a 1.5× target might be hit in seconds — but 1.5× might also be too small to cover slippage. By scaling with ATR, we adapt to market conditions: wider targets in fast markets, tighter in slow markets.
+**Implementation details:**
+```python
+def _compute_atr_target(self, entry, risk, rolling_data, direction):
+    window = rolling_data.get(KEY_PRICE_5M)
+    if window is None or window.std is None:
+        return entry + (risk * TARGET_RISK_MULT)  # fallback
+    
+    price = abs(entry)
+    atr = window.std * math.sqrt(5)  # 5-min ATR proxy
+    atr_pct = atr / price if price > 0 else 0
+    
+    if atr_pct > 0.005:
+        mult = 2.0   # High vol
+    elif atr_pct > 0.002:
+        mult = 1.5   # Medium vol
+    else:
+        mult = 1.0   # Low vol
+    
+    target = entry + (risk * mult) if direction == "LONG" else entry - (risk * mult)
+    
+    # Minimum 0.2% target
+    min_target = entry * 0.002 if direction == "LONG" else entry * -0.002
+    if direction == "LONG":
+        target = max(target, entry + min_target)
+    else:
+        target = min(target, entry - min_target)
+    
+    return target
+```
 
-**Config params to add:**
+**Config params:**
 ```yaml
-bounce_target_mult: 1.5               # base multiplier for bounces
-slice_target_mult: 2.0                # base multiplier for slices
-atr_normalization_cap: 3.0            # cap on target multiplier
-target_min_pct: 0.003                 # minimum 0.3% target
+atr_high_mult: 2.0
+atr_medium_mult: 1.5
+atr_low_mult: 1.0
+atr_high_threshold: 0.005
+atr_low_threshold: 0.002
+target_min_pct: 0.002
 ```
 
 ---
 
 ## Phase 5: Confidence Recalculation
 
-**New `_compute_bounce_confidence()` structure:**
+**New `_compute_bounce_confidence_v2()` structure (5 components):**
 
-```python
-def _compute_bounce_confidence(self, ...) -> float:
-    # 1. OI rank (0.10–0.15)
-    rank_conf = max(0.10, 0.15 - 0.025 * (rank - 1))
+| Component | Weight | Type |
+|-----------|--------|------|
+| OI Rank | 0.15–0.25 | soft |
+| Proximity | 0.15–0.25 | soft |
+| Signal Strength (candle/divergence) | 0.15–0.20 | soft |
+| **Gamma Magnitude** | 0.10–0.20 | **soft** |
+| Regime Alignment | 0.10–0.15 | soft |
 
-    # 2. Proximity (0.10–0.20)
-    prox_conf = ...  # closer = higher
+**New `_compute_slice_confidence_v2()` structure (6 components):**
 
-    # 3. Gamma magnitude (0.05–0.10) — NEW
-    gamma_conf = 0.05 + 0.05 * min(1.0, abs(gamma_at_strike) / GAMMA_MAGNITUDE_THRESHOLD)
+| Component | Weight | Type |
+|-----------|--------|------|
+| **Liquidity Vacuum** | 0.20–0.30 | **hard gate** |
+| **Delta Acceleration** | 0.15–0.20 | **hard gate** |
+| OI Rank | 0.15–0.25 | soft |
+| Body Ratio | 0.20–0.30 | soft |
+| Volume Spike | 0.10–0.15 | soft |
+| Regime Alignment | 0.10–0.15 | soft |
 
-    # 4. Signal strength (0.10–0.15)
-    signal_conf = ...  # candle pattern / divergence quality
+**Hard gates for slice:**
+- Liquidity vacuum (bid/ask ratio < 0.30)
+- Delta acceleration (ROC > 0.10 or < -0.10)
 
-    # 5. Regime alignment (0.05–0.10)
-    regime_conf = ...
-
-    # 6. ATR target quality (0.05–0.10) — NEW
-    atr_conf = ...  # how well the target scales with market speed
-
-    # Normalize and average
-    confidence = (norm_rank + norm_prox + norm_gamma + norm_signal + norm_regime + norm_atr) / 6.0
-    return min(MAX_CONFIDENCE, max(0.0, confidence))
-```
-
-**New `_compute_slice_confidence()` structure:**
-
-```python
-def _compute_slice_confidence(self, ...) -> float:
-    # 1. OI rank (0.10–0.15)
-    rank_conf = ...
-
-    # 2. Proximity (0.10–0.20)
-    prox_conf = ...
-
-    # 3. Gamma magnitude (0.05–0.10) — NEW
-    gamma_conf = ...
-
-    # 4. Signal strength (0.15–0.25) — upgraded: body_ratio + volume
-    signal_conf = 0.15 + 0.10 * min(1.0, body_ratio / 0.8)
-
-    # 5. Liquidity vacuum (0.10–0.15) — NEW hard gate
-    vacuum_conf = 0.10 + 0.05 * min(1.0, (depth_ratio - LIQUIDITY_VACUUM_RATIO) / 2.0)
-
-    # 6. Delta surge (0.10–0.15) — NEW hard gate
-    delta_conf = 0.10 + 0.05 * min(1.0, (delta_accel - 1.0) / 0.5)
-
-    # 7. Regime alignment (0.05–0.10)
-    regime_conf = ...
-
-    # 8. ATR target quality (0.05–0.10) — NEW
-    atr_conf = ...
-
-    # Normalize and average
-    confidence = (sum of 8 norms) / 8.0
-    return min(MAX_CONFIDENCE, max(0.0, confidence))
-```
+**Min confidence: 0.35** (up from 0.25)
 
 ---
 
@@ -215,9 +258,8 @@ strike_concentration:
     # === v1 params (kept for backwards compat) ===
     top_oi_strikes_count: 3
     bounce_proximity_pct: 0.005
-    slice_body_ratio: 0.3
+    slice_body_ratio: 0.30
     slice_volume_ratio: 1.20
-    divergence_volume_threshold: 0.80
     stop_pct_bounce: 0.003
     stop_pct_slice: 0.003
     target_risk_mult: 1.5
@@ -226,19 +268,16 @@ strike_concentration:
 
     # === v2 Liquidity-Momentum params ===
     # Liquidity vacuum
-    liquidity_vacuum_ratio: 3.0
+    liquidity_vacuum_ratio: 0.30
+    depth_window_pct: 0.002
 
-    # Delta surge
-    delta_accel_threshold: 1.15
-
-    # Gamma magnitude
-    gamma_magnitude_threshold: 0.50
-
-    # ATR-normalized targets
-    bounce_target_mult: 1.5
-    slice_target_mult: 2.0
-    atr_normalization_cap: 3.0
-    target_min_pct: 0.003
+    # ATR targets
+    atr_high_mult: 2.0
+    atr_medium_mult: 1.5
+    atr_low_mult: 1.0
+    atr_high_threshold: 0.005
+    atr_low_threshold: 0.002
+    target_min_pct: 0.002
 ```
 
 ---
@@ -255,26 +294,22 @@ metadata = {
     "strike": ...,
     "total_oi": ...,
     "proximity_pct": ...,
-    "bullish_reversal": ...,
-    "bearish_reversal": ...,
-    "body_ratio": ...,
-    "volume_spike": ...,
-    "delta_positive": ...,
-    "delta_negative": ...,
     "net_gamma": ...,
     "regime": ...,
-    "trend": ...,
     "risk": ...,
     "risk_reward_ratio": ...,
 
     # === v2 new fields ===
-    "gamma_at_strike": round(gamma_at_strike, 4),
-    "liquidity_vacuum_ratio": round(depth_ratio, 2),
-    "delta_acceleration": round(delta_accel, 3),
-    "atr_current": round(current_atr, 4),
-    "atr_mean": round(mean_atr, 4),
-    "atr_ratio": round(atr_ratio, 3),
+    # Bounce
+    "gamma_magnitude": round(abs(strike_gamma), 4),
+    "gamma_confidence": round(gamma_conf, 3),
+
+    # Slice
+    "liquidity_vacuum_ratio": round(vacuum_ratio, 3),
+    "delta_acceleration": round(delta_roc, 4),
+    "atr_pct": round(atr_pct, 5),
     "target_mult": round(target_mult, 2),
+    "vol_regime": "high" / "medium" / "low",
 }
 ```
 
@@ -286,15 +321,14 @@ metadata = {
 
 ```python
 # --- Strike Concentration v2 (Liquidity-Momentum) ---
-KEY_STRIKE_DELTA_5M = "strike_delta_5m"
-KEY_ATR_5M = "atr_5m"
+KEY_DELTA_ROC_5M = "delta_roc_5m"
 ```
 
 Include in `ALL_KEYS` tuple.
 
 **Add to `main.py`** in `_update_rolling_data()`:
-- Compute ATR: `std_dev of price_5m * sqrt(5)` → push to `KEY_ATR_5M`
-- Track net delta at top-OI strikes → push to `KEY_STRIKE_DELTA_5M`
+- Compute delta ROC: get current net_delta from greeks_summary, get delta 5 ticks ago, compute `roc = (current - delta_5_ago) / abs(delta_5_ago)`
+- Push to rolling window KEY_DELTA_ROC_5M
 
 ---
 
@@ -302,10 +336,10 @@ Include in `ALL_KEYS` tuple.
 
 | File | Changes |
 |------|---------|
-| `strategies/rolling_keys.py` | Add `KEY_STRIKE_DELTA_5M`, `KEY_ATR_5M` |
-| `main.py` | Add rolling key init + ATR + strike delta computation |
-| `strategies/layer3/strike_concentration.py` | Main v2 implementation |
-| `config/strategies.yaml` | Add 10 new params under `strike_concentration` |
+| `strategies/rolling_keys.py` | Add `KEY_DELTA_ROC_5M` |
+| `main.py` | Add rolling key init + delta ROC computation |
+| `strategies/layer3/strike_concentration.py` | v2 rewrite — liquidity vacuum, delta surge, gamma magnitude, ATR targets |
+| `config/strategies.yaml` | Add 9 new params under `strike_concentration` |
 
 **No changes needed:** `strategies/layer3/__init__.py` — no registration changes.
 
@@ -313,38 +347,40 @@ Include in `ALL_KEYS` tuple.
 
 ## Acceptance Criteria
 
-1. ✅ `_check_liquidity_vacuum()` checks bid/ask depth ratio for slice confirmation
-2. ✅ `_check_delta_surge()` computes delta ROC at strike for slice validation
-3. ✅ `_get_gamma_magnitude()` retrieves gamma at strike for bounce confidence weighting
-4. ✅ `_compute_atr_normalized_target()` scales target with ATR ratio
-5. ✅ Hard gates: liquidity vacuum AND delta surge for slice mode
+1. ✅ `_check_liquidity_vacuum()` detects bid/ask depth collapse on breakout side
+2. ✅ `_check_delta_surge()` detects delta ROC ≥10% at breakout
+3. ✅ `_gamma_bounce_confidence()` scales confidence by gamma magnitude at strike
+4. ✅ `_compute_atr_target()` scales target by ATR volatility regime
+5. ✅ Hard gates: liquidity vacuum AND delta surge (for slice mode)
 6. ✅ Min confidence raised from 0.25 → 0.35
-7. ✅ Rolling keys `KEY_STRIKE_DELTA_5M` and `KEY_ATR_5M` added and populated
+7. ✅ Rolling key `KEY_DELTA_ROC_5M` added and populated in main.py
 8. ✅ New metadata fields in signal output
 9. ✅ Config params added to strategies.yaml
 10. ✅ Import passes: `python3 -c "from strategies.layer3.strike_concentration import StrikeConcentration; print('OK')"`
-11. ✅ Commit message: `feat(strike_conc): v2 Liquidity-Momentum upgrade`
+11. ✅ Commit message: `feat(strike): v2 Liquidity-Momentum upgrade`
 
 ---
 
-## Data Reference (from LEVEL2_DATA_SAMPLES.jsonl)
+## Data Reference
 
-**Liquidity vacuum patterns (depth_agg_parsed):**
-- LONG slice: bid_size=5000, ask_size=50 → ratio=100 → vacuum confirmed
-- LONG slice: bid_size=500, ask_size=400 → ratio=1.25 → NO vacuum → reject
-- SHORT slice: ask_size=5000, bid_size=50 → ratio=100 → vacuum confirmed
+**Liquidity vacuum patterns (market_depth_agg):**
+- Normal: bid_total=500, ask_total=500 → ratio=1.0 (balanced)
+- LONG vacuum: bid_total=500, ask_total=50 → ratio=0.10 (thin asks = free run up)
+- SHORT vacuum: bid_total=50, ask_total=500 → ratio=0.10 (thin bids = free run down)
+- Threshold: ratio < 0.30 = vacuum confirmed
 
-**Delta surge patterns:**
-- Slow drift: delta 0.30 → 0.32 → 0.34 → ratio=1.13 → NO surge
-- Surge: delta 0.30 → 0.45 → 0.60 → ratio=2.0 → surge confirmed
-- For SHORT: delta -0.30 → -0.45 → -0.60 → ratio=2.0 → decel=0.50 → surge confirmed
+**Delta acceleration patterns:**
+- Normal: delta goes 0.30 → 0.32 → 0.31 → roc ≈ 0 (no acceleration)
+- LONG surge: delta goes 0.30 → 0.45 → 0.60 → roc = (0.60-0.30)/0.30 = 1.00 (massive acceleration)
+- SHORT surge: delta goes -0.30 → -0.45 → -0.60 → roc = (-0.60-(-0.30))/0.30 = -1.00 (massive deceleration)
+- Threshold: |roc| > 0.10 = surge confirmed
 
-**Gamma magnitude patterns:**
-- Strike 420: gamma=0.80 → weight=max (strong structural wall)
-- Strike 425: gamma=0.10 → weight=min (weak noise level)
-- Strike 415: gamma=0.40 → weight=moderate (meaningful but not dominant)
+**Gamma magnitude patterns (from greeks_summary):**
+- Strike with 10K OI: net_gamma ≈ 0.2 → gamma_conf ≈ 0.06 (noise)
+- Strike with 100K OI: net_gamma ≈ 1.0 → gamma_conf ≈ 0.13 (moderate)
+- Strike with 1M OI: net_gamma ≈ 3.0 → gamma_conf = 0.20 (structural)
 
 **ATR patterns:**
-- Fast market: current_atr=2.5, mean_atr=1.0 → atr_ratio=2.5 → target_mult=3.75 → capped at 3.0
-- Normal market: current_atr=1.0, mean_atr=1.0 → atr_ratio=1.0 → target_mult=1.5
-- Slow market: current_atr=0.5, mean_atr=1.0 → atr_ratio=0.5 → target_mult=0.75
+- High vol: price_std=2.0 → atr=4.5 → atr_pct=0.8% → mult=2.0 (wide scalp)
+- Medium vol: price_std=1.0 → atr=2.2 → atr_pct=0.4% → mult=1.5 (baseline)
+- Low vol: price_std=0.3 → atr=0.7 → atr_pct=0.1% → mult=1.0 (tight scalp)
