@@ -23,6 +23,7 @@ import argparse
 import asyncio
 import json
 import logging
+import math
 import os
 import signal
 import subprocess
@@ -268,6 +269,9 @@ class SyngexOrchestrator:
             # Squeeze depth rolling windows (liquidity vacuum detection)
             KEY_DEPTH_BID_SIZE_ROLLING: RollingWindow(window_type="time", window_size=60),
             KEY_DEPTH_ASK_SIZE_ROLLING: RollingWindow(window_type="time", window_size=60),
+            # Strike Concentration v2 (Liquidity-Momentum)
+            KEY_ATR_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_STRIKE_DELTA_5M: RollingWindow(window_type="time", window_size=300),
         }
 
         # Call/put update counters for volume_up/volume_down tracking
@@ -665,6 +669,15 @@ class SyngexOrchestrator:
                     self._rolling_data[KEY_PRICE_5M].push(price, ts)
                     self._rolling_data[KEY_PRICE_30M].push(price, ts)
 
+                    # ATR: std_dev of price_5m * sqrt(5) (Strike Conc v2)
+                    if KEY_ATR_5M in self._rolling_data:
+                        price_vals = self._rolling_data[KEY_PRICE_5M].values
+                        if len(price_vals) >= 5:
+                            mean_p = sum(price_vals) / len(price_vals)
+                            var = sum((x - mean_p) ** 2 for x in price_vals) / len(price_vals)
+                            atr = math.sqrt(var) * math.sqrt(5)
+                            self._rolling_data[KEY_ATR_5M].push(atr, ts)
+
             # Periodically update net_gamma rolling window
             if self._calculator._msg_count % 20 == 0:
                 ng = self._calculator.get_net_gamma()
@@ -938,6 +951,33 @@ class SyngexOrchestrator:
                 except Exception:
                     pass
 
+                # ── Strike Concentration v2: net delta at top-OI strikes ──
+                try:
+                    if KEY_STRIKE_DELTA_5M in self._rolling_data and gex_summary:
+                        # Identify top-OI strikes (same logic as StrikeConcentration)
+                        strike_oi_list = []
+                        for strike_str, strike_data in gex_summary.items():
+                            try:
+                                strike = float(strike_str)
+                            except (ValueError, TypeError):
+                                continue
+                            call_oi = strike_data.get("call_oi", 0) or 0
+                            put_oi = strike_data.get("put_oi", 0) or 0
+                            total_oi = call_oi + put_oi
+                            if total_oi > 0:
+                                strike_oi_list.append((strike, total_oi))
+                        strike_oi_list.sort(key=lambda x: x[1], reverse=True)
+                        top_strikes = strike_oi_list[:3]
+
+                        # Compute net delta at top-OI strikes
+                        total_net_delta = 0.0
+                        for strike, _ in top_strikes:
+                            delta_data = self._calculator.get_delta_by_strike(strike)
+                            total_net_delta += delta_data.get("net_delta", 0.0)
+                        self._rolling_data[KEY_STRIKE_DELTA_5M].push(total_net_delta)
+                except Exception:
+                    pass
+
             # ── Depth data capture (L2/TotalView) ──
             msg_type = data.get("type", "")
             if msg_type in ("market_depth_quotes", "market_depth_agg"):
@@ -976,6 +1016,15 @@ class SyngexOrchestrator:
                     self._rolling_data[KEY_DEPTH_BID_SIZE_ROLLING].push(total_bid_size, ts)
                 if KEY_DEPTH_ASK_SIZE_ROLLING in self._rolling_data:
                     self._rolling_data[KEY_DEPTH_ASK_SIZE_ROLLING].push(total_ask_size, ts)
+
+                # Store raw depth levels for StrikeConcentration v2 liquidity vacuum
+                if msg_type == "market_depth_agg":
+                    bid_levels = [{"price": float(b.get("Price", 0)), "size": int(b.get("TotalSize", 0))} for b in bids]
+                    ask_levels = [{"price": float(a.get("Price", 0)), "size": int(a.get("TotalSize", 0))} for a in asks]
+                    self._rolling_data["market_depth_agg"] = {
+                        "bid_levels": bid_levels,
+                        "ask_levels": ask_levels,
+                    }
 
 
         except Exception as exc:

@@ -58,6 +58,10 @@ KEY_GAMMA_ACCEL_5M = "gamma_accel_5m"
 KEY_CONSEC_LONG = "consec_long"
 KEY_CONSEC_SHORT = "consec_short"
 
+# --- Strike Concentration v2 (Liquidity-Momentum) ---
+KEY_STRIKE_DELTA_5M = "strike_delta_5m"
+KEY_ATR_5M = "atr_5m"
+
 # --- Convenience: all core keys in one tuple ---
 CORE_KEYS = (
     KEY_PRICE_5M,
@@ -96,7 +100,8 @@ ALL_KEYS = (*CORE_KEYS, *DEPTH_KEYS, KEY_FLOW_RATIO_5M,
             KEY_GAMMA_ACCEL_5M,
             KEY_CONSEC_LONG, KEY_CONSEC_SHORT,
             KEY_DEPTH_BID_SIZE_ROLLING, KEY_DEPTH_ASK_SIZE_ROLLING,
-            KEY_SKEW_WIDTH_5M)
+            KEY_SKEW_WIDTH_5M,
+            KEY_STRIKE_DELTA_5M, KEY_ATR_5M)
 
 __all__ = [
     "KEY_PRICE_5M", "KEY_PRICE_30M",
@@ -114,5 +119,6 @@ __all__ = [
     "KEY_GAMMA_ACCEL_5M",
     "KEY_CONSEC_LONG", "KEY_CONSEC_SHORT",
     "KEY_SKEW_WIDTH_5M",
+    "KEY_STRIKE_DELTA_5M", "KEY_ATR_5M",
     "CORE_KEYS", "DEPTH_KEYS", "ALL_KEYS",
 ]

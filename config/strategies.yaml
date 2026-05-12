@@ -350,6 +350,14 @@ layer3:
       min_confidence: 0.35
       max_confidence: 0.85
       min_data_points: 3
+      # v2 Liquidity-Momentum params
+      liquidity_vacuum_ratio: 3.0
+      delta_accel_threshold: 1.15
+      gamma_magnitude_threshold: 0.50
+      bounce_target_mult: 1.5
+      slice_target_mult: 2.0
+      atr_normalization_cap: 3.0
+      target_min_pct: 0.003
 
   theta_burn:
     enabled: true
