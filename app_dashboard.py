@@ -563,7 +563,6 @@ render_top_strikes(state)
 # Status footer
 render_status(state, signals)
 
-# Auto-refresh: st.rerun() triggers a full script rerun (Streamlit-native pattern).
-# Replaced blocking 'while True' loop — Streamlit scripts must complete normally.
-time.sleep(POLL_INTERVAL)
-st.rerun()
+# NOTE: Module-level while True + st.rerun() is not compatible with Streamlit's
+# execution model. Use @st.cache_data(ttl=POLL_INTERVAL) on functions that need
+# periodic refresh, or st_autorefresh from streamlit-autorefresh.
