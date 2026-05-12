@@ -89,6 +89,11 @@ strategies:
     span_rows: 1
   theta_burn:
     row: 3
+    col: 4
+    span_cols: 1
+    span_rows: 1
+  depth_decay_momentum:
+    row: 3
     col: 5
     span_cols: 1
     span_rows: 1

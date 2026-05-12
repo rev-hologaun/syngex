@@ -87,6 +87,13 @@ KEY_AGGRESSIVE_SELL_VOL_5M = "aggressive_sell_vol_5m"
 KEY_AF_5M = "aggression_flow_5m"
 KEY_TRADE_SIZE_5M = "trade_size_5m"
 
+# --- Depth Decay Momentum ---
+KEY_DEPTH_DECAY_BID_5M = "depth_decay_bid_5m"
+KEY_DEPTH_DECAY_ASK_5M = "depth_decay_ask_5m"
+KEY_DEPTH_TOP5_BID_5M = "depth_top5_bid_5m"
+KEY_DEPTH_TOP5_ASK_5M = "depth_top5_ask_5m"
+KEY_DEPTH_VOL_RATIO_5M = "depth_vol_ratio_5m"
+
 # --- Convenience: all core keys in one tuple ---
 CORE_KEYS = (
     KEY_PRICE_5M,
@@ -118,6 +125,15 @@ DEPTH_KEYS = (
     KEY_DEPTH_ASK_LEVELS_5M,
     KEY_DEPTH_BID_SIZE_ROLLING,
     KEY_DEPTH_ASK_SIZE_ROLLING,
+)
+
+# Depth Decay Momentum keys tuple
+DEPTH_DECAY_KEYS = (
+    KEY_DEPTH_DECAY_BID_5M,
+    KEY_DEPTH_DECAY_ASK_5M,
+    KEY_DEPTH_TOP5_BID_5M,
+    KEY_DEPTH_TOP5_ASK_5M,
+    KEY_DEPTH_VOL_RATIO_5M,
 )
 
 # VAMP Momentum keys tuple
@@ -154,7 +170,8 @@ ALL_KEYS = (*CORE_KEYS, *DEPTH_KEYS, KEY_FLOW_RATIO_5M,
             KEY_VAMP_5M, KEY_VAMP_MID_DEV_5M, KEY_VAMP_ROC_5M,
             KEY_VAMP_PARTICIPANTS_5M, KEY_VAMP_DEPTH_DENSITY_5M,
             KEY_OBI_5M, KEY_AGGRESSIVE_BUY_VOL_5M, KEY_AGGRESSIVE_SELL_VOL_5M,
-            KEY_AF_5M, KEY_TRADE_SIZE_5M)
+            KEY_AF_5M, KEY_TRADE_SIZE_5M,
+            *DEPTH_DECAY_KEYS)
 
 __all__ = [
     "KEY_PRICE_5M", "KEY_PRICE_30M",
@@ -180,5 +197,8 @@ __all__ = [
     "KEY_VAMP_PARTICIPANTS_5M", "KEY_VAMP_DEPTH_DENSITY_5M",
     "KEY_OBI_5M", "KEY_AGGRESSIVE_BUY_VOL_5M", "KEY_AGGRESSIVE_SELL_VOL_5M",
     "KEY_AF_5M", "KEY_TRADE_SIZE_5M",
-    "CORE_KEYS", "DEPTH_KEYS", "ALL_KEYS", "OBI_KEYS",
+    "KEY_DEPTH_DECAY_BID_5M", "KEY_DEPTH_DECAY_ASK_5M",
+    "KEY_DEPTH_TOP5_BID_5M", "KEY_DEPTH_TOP5_ASK_5M",
+    "KEY_DEPTH_VOL_RATIO_5M",
+    "CORE_KEYS", "DEPTH_KEYS", "DEPTH_DECAY_KEYS", "ALL_KEYS", "OBI_KEYS",
 ]

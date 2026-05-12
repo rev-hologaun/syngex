@@ -125,6 +125,11 @@ from strategies.rolling_keys import (
     KEY_VAMP_DEPTH_DENSITY_5M,
     KEY_PRICE_5M,
     KEY_PRICE_30M,
+    KEY_DEPTH_DECAY_BID_5M,
+    KEY_DEPTH_DECAY_ASK_5M,
+    KEY_DEPTH_TOP5_BID_5M,
+    KEY_DEPTH_TOP5_ASK_5M,
+    KEY_DEPTH_VOL_RATIO_5M,
 )
 from strategies.layer1 import (
     GammaWallBounce,
@@ -342,6 +347,12 @@ class SyngexOrchestrator:
             KEY_AGGRESSIVE_SELL_VOL_5M: RollingWindow(window_type="time", window_size=300),
             KEY_AF_5M: RollingWindow(window_type="time", window_size=300),
             KEY_TRADE_SIZE_5M: RollingWindow(window_type="time", window_size=300),
+            # Depth Decay Momentum rolling windows
+            KEY_DEPTH_DECAY_BID_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_DEPTH_DECAY_ASK_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_DEPTH_TOP5_BID_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_DEPTH_TOP5_ASK_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_DEPTH_VOL_RATIO_5M: RollingWindow(window_type="time", window_size=300),
         }
 
         # Call/put update counters for volume_up/volume_down tracking
@@ -1287,6 +1298,57 @@ class SyngexOrchestrator:
                         self._rolling_data[KEY_VAMP_MID_DEV_5M].push(vamp_mid_dev, ts)
                     if KEY_VAMP_ROC_5M in self._rolling_data:
                         self._rolling_data[KEY_VAMP_ROC_5M].push(vamp_roc, ts)
+
+                    # ── Depth Decay Momentum: compute depth ROC and top-level decay ──
+                    # Overall depth ROC (30s lookback using 5-tick window)
+                    bid_size_window = self._rolling_data.get(KEY_DEPTH_BID_SIZE_5M)
+                    ask_size_window = self._rolling_data.get(KEY_DEPTH_ASK_SIZE_5M)
+
+                    bid_depth_roc = 0.0
+                    ask_depth_roc = 0.0
+
+                    if bid_size_window and bid_size_window.count >= 5:
+                        old_bid = bid_size_window.values[-5]
+                        current_bid = bid_size_window.values[-1]
+                        if old_bid > 0:
+                            bid_depth_roc = (current_bid - old_bid) / old_bid
+
+                    if ask_size_window and ask_size_window.count >= 5:
+                        old_ask = ask_size_window.values[-5]
+                        current_ask = ask_size_window.values[-1]
+                        if old_ask > 0:
+                            ask_depth_roc = (current_ask - old_ask) / old_ask
+
+                    if KEY_DEPTH_DECAY_BID_5M in self._rolling_data:
+                        self._rolling_data[KEY_DEPTH_DECAY_BID_5M].push(bid_depth_roc, ts)
+                    if KEY_DEPTH_DECAY_ASK_5M in self._rolling_data:
+                        self._rolling_data[KEY_DEPTH_DECAY_ASK_5M].push(ask_depth_roc, ts)
+
+                    # Top-5 level depth (for magnitude gate)
+                    bid_levels = self._rolling_data.get("market_depth_agg", {}).get("bid_levels", [])
+                    ask_levels = self._rolling_data.get("market_depth_agg", {}).get("ask_levels", [])
+
+                    top5_bid_depth = sum(l["size"] for l in bid_levels[:5])
+                    top5_ask_depth = sum(l["size"] for l in ask_levels[:5])
+
+                    if KEY_DEPTH_TOP5_BID_5M in self._rolling_data:
+                        self._rolling_data[KEY_DEPTH_TOP5_BID_5M].push(top5_bid_depth, ts)
+                    if KEY_DEPTH_TOP5_ASK_5M in self._rolling_data:
+                        self._rolling_data[KEY_DEPTH_TOP5_ASK_5M].push(top5_ask_depth, ts)
+
+                    # Volume/depth ratio: track volume changes alongside depth changes
+                    volume_window = self._rolling_data.get(KEY_VOLUME_5M)
+                    if volume_window and volume_window.count >= 5:
+                        old_vol = volume_window.values[-5]
+                        current_vol = volume_window.values[-1]
+                        vol_change = abs(current_vol - old_vol)
+                        depth_change = abs((current_bid + current_ask) - (old_bid + old_ask)) if (old_bid and old_ask) else 0
+                        if depth_change > 0:
+                            vol_ratio = vol_change / depth_change
+                        else:
+                            vol_ratio = 0.0
+                        if KEY_DEPTH_VOL_RATIO_5M in self._rolling_data:
+                            self._rolling_data[KEY_DEPTH_VOL_RATIO_5M].push(vol_ratio, ts)
                     if KEY_VAMP_PARTICIPANTS_5M in self._rolling_data:
                         avg_participants = (
                             data.get("bid_avg_participants", 0) + data.get("ask_avg_participants", 0)
