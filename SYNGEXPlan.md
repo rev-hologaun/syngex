@@ -147,30 +147,49 @@
 
 | # | Strategy | Layer | Signal Type | Hold Time | Phase |
 |---|----------|-------|-------------|-----------|-------|
-| 1 | Gamma Wall Bounce | 1 | Mean Reversion | 15–30 min | 2 |
-| 2 | Magnet & Accelerate | 1 | Two-Phase | 5–60 min | 2 |
-| 3 | Gamma Flip Breakout | 1 | Regime Trend | 15–60 min | 2 |
-| 4 | Gamma Squeeze / Wall-Breaker | 1 | Momentum | 5–30 min | 2 |
-| 5 | GEX Imbalance | 1 | Positioning Bias | 15–45 min | 3 |
-| 6 | Confluence Reversal | 1 | Double-Stacked | 15–60 min | 3 |
+| 1 | gamma_wall_bounce | 1 | Mean Reversion | 15–30 min | 2 |
+| 2 | magnet_accelerate | 1 | Two-Phase | 5–60 min | 2 |
+| 3 | gamma_flip_breakout | 1 | Regime Trend | 15–60 min | 2 |
+| 4 | gamma_squeeze | 1 | Momentum | 5–30 min | 2 |
+| 5 | gex_imbalance | 1 | Positioning Bias | 15–45 min | 3 |
+| 6 | confluence_reversal | 1 | Double-Stacked | 15–60 min | 3 |
 | 7 | Net Gamma Regime Filter | 1 | Master Filter | N/A | 1 |
-| 8 | Vol Compression Range | 1 | Vol Selling | 30–120 min | 3 |
-| 9 | GEX Divergence | 2 | Fade | 15–60 min | 3 |
-| 10 | Delta-Gamma Squeeze | 2 | Extreme Momentum | 5–30 min | 4 |
-| 11 | Delta-Volume Exhaustion | 2 | Reversal | 15–45 min | 4 |
-| 12 | Call/Put Flow Asymmetry | 2 | Directional | 5–60 min | 4 |
-| 13 | Delta-IV Divergence | 2 | Sentiment Shift | 15–60 min | 4 |
-| 14 | IV-GEX Divergence | 2 | Vol Mean Reversion | 15–45 min | 4 |
-| 15 | IV Skew Squeeze | 2 | Sentiment Reversal | 1–4 hr | 6 |
-| 16 | Gamma-Volume Convergence | 3 | Ignition | 5–15 min | 5 |
-| 17 | IV Band Breakout | 3 | Breakout | 10–45 min | 5 |
-| 18 | Strike Concentration Scalp | 3 | Micro-Reaction | 3–15 min | 5 |
-| 19 | Theta-Burn Scalp | 3 | Pin Trading | 3–8 min | 5 |
-| 20 | Prob-Weighted Magnet | 3 | Stealth Accumulation | 15–45 min | 6 |
-| 21 | Prob Distribution Shift | 3 | Leading Indicator | 30min–2hr | 6 |
-| 22 | Extrinsic/Intrinsic Flow | 3 | Conviction Tracking | 15min–3hr | 6 |
+| 8 | vol_compression_range | 1 | Vol Selling | 30–120 min | 3 |
+| 9 | gex_divergence | 2 | Fade | 15–60 min | 3 |
+| 10 | delta_gamma_squeeze | 2 | Extreme Momentum | 5–30 min | 4 |
+| 11 | delta_volume_exhaustion | 2 | Reversal | 15–45 min | 4 |
+| 12 | call_put_flow_asymmetry | 2 | Directional | 5–60 min | 4 |
+| 13 | delta_iv_divergence | 2 | Sentiment Shift | 15–60 min | 4 |
+| 14 | iv_gex_divergence | 2 | Vol Mean Reversion | 15–45 min | 4 |
+| 15 | iv_skew_squeeze | 2 | Sentiment Reversal | 1–4 hr | 6 |
+| 16 | gamma_volume_convergence | 3 | Ignition | 5–15 min | 5 |
+| 17 | iv_band_breakout | 3 | Breakout | 10–45 min | 5 |
+| 18 | strike_concentration | 3 | Micro-Reaction | 3–15 min | 5 |
+| 19 | theta_burn | 3 | Pin Trading | 3–8 min | 5 |
+| 20 | prob_weighted_magnet | 2 | Stealth Accumulation | 15–45 min | 6 |
+| 21 | prob_distribution_shift | 2 | Leading Indicator | 30min–2hr | 6 |
+| 22 | extrinsic_intrinsic_flow | 2 | Conviction Tracking | 15min–3hr | 6 |
+| **NEW** | **exchange_flow_imbalance** | 2 | Venue-Aware Directional | 15–45 min | v1.95 |
+| **NEW** | **exchange_flow_asymmetry** | 2 | Venue-Signature | 15–60 min | v1.96 |
+| **NEW** | **depth_imbalance_momentum** | 2 | Depth Imbalance | 5–30 min | v1.97 |
+| **NEW** | **depth_decay_momentum** | 2 | Depth Decay | 5–30 min | v1.97 |
+| **NEW** | **obi_aggression_flow** | 2 | OBI + Aggression | 5–15 min | v1.97 |
+| **NEW** | **exchange_flow_concentration** | 2 | Exchange Dominance | 5–30 min | v1.97 |
+| **NEW** | **participant_diversity_conviction** | 2 | Participant Conviction | 15–60 min | v1.97 |
+| **NEW** | **participant_divergence_scalper** | 2 | Participant Divergence | 3–15 min | v1.97 |
+| **NEW** | **order_book_fragmentation** | 2 | OB Fragmentation | 3–15 min | v1.97 |
+| **NEW** | **order_book_stacking** | 2 | OB Stacking | 3–15 min | v1.97 |
+| **NEW** | **vortex_compression_breakout** | 2 | Vortex Compression | 5–30 min | v1.97 |
+| **NEW** | **extrinsic_flow** | 2 | Extrinsic Flow | 15–45 min | v1.97 |
+| **NEW** | **ghost_premium** | 2 | Ghost Premium | 15–45 min | v1.97 |
+| **NEW** | **gamma_breaker** | 2 | Gamma Breaker | 5–30 min | v1.97 |
+| **NEW** | **iron_anchor** | 2 | Iron Anchor | 15–60 min | v1.97 |
+| **NEW** | **skew_dynamics** | 2 | Skew Dynamics | 15–45 min | v1.97 |
+| **NEW** | **smile_dynamics** | 2 | Smile Dynamics | 15–45 min | v1.97 |
+| **NEW** | **sentiment_sync** | 2 | Sentiment Sync | 15–60 min | v1.97 |
+| **NEW** | **whale_tracker** | 2 | Whale Tracker | 15–60 min | v1.97 |
 
-**Total: 22 strategies + 1 sub-strategy (Magnet Zone Scalp)**
+**Total: 41 strategies (22 original + 19 new) — 100% implemented**
 
 ---
 
@@ -264,6 +283,10 @@ syngex/
 | **Phase A** | ✅ | 2026-05-03 | 2026-05-03 | **Heatmap Dashboard** — `app_heatmap.py` (Flask+SocketIO), `heatmap.html` (6-col grid, status LEDs, sparklines), file-based decoupling, SignalTracker stats, health classification, connection status. v1.5. |
 | **Val2** | ✅ | 2026-05-05 | 2026-05-05 | **Val2 Optimization** — All 22 strategies: cooldowns removed, MIN_CONFIDENCE 0.35→0.25, trend/regime metadata added, bidirectional expansion, regime/trend filters. 19 fixes + 1 bug fix. v1.72. |
 | **v1.90** | ✅ | 2026-05-11 | 2026-05-11 | **Conviction-Master & All Strategies v2** — 6 strategies upgraded to v2 with hard gates + 7-component confidence. Level2/TotalView data pipeline. Extrinsic ROC, Aggressor Volume, Delta-Skew Coupling, IV-Scaled Targets. MIN_CONFIDENCE 0.25→0.35. v1.90. |
+| **v1.95** | ✅ | 2026-05-12 | 2026-05-12 | **Exchange Flow Imbalance** — Venue-aware directional strategy (MEMX+BATS aggressor, IEX passive). VSI, VSI ROC, IEX intent score, venue concentration. 4 hard gates, 7-component confidence. |
+| **v1.96** | ✅ | 2026-05-12 | 2026-05-12 | **Exchange Flow Asymmetry** — Venue-signature tracking (MEMX=accumulation, BATS=momentum). ESI, baseline deviation, volume ratio. 3 hard gates, 5-component confidence. |
+| **v1.97** | ✅ | 2026-05-12 | 2026-05-12 | **19 new strategies** — exchange_flow_imbalance, exchange_flow_asymmetry, depth_decay_momentum, depth_imbalance_momentum, obi_aggression_flow, exchange_flow_concentration, participant_diversity_conviction, participant_divergence_scalper, order_book_fragmentation, order_book_stacking, vortex_compression_breakout, extrinsic_flow, ghost_premium, gamma_breaker, iron_anchor, skew_dynamics, smile_dynamics, sentiment_sync, whale_tracker. |
+| **v1.98** | ✅ | 2026-05-12 | 2026-05-12 | **Heatmap reorganization** — 41 strategies repositioned into 7-row logical grouping: Core GEX, GEX Alpha, Flow/Microstructure, Exchange/Order Book, Volatility Surface, Volume/Sentiment, Confluence. 6 cols × 7 rows = 42 slots. |
 
 **Total: 22/22 strategies complete (100%) | v1.90 — 6 strategies upgraded to v2 architectures, Level2/TotalView data pipeline added**
 
@@ -613,8 +636,7 @@ All 12 dormant layer2/3/full_data strategies should now fire on next run.
 
 | Priority | Task | Notes |
 |----------|------|-------|
-| 🔴 High | **Validate existing v1.90 strategies** | Run all 22 strategies (6 with v2 upgrades) in live market. Compare v1.90 signals vs v1.72 baseline. Monitor for false positives/negatives. |
-| 🔴 High | **Create new strategies** | Build additional strategies beyond the 22 — leverage the new Level2/TotalView/BATS data layers. Ideas: order book imbalance, aggressive flow clustering, IV term structure breaks. |
+| 🔴 High | **Collect 1 day of trading data and perform validation of all 41 strategies** | Run all 41 strategies across the full symbol universe. Collect signal data, track outcomes, compute per-strategy win rates and P&L. Compare new strategies (v1.95–v1.97) against baseline from May 4 run. Identify which strategies actually produce profitable signals. |
 | 🟡 Medium | **Production deployment** | Apply 70%+ confidence filter, re-enable cooldowns, apply regime/trend gates per `val2plan.md` |
 | 🟡 Medium | **TSLA/META symbol-specific tuning** | Either exclude or create symbol-specific parameter sets |
 | 🟢 Low | **Future — Backtesting framework** | Use signal_outcomes.jsonl for historical strategy performance analysis |
@@ -784,4 +806,4 @@ ByteDance's super agent harness uses an 18-middleware chain on its lead agent. E
 
 ---
 
-*Last updated: 2026-05-11 — v1.90 — 6 strategies upgraded to v2 with hard gates + 7-component confidence scoring. Level2/TotalView data pipeline added. orb_probe.py demonstrates new stream format. Next: Live validation of v1.90 strategies, then build new strategies leveraging Level2/TotalView/BATS data layers.*
+*Last updated: 2026-05-12 — 41 strategies across 7 heatmap rows. v1.95–v1.97 added 19 new strategies (exchange flow, depth, OB, participant, volatility surface, sentiment). Next: Collect 1 day of trading data and perform validation of all 41 strategies.*
