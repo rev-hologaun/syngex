@@ -30,3 +30,32 @@
 192.168.50.147 - - [12/May/2026 06:19:34] "POST /socket.io/?EIO=4&transport=polling&t=PuSLy9l&sid=qmUSEMdmx7_VSffmAAAA HTTP/1.1" 200 -
 192.168.50.147 - - [12/May/2026 06:19:34] "GET /socket.io/?EIO=4&transport=polling&t=PuSLy9l.0&sid=UyVEMwzJxABowmJiAAAA HTTP/1.1" 200 -
 192.168.50.147 - - [12/May/2026 06:19:34] "GET /socket.io/?EIO=4&transport=polling&t=PuSLy9l.0&sid=qmUSEMdmx7_VSffmAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [12/May/2026 06:37:38] "GET / HTTP/1.1" 200 -
+192.168.50.147 - - [12/May/2026 06:37:38] "GET /socket.io/?EIO=4&transport=websocket&sid=UyVEMwzJxABowmJiAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [12/May/2026 06:37:38] "GET /socket.io/?EIO=4&transport=polling&t=PuSQ4kC HTTP/1.1" 200 -
+192.168.50.147 - - [12/May/2026 06:37:38] "POST /socket.io/?EIO=4&transport=polling&t=PuSQ4kQ&sid=Oat8kkTS4igvzJyrAAAC HTTP/1.1" 200 -
+192.168.50.147 - - [12/May/2026 06:37:38] "GET /socket.io/?EIO=4&transport=polling&t=PuSQ4kQ.0&sid=Oat8kkTS4igvzJyrAAAC HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8201
+ * Running on http://192.168.50.97:8201
+[33mPress CTRL+C to quit[0m
+192.168.50.147 - - [12/May/2026 06:39:57] "GET /socket.io/?EIO=4&transport=polling&t=PuSQcdV HTTP/1.1" 200 -
+192.168.50.147 - - [12/May/2026 06:39:57] "POST /socket.io/?EIO=4&transport=polling&t=PuSQclo&sid=kMmUaS5J62Vi0Yx9AAAA HTTP/1.1" 200 -
+192.168.50.147 - - [12/May/2026 06:39:57] "GET /socket.io/?EIO=4&transport=polling&t=PuSQclp&sid=kMmUaS5J62Vi0Yx9AAAA HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8211
+ * Running on http://192.168.50.97:8211
+[33mPress CTRL+C to quit[0m
+192.168.50.147 - - [12/May/2026 06:40:04] "GET /socket.io/?EIO=4&transport=polling&t=PuSQeCd HTTP/1.1" 200 -
+192.168.50.147 - - [12/May/2026 06:40:04] "POST /socket.io/?EIO=4&transport=polling&t=PuSQeSm&sid=1JrCWmm-ndJX8JsnAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [12/May/2026 06:40:04] "GET /socket.io/?EIO=4&transport=polling&t=PuSQeSn&sid=1JrCWmm-ndJX8JsnAAAA HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8261
+ * Running on http://192.168.50.97:8261
+[33mPress CTRL+C to quit[0m
+192.168.50.147 - - [12/May/2026 06:40:09] "GET /socket.io/?EIO=4&transport=polling&t=PuSQfgR HTTP/1.1" 200 -
+192.168.50.147 - - [12/May/2026 06:40:09] "POST /socket.io/?EIO=4&transport=polling&t=PuSQfkq&sid=GOFCASarMys0aW2hAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [12/May/2026 06:40:09] "GET /socket.io/?EIO=4&transport=polling&t=PuSQfkq.0&sid=GOFCASarMys0aW2hAAAA HTTP/1.1" 200 -
