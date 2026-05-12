@@ -4,9 +4,10 @@ grid:
   columns: 6
   rows: 8
 
-# Strategy placement in the 6×4 grid
+# Strategy placement in the 6×8 grid
 # Each strategy maps to its YAML config key → grid position
 strategies:
+  # Row 1: Layer 1 — Core GEX
   gamma_wall_bounce:
     row: 1
     col: 1
@@ -37,6 +38,7 @@ strategies:
     col: 6
     span_cols: 1
     span_rows: 1
+  # Row 2: Layer 1/2 Alpha
   vol_compression_range:
     row: 2
     col: 1
@@ -67,6 +69,7 @@ strategies:
     col: 6
     span_cols: 1
     span_rows: 1
+  # Row 3: Layer 2/3 Microstructure
   iv_gex_divergence:
     row: 3
     col: 1
@@ -87,11 +90,6 @@ strategies:
     col: 4
     span_cols: 1
     span_rows: 1
-  theta_burn:
-    row: 4
-    col: 5
-    span_cols: 1
-    span_rows: 1
   depth_decay_momentum:
     row: 3
     col: 5
@@ -102,32 +100,39 @@ strategies:
     col: 6
     span_cols: 1
     span_rows: 1
+  # Row 4: Layer 2 Advanced + Full Data
   depth_imbalance_momentum:
-    row: 4
-    col: 6
-    span_cols: 1
-    span_rows: 1
-  iv_skew_squeeze:
     row: 4
     col: 1
     span_cols: 1
     span_rows: 1
-  prob_weighted_magnet:
+  exchange_flow_concentration:
     row: 4
     col: 2
     span_cols: 1
     span_rows: 1
-  prob_distribution_shift:
+  iv_skew_squeeze:
     row: 4
     col: 3
     span_cols: 1
     span_rows: 1
-  extrinsic_intrinsic_flow:
+  prob_weighted_magnet:
     row: 4
     col: 4
     span_cols: 1
     span_rows: 1
-  exchange_flow_concentration:
+  prob_distribution_shift:
+    row: 4
+    col: 5
+    span_cols: 1
+    span_rows: 1
+  extrinsic_intrinsic_flow:
+    row: 4
+    col: 6
+    span_cols: 1
+    span_rows: 1
+  # Row 5: Full Data remainder
+  theta_burn:
     row: 5
     col: 1
     span_cols: 1
@@ -155,7 +160,7 @@ thresholds:
   idle_threshold_seconds: 300
   bleeding_pnl: -100.0
   bleeding_win_rate: 0.35
-  near_zero_pnl: 10.0  # absolute value
+  near_zero_pnl: 10.0
 
 # Color palette
 colors:
