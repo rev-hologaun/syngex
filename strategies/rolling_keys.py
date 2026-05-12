@@ -32,6 +32,9 @@ KEY_DEPTH_ASK_LEVELS_5M = "depth_ask_levels_5m"
 KEY_DEPTH_BID_SIZE_ROLLING = "depth_bid_size_rolling"
 KEY_DEPTH_ASK_SIZE_ROLLING = "depth_ask_size_rolling"
 
+# --- Flow ratio tracking (call_put_flow_asymmetry v2) ---
+KEY_FLOW_RATIO_5M = "flow_ratio_5m"
+
 # --- Strategy-specific keys (created by individual strategies) ---
 KEY_EXTRINSIC_PROXY_5M = "extrinsic_proxy_5m"
 KEY_PROB_MOMENTUM_5M = "prob_momentum_5m"
@@ -68,7 +71,8 @@ DEPTH_KEYS = (
 )
 
 # All keys in one tuple for validation
-ALL_KEYS = (*CORE_KEYS, *DEPTH_KEYS, KEY_EXTRINSIC_PROXY_5M, KEY_PROB_MOMENTUM_5M,
+ALL_KEYS = (*CORE_KEYS, *DEPTH_KEYS, KEY_FLOW_RATIO_5M,
+            KEY_EXTRINSIC_PROXY_5M, KEY_PROB_MOMENTUM_5M,
             KEY_CONSEC_LONG, KEY_CONSEC_SHORT,
             KEY_DEPTH_BID_SIZE_ROLLING, KEY_DEPTH_ASK_SIZE_ROLLING)
 
@@ -78,6 +82,7 @@ __all__ = [
     "KEY_VOLUME_5M", "KEY_VOLUME_DOWN_5M", "KEY_VOLUME_UP_5M",
     "KEY_TOTAL_DELTA_5M", "KEY_WALL_DELTA_5M", "KEY_TOTAL_GAMMA_5M", "KEY_IV_SKEW_5M",
     "KEY_ATM_DELTA_5M", "KEY_ATM_IV_5M",
+    "KEY_FLOW_RATIO_5M",
     "KEY_DEPTH_BID_SIZE_5M", "KEY_DEPTH_ASK_SIZE_5M", "KEY_DEPTH_SPREAD_5M",
     "KEY_DEPTH_BID_LEVELS_5M", "KEY_DEPTH_ASK_LEVELS_5M",
     "KEY_DEPTH_BID_SIZE_ROLLING", "KEY_DEPTH_ASK_SIZE_ROLLING",

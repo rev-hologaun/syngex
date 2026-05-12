@@ -247,6 +247,7 @@ class SyngexOrchestrator:
             KEY_VOLUME_DOWN_5M: RollingWindow(window_type="time", window_size=300),
             KEY_TOTAL_GAMMA_5M: RollingWindow(window_type="time", window_size=300),
             KEY_IV_SKEW_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_FLOW_RATIO_5M: RollingWindow(window_type="time", window_size=300),
             KEY_EXTRINSIC_PROXY_5M: RollingWindow(window_type="time", window_size=300),
             KEY_PROB_MOMENTUM_5M: RollingWindow(window_type="time", window_size=300),
             # Depth / L2 rolling windows
@@ -751,6 +752,35 @@ class SyngexOrchestrator:
                     atm_iv = self._calculator.get_iv_by_strike(atm_strike)
                     if atm_iv is not None and KEY_ATM_IV_5M in self._rolling_data:
                         self._rolling_data[KEY_ATM_IV_5M].push(atm_iv)
+
+                # Push flow_ratio to rolling window for call_put_flow_asymmetry v2
+                try:
+                    call_score = 0.0
+                    put_score = 0.0
+                    for strike_str, strike_data in gex_summary.items():
+                        call_oi = strike_data.get("call_oi", 0)
+                        call_gamma = strike_data.get("call_gamma", 0)
+                        call_delta = abs(strike_data.get("call_delta_sum", 0))
+                        if call_oi > 0 and call_gamma > 0 and call_delta > 0.01:
+                            call_score += call_oi * call_gamma * call_delta
+
+                        put_oi = strike_data.get("put_oi", 0)
+                        put_gamma = strike_data.get("put_gamma", 0)
+                        put_delta = abs(strike_data.get("put_delta_sum", 0))
+                        if put_oi > 0 and put_gamma > 0 and put_delta > 0.01:
+                            put_score += put_oi * put_gamma * put_delta
+
+                    if put_score > 0:
+                        flow_ratio = call_score / put_score
+                    elif call_score > 0:
+                        flow_ratio = float("inf")
+                    else:
+                        flow_ratio = 0.0
+
+                    if KEY_FLOW_RATIO_5M in self._rolling_data:
+                        self._rolling_data[KEY_FLOW_RATIO_5M].push(flow_ratio)
+                except Exception:
+                    pass
 
             # ── Depth data capture (L2/TotalView) ──
             msg_type = data.get("type", "")
