@@ -13,7 +13,7 @@ Syngex is a well-architected options-trading signal pipeline with 41 strategies 
 
 | Severity | Count |
 |----------|-------|
-| 🔴 Critical | 2 ✅(1 fixed) |
+| 🔴 Critical | 3 ✅(3 fixed) |
 | 🟡 Significant | 6 |
 | 🟠 Moderate | 8 |
 | 🔵 Minor | 12 |
@@ -26,8 +26,8 @@ Syngex is a well-architected options-trading signal pipeline with 41 strategies 
 | Issue | Status | Date | Details |
 |-------|--------|------|---------|
 | **C1** | ✅ **FIXED** | 2026-05-12 | `depth_snapshot` now properly populated by orchestrator (lines 2569-2570 in `main.py`) + strategy guard simplified (`gamma_wall_bounce.py` lines 168, 292) |
-| C2 | ⏳ PENDING | — | `duration_seconds` infinite loop in `orb_probe.py` |
-| C3 | ⏳ PENDING | — | Duplicate signal logging |
+| **C2** | ✅ **FIXED** | 2026-05-12 | `duration_seconds` countdown replaced with `time.monotonic()` deadline in all 4 `collect_*` functions (`orb_probe.py`) |
+| **C3** | ✅ **FIXED** | 2026-05-12 | Removed duplicate global signal logging from `SignalTracker._log_signal_to_disk()` — `StrategyEngine` is sole writer to `signals.jsonl` |
 | S1-S6 | ⏳ PENDING | — | Significant issues |
 | M1-M12 | ⏳ PENDING | — | Moderate issues |
 | D1-D12 | ⏳ PENDING | — | Minor issues |
