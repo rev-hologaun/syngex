@@ -48,7 +48,7 @@ logger = logging.getLogger("Syngex.Strategies.GammaSqueeze")
 # Constants
 # ---------------------------------------------------------------------------
 
-PIN_ATR_PCT = 0.003           # 0.3% — max range for pin detection
+PIN_MAX_RANGE_PCT = 0.003     # 0.3% — max rolling range for pin detection
 WALL_PROXIMITY_PCT = 0.003    # 0.3% — price must be near wall for breakout
 VOLUME_SURGE_MULT = 1.5       # 1.5× average volume = confirmation
 MIN_WALL_GEX = 500000         # Minimum |GEX| for wall consideration
@@ -195,7 +195,7 @@ class GammaSqueeze(BaseStrategy):
             return False
 
         atr_pct = price_window.range / price
-        if atr_pct > PIN_ATR_PCT:
+        if atr_pct > PIN_MAX_RANGE_PCT:
             return False
 
         # Condition 2: Positive net gamma

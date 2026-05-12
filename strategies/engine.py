@@ -103,7 +103,6 @@ class EngineConfig:
     """Configuration for the StrategyEngine."""
     min_confidence: float = 0.40       # Minimum confidence to pass the filter
     max_signals_per_tick: int = 10     # Prevent signal spam
-    signal_log_path: str = "log/signals.jsonl"
     dedup_window_seconds: float = 60.0  # Don't repeat same strategy signal within this window
 
 
@@ -119,7 +118,11 @@ class StrategyEngine:
         5. Stop: engine.stop()
     """
 
-    def __init__(self, config: Optional[EngineConfig] = None) -> None:
+    def __init__(
+        self,
+        config: Optional[EngineConfig] = None,
+        signal_tracker: Any = None,
+    ) -> None:
         self.config = config or EngineConfig()
         self._strategies: List[BaseStrategy] = []
         self._filter_callback: Optional[Callable[[Signal], bool]] = None
@@ -133,9 +136,8 @@ class StrategyEngine:
         self._recent_signals: List[Dict[str, Any]] = []  # last N signal dicts
         self._recent_buffer_size: int = 200  # keep up to 200 recent signals in memory
 
-        # Ensure log directory exists
-        log_path = Path(self.config.signal_log_path)
-        log_path.parent.mkdir(parents=True, exist_ok=True)
+        # Signal tracker for per-symbol logging (delegates all signal writes)
+        self._signal_tracker = signal_tracker
 
         logger.info("StrategyEngine initialized (min_confidence=%.2f, max_per_tick=%d)",
                      self.config.min_confidence, self.config.max_signals_per_tick)
@@ -460,8 +462,8 @@ class StrategyEngine:
         Layer hierarchy:
             layer1 (structural)  -> 1
             layer2 (alpha)       -> 2
-            layer3 (sentiment)   -> 3
-            full_data (ML)       -> 4
+            layer3 (Micro-Signal) -> 3
+            full_data (IV/Prob/Skew) -> 4
         """
         priority_map = {
             "layer1": 1,
@@ -504,13 +506,19 @@ class StrategyEngine:
     # ------------------------------------------------------------------
 
     def _log_signal(self, signal: Signal) -> None:
-        """Append signal to JSONL log file for backtesting."""
-        try:
-            log_path = Path(self.config.signal_log_path)
-            with open(log_path, "a") as f:
-                f.write(json.dumps(signal.to_dict()) + "\n")
-        except Exception as exc:
-            logger.warning("Failed to log signal: %s", exc)
+        """Delegate signal logging to the SignalTracker (per-symbol log).
+
+        The SignalTracker owns all signal persistence — it writes to
+        log/signals_{SYMBOL}.jsonl with full fields (signal_id, symbol,
+        strategy_id, etc.). No global log is maintained.
+        """
+        if self._signal_tracker is not None:
+            try:
+                self._signal_tracker.track(signal.to_dict())
+            except Exception as exc:
+                logger.warning("Failed to log signal via tracker: %s", exc)
+        else:
+            logger.warning("SignalTracker not configured — signal not logged: %s", signal.strategy_id)
 
     # ------------------------------------------------------------------
     # Status

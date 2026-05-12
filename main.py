@@ -285,6 +285,9 @@ class SyngexOrchestrator:
     # How often (seconds) to log the Gamma Profile
     PROFILE_INTERVAL: float = 5.0
 
+    # How often (seconds) to persist phi accumulators to disk
+    PHI_WRITE_INTERVAL: float = 5.0
+
     def __init__(
         self, symbol: str, mode: str = "stream", port: int = 8501
     ) -> None:
@@ -359,7 +362,6 @@ class SyngexOrchestrator:
 
         # Signal tracker for outcome resolution (symbol-specific log)
         log_dir = self._data_dir.parent / "log"
-        signal_log_path = str(log_dir / "signals.jsonl")  # global master ledger
         self._signal_tracker = SignalTracker(
             max_hold_seconds=900,  # global default
             strategy_hold_times=strategy_hold_times,
@@ -373,11 +375,9 @@ class SyngexOrchestrator:
             config=EngineConfig(
                 min_confidence=global_config.get("min_confidence", 0.35),
                 max_signals_per_tick=global_config.get("max_signals_per_tick", 10),
-                signal_log_path=global_config.get(
-                    "signal_log_path", str(self._data_dir.parent / "log" / "signals.jsonl")
-                ),
                 dedup_window_seconds=global_config.get("dedup_window_seconds", 60.0),
-            )
+            ),
+            signal_tracker=self._signal_tracker,
         )
         # Register strategies from config (config-driven, not hardcoded)
         self._register_strategies_from_config()
@@ -409,6 +409,9 @@ class SyngexOrchestrator:
 
         # Crash-recovery state file for phi accumulators (symbol-specific)
         self._phi_state_file = self._data_dir / f"phi_state_{self.symbol}.json"
+
+        # Phi write throttle — rate-limit disk writes to avoid excessive I/O
+        self._phi_last_write: float = 0.0  # time.time() of last successful write
 
         # Load persisted phi accumulators (crash recovery)
         self._load_phi_accumulators()
@@ -560,8 +563,6 @@ class SyngexOrchestrator:
                     self._strategy_engine.config.min_confidence = global_cfg.get("min_confidence", 0.35)
                     self._strategy_engine.config.max_signals_per_tick = global_cfg.get("max_signals_per_tick", 10)
                     self._strategy_engine.config.dedup_window_seconds = global_cfg.get("dedup_window_seconds", 60.0)
-                    log_path = global_cfg.get("signal_log_path", "log/signals.jsonl")
-                    self._strategy_engine.config.signal_log_path = str(self._data_dir.parent / log_path)
 
                 # Apply per-strategy params
                 for layer in ["layer1", "layer2", "layer3", "full_data"]:
@@ -2824,9 +2825,14 @@ class SyngexOrchestrator:
     def _persist_phi_accumulators(self) -> None:
         """Write current phi tick accumulators to a JSON file for crash recovery.
 
-        Called after each tick commit so a mid-tick crash restores
-        accumulated values on restart rather than losing them.
+        Rate-limited: only writes if PHI_WRITE_INTERVAL seconds have elapsed
+        since the last write. This avoids excessive disk I/O during high-
+        frequency streaming while still preserving accumulators on crash.
         """
+        now = time.time()
+        if now - self._phi_last_write < self.PHI_WRITE_INTERVAL:
+            return
+
         try:
             self._data_dir.mkdir(parents=True, exist_ok=True)
             state = {
@@ -2835,6 +2841,7 @@ class SyngexOrchestrator:
             }
             with open(self._phi_state_file, "w") as f:
                 json.dump(state, f)
+            self._phi_last_write = now
         except Exception as exc:
             logger.debug("Failed to persist phi accumulators: %s", exc)
 

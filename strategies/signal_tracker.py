@@ -78,8 +78,6 @@ class SignalTracker:
         resolved = tracker.get_resolved()  # Get resolved signals
     """
 
-    MAX_HOLD_SECONDS = 900  # 15 minutes default for most strategies
-
     def __init__(
         self,
         max_hold_seconds: int = 900,
@@ -185,10 +183,9 @@ class SignalTracker:
         }
         json_line = json.dumps(log_entry) + "\n"
 
-        # 1. Per-symbol log: log/signals_{SYMBOL}.jsonl
-        # Note: Global master ledger (log/signals.jsonl) is written by
-        # StrategyEngine._log_signal() only — SignalTracker owns per-symbol
-        # and outcome tracking, not the global signal log.
+        # Per-symbol log: log/signals_{SYMBOL}.jsonl
+        # SignalTracker owns all signal persistence — no global log.
+        # StrategyEngine._log_signal() delegates here via track().
         try:
             sym_path = self._log_dir / f"signals_{self._symbol}.jsonl"
             with open(sym_path, "a") as f:

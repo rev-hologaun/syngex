@@ -7,7 +7,6 @@ global:
   min_confidence: 0.35
   max_signals_per_tick: 10
   dedup_window_seconds: 60
-  signal_log_path: "log/signals.jsonl"
 
 # Layer 1: Structural (GEX + OHLC) — 8 strategies
 layer1:
