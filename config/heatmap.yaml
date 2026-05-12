@@ -57,14 +57,14 @@ strategies:
     col: 4
     span_cols: 1
     span_rows: 1
-  vamp_momentum:
+  obi_aggression_flow:
     row: 2
-    col: 6
+    col: 5
     span_cols: 1
     span_rows: 1
   call_put_flow_asymmetry:
     row: 2
-    col: 5
+    col: 6
     span_cols: 1
     span_rows: 1
   iv_gex_divergence:
@@ -92,6 +92,11 @@ strategies:
     col: 5
     span_cols: 1
     span_rows: 1
+  vamp_momentum:
+    row: 3
+    col: 6
+    span_cols: 1
+    span_rows: 1
   iv_skew_squeeze:
     row: 4
     col: 1
@@ -110,11 +115,6 @@ strategies:
   extrinsic_intrinsic_flow:
     row: 4
     col: 4
-    span_cols: 1
-    span_rows: 1
-  vamp_momentum:
-    row: 2
-    col: 6
     span_cols: 1
     span_rows: 1
 

@@ -80,6 +80,13 @@ KEY_VAMP_ROC_5M = "vamp_roc_5m"
 KEY_VAMP_PARTICIPANTS_5M = "vamp_participants_5m"
 KEY_VAMP_DEPTH_DENSITY_5M = "vamp_depth_density_5m"
 
+# --- OBI + Aggression Flow ---
+KEY_OBI_5M = "obi_5m"
+KEY_AGGRESSIVE_BUY_VOL_5M = "aggressive_buy_vol_5m"
+KEY_AGGRESSIVE_SELL_VOL_5M = "aggressive_sell_vol_5m"
+KEY_AF_5M = "aggression_flow_5m"
+KEY_TRADE_SIZE_5M = "trade_size_5m"
+
 # --- Convenience: all core keys in one tuple ---
 CORE_KEYS = (
     KEY_PRICE_5M,
@@ -122,6 +129,15 @@ VAMP_KEYS = (
     KEY_VAMP_DEPTH_DENSITY_5M,
 )
 
+# OBI + Aggression Flow keys tuple
+OBI_KEYS = (
+    KEY_OBI_5M,
+    KEY_AGGRESSIVE_BUY_VOL_5M,
+    KEY_AGGRESSIVE_SELL_VOL_5M,
+    KEY_AF_5M,
+    KEY_TRADE_SIZE_5M,
+)
+
 # All keys in one tuple for validation
 ALL_KEYS = (*CORE_KEYS, *DEPTH_KEYS, KEY_FLOW_RATIO_5M,
             KEY_EXTRINSIC_PROXY_5M, KEY_EXTRINSIC_ROC_5M, KEY_PROB_MOMENTUM_5M,
@@ -136,7 +152,9 @@ ALL_KEYS = (*CORE_KEYS, *DEPTH_KEYS, KEY_FLOW_RATIO_5M,
             KEY_MAGNET_DELTA_5M,
             KEY_MOMENTUM_ROC_5M,
             KEY_VAMP_5M, KEY_VAMP_MID_DEV_5M, KEY_VAMP_ROC_5M,
-            KEY_VAMP_PARTICIPANTS_5M, KEY_VAMP_DEPTH_DENSITY_5M)
+            KEY_VAMP_PARTICIPANTS_5M, KEY_VAMP_DEPTH_DENSITY_5M,
+            KEY_OBI_5M, KEY_AGGRESSIVE_BUY_VOL_5M, KEY_AGGRESSIVE_SELL_VOL_5M,
+            KEY_AF_5M, KEY_TRADE_SIZE_5M)
 
 __all__ = [
     "KEY_PRICE_5M", "KEY_PRICE_30M",
@@ -160,5 +178,7 @@ __all__ = [
     "KEY_MOMENTUM_ROC_5M",
     "KEY_VAMP_5M", "KEY_VAMP_MID_DEV_5M", "KEY_VAMP_ROC_5M",
     "KEY_VAMP_PARTICIPANTS_5M", "KEY_VAMP_DEPTH_DENSITY_5M",
-    "CORE_KEYS", "DEPTH_KEYS", "ALL_KEYS",
+    "KEY_OBI_5M", "KEY_AGGRESSIVE_BUY_VOL_5M", "KEY_AGGRESSIVE_SELL_VOL_5M",
+    "KEY_AF_5M", "KEY_TRADE_SIZE_5M",
+    "CORE_KEYS", "DEPTH_KEYS", "ALL_KEYS", "OBI_KEYS",
 ]

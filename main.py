@@ -76,7 +76,56 @@ from engine.dashboard import SyngexDashboard
 from strategies.engine import StrategyEngine, EngineConfig
 from strategies.filters.net_gamma_filter import NetGammaFilter
 from strategies.rolling_window import RollingWindow
-from strategies.rolling_keys import *
+from strategies.rolling_keys import (
+    KEY_OBI_5M,
+    KEY_AGGRESSIVE_BUY_VOL_5M,
+    KEY_AGGRESSIVE_SELL_VOL_5M,
+    KEY_AF_5M,
+    KEY_TRADE_SIZE_5M,
+    KEY_ATM_DELTA_5M,
+    KEY_ATM_IV_5M,
+    KEY_VOLUME_5M,
+    KEY_VOLUME_DOWN_5M,
+    KEY_VOLUME_UP_5M,
+    KEY_NET_GAMMA_5M,
+    KEY_TOTAL_DELTA_5M,
+    KEY_WALL_DELTA_5M,
+    KEY_TOTAL_GAMMA_5M,
+    KEY_IV_SKEW_5M,
+    KEY_SKEW_WIDTH_5M,
+    KEY_FLOW_RATIO_5M,
+    KEY_EXTRINSIC_PROXY_5M,
+    KEY_EXTRINSIC_ROC_5M,
+    KEY_PROB_MOMENTUM_5M,
+    KEY_IV_SKEW_GRADIENT_5M,
+    KEY_GAMMA_DENSITY_5M,
+    KEY_OTM_DELTA_5M,
+    KEY_OTM_IV_5M,
+    KEY_DELTA_IV_CORR_5M,
+    KEY_GAMMA_ACCEL_5M,
+    KEY_CONSEC_LONG,
+    KEY_CONSEC_SHORT,
+    KEY_DEPTH_BID_SIZE_5M,
+    KEY_DEPTH_ASK_SIZE_5M,
+    KEY_DEPTH_SPREAD_5M,
+    KEY_DEPTH_BID_LEVELS_5M,
+    KEY_DEPTH_ASK_LEVELS_5M,
+    KEY_DEPTH_BID_SIZE_ROLLING,
+    KEY_DEPTH_ASK_SIZE_ROLLING,
+    KEY_SKEW_ROC_5M,
+    KEY_DELTA_ROC_5M,
+    KEY_STRIKE_DELTA_5M,
+    KEY_ATR_5M,
+    KEY_MAGNET_DELTA_5M,
+    KEY_MOMENTUM_ROC_5M,
+    KEY_VAMP_5M,
+    KEY_VAMP_MID_DEV_5M,
+    KEY_VAMP_ROC_5M,
+    KEY_VAMP_PARTICIPANTS_5M,
+    KEY_VAMP_DEPTH_DENSITY_5M,
+    KEY_PRICE_5M,
+    KEY_PRICE_30M,
+)
 from strategies.layer1 import (
     GammaWallBounce,
     MagnetAccelerate,
@@ -93,6 +142,7 @@ from strategies.layer2 import (
     CallPutFlowAsymmetry,
     IVGEXDivergence,
     VampMomentum,
+    ObiAggressionFlow,
 )
 from strategies.layer2.delta_iv_divergence import DeltaIVDivergence
 from strategies.layer3 import (
@@ -286,6 +336,12 @@ class SyngexOrchestrator:
             KEY_VAMP_ROC_5M: RollingWindow(window_type="time", window_size=300),
             KEY_VAMP_PARTICIPANTS_5M: RollingWindow(window_type="time", window_size=300),
             KEY_VAMP_DEPTH_DENSITY_5M: RollingWindow(window_type="time", window_size=300),
+            # OBI + Aggression Flow rolling windows
+            KEY_OBI_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_AGGRESSIVE_BUY_VOL_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_AGGRESSIVE_SELL_VOL_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_AF_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_TRADE_SIZE_5M: RollingWindow(window_type="time", window_size=300),
         }
 
         # Call/put update counters for volume_up/volume_down tracking
@@ -553,6 +609,7 @@ class SyngexOrchestrator:
                 "iv_gex_divergence": IVGEXDivergence,
                 "delta_iv_divergence": DeltaIVDivergence,
                 "vamp_momentum": VampMomentum,
+                "obi_aggression_flow": ObiAggressionFlow,
             },
             "layer3": {
                 "gamma_volume_convergence": GammaVolumeConvergence,
@@ -1237,6 +1294,59 @@ class SyngexOrchestrator:
                         self._rolling_data[KEY_VAMP_PARTICIPANTS_5M].push(avg_participants, ts)
                     if KEY_VAMP_DEPTH_DENSITY_5M in self._rolling_data:
                         self._rolling_data[KEY_VAMP_DEPTH_DENSITY_5M].push(total_size, ts)
+
+                    # OBI computation from depth agg
+                    total_depth = total_bid_size + total_ask_size
+                    if total_depth > 0:
+                        obi = (total_bid_size - total_ask_size) / total_depth
+                    else:
+                        obi = 0.0
+                    ts = time.time()
+                    if KEY_OBI_5M in self._rolling_data:
+                        self._rolling_data[KEY_OBI_5M].push(obi, ts)
+
+            # Aggression Flow from quotes stream — detect aggressive trades
+            if data.get("type") == "quote_update":
+                last = data.get("last", 0)
+                bid = data.get("bid", 0)
+                ask = data.get("ask", 0)
+                last_size = data.get("last_size", 0)
+                if isinstance(last_size, str):
+                    try:
+                        last_size = int(last_size)
+                    except (ValueError, TypeError):
+                        last_size = 0
+
+                if last_size > 0:
+                    if last >= ask and ask > 0:
+                        # Aggressive buy — hit the ask
+                        if KEY_AGGRESSIVE_BUY_VOL_5M in self._rolling_data:
+                            self._rolling_data[KEY_AGGRESSIVE_BUY_VOL_5M].push(last_size, ts)
+                    elif last <= bid and bid > 0:
+                        # Aggressive sell — hit the bid
+                        if KEY_AGGRESSIVE_SELL_VOL_5M in self._rolling_data:
+                            self._rolling_data[KEY_AGGRESSIVE_SELL_VOL_5M].push(last_size, ts)
+
+                    # Track individual trade size for volume gate
+                    if KEY_TRADE_SIZE_5M in self._rolling_data:
+                        self._rolling_data[KEY_TRADE_SIZE_5M].push(last_size, ts)
+
+                # Compute AF from rolling aggressive volumes
+                buy_vol_window = self._rolling_data.get(KEY_AGGRESSIVE_BUY_VOL_5M)
+                sell_vol_window = self._rolling_data.get(KEY_AGGRESSIVE_SELL_VOL_5M)
+                if buy_vol_window and sell_vol_window and buy_vol_window.count > 0 and sell_vol_window.count > 0:
+                    total_buy = sum(buy_vol_window.values)
+                    total_sell = sum(sell_vol_window.values)
+                    total_aggressive = total_buy + total_sell
+                    if total_aggressive > 0:
+                        af = (total_buy - total_sell) / total_aggressive
+                    else:
+                        af = 0.0
+                else:
+                    af = 0.0
+
+                if KEY_AF_5M in self._rolling_data:
+                    self._rolling_data[KEY_AF_5M].push(af, ts)
 
 
         except Exception as exc:

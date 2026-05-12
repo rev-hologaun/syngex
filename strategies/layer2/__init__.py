@@ -10,6 +10,7 @@ Strategies:
     - DeltaVolumeExhaustion: Trend reversal via weakening delta + volume conviction
     - CallPutFlowAsymmetry: Real-time call vs put flow bias detection
     - IVGEXDivergence: Volatility mean reversion at gamma extremes
+    - ObiAggressionFlow: Order book imbalance + aggressive trade flow alignment
 """
 
 from .delta_gamma_squeeze import DeltaGammaSqueeze
@@ -18,6 +19,7 @@ from .call_put_flow_asymmetry import CallPutFlowAsymmetry
 from .iv_gex_divergence import IVGEXDivergence
 from .delta_iv_divergence import DeltaIVDivergence
 from .vamp_momentum import VampMomentum
+from .obi_aggression_flow import ObiAggressionFlow
 
 __all__ = [
     "DeltaGammaSqueeze",
@@ -26,4 +28,5 @@ __all__ = [
     "IVGEXDivergence",
     "DeltaIVDivergence",
     "VampMomentum",
+    "ObiAggressionFlow",
 ]

@@ -297,6 +297,24 @@ layer2:
       min_confidence: 0.40                  # Raised for microstructure strategy
       max_confidence: 0.90
 
+  obi_aggression_flow:
+    enabled: true
+    tracker:
+      max_hold_seconds: 900
+    params:
+      obi_threshold: 0.75
+      af_threshold: 0.5
+      min_obi_data_points: 10
+      min_af_data_points: 5
+      volume_spike_mult: 2.0
+      trade_size_ma_window: 300
+      min_avg_participants: 1.0
+      max_spread_multiplier: 1.5
+      stop_pct: 0.005
+      target_risk_mult: 1.5
+      min_confidence: 0.45
+      max_confidence: 0.90
+
 # Layer 3: Micro-Signal (1Hz) — 4 strategies
 layer3:
   gamma_volume_convergence:
