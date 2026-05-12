@@ -248,6 +248,7 @@ class SyngexOrchestrator:
             KEY_TOTAL_GAMMA_5M: RollingWindow(window_type="time", window_size=300),
             KEY_GAMMA_ACCEL_5M: RollingWindow(window_type="time", window_size=300),
             KEY_IV_SKEW_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_SKEW_WIDTH_5M: RollingWindow(window_type="time", window_size=300),
             KEY_FLOW_RATIO_5M: RollingWindow(window_type="time", window_size=300),
             KEY_EXTRINSIC_PROXY_5M: RollingWindow(window_type="time", window_size=300),
             KEY_PROB_MOMENTUM_5M: RollingWindow(window_type="time", window_size=300),
@@ -772,6 +773,23 @@ class SyngexOrchestrator:
                     atm_iv = self._calculator.get_iv_by_strike(atm_strike)
                     if atm_iv is not None and KEY_ATM_IV_5M in self._rolling_data:
                         self._rolling_data[KEY_ATM_IV_5M].push(atm_iv)
+
+                # ── iv_band_breakout v2: Skew width (|OTM Put IV - OTM Call IV|) ──
+                try:
+                    if atm_strike is not None and KEY_SKEW_WIDTH_5M in self._rolling_data:
+                        # OTM Put strike: ATM - 5%
+                        otm_put_strike = atm_strike * 0.95
+                        # OTM Call strike: ATM + 5%
+                        otm_call_strike = atm_strike * 1.05
+
+                        otm_put_iv = self._calculator.get_iv_by_strike(otm_put_strike)
+                        otm_call_iv = self._calculator.get_iv_by_strike(otm_call_strike)
+
+                        if otm_put_iv is not None and otm_put_iv > 0 and otm_call_iv is not None and otm_call_iv > 0:
+                            skew_width = abs(otm_put_iv - otm_call_iv)
+                            self._rolling_data[KEY_SKEW_WIDTH_5M].push(skew_width)
+                except Exception:
+                    pass
 
                 # ── delta_iv_divergence v2: OTM Delta/IV and Delta-IV correlation ──
                 try:

@@ -39,6 +39,9 @@ KEY_FLOW_RATIO_5M = "flow_ratio_5m"
 KEY_EXTRINSIC_PROXY_5M = "extrinsic_proxy_5m"
 KEY_PROB_MOMENTUM_5M = "prob_momentum_5m"
 
+# --- IV Band Breakout v2 (Breakout-Master) ---
+KEY_SKEW_WIDTH_5M = "skew_width_5m"
+
 # --- IV skew gradient (iv_gex_divergence v2) ---
 KEY_IV_SKEW_GRADIENT_5M = "iv_skew_gradient_5m"
 KEY_GAMMA_DENSITY_5M = "gamma_density_5m"
@@ -92,7 +95,8 @@ ALL_KEYS = (*CORE_KEYS, *DEPTH_KEYS, KEY_FLOW_RATIO_5M,
             KEY_OTM_DELTA_5M, KEY_OTM_IV_5M, KEY_DELTA_IV_CORR_5M,
             KEY_GAMMA_ACCEL_5M,
             KEY_CONSEC_LONG, KEY_CONSEC_SHORT,
-            KEY_DEPTH_BID_SIZE_ROLLING, KEY_DEPTH_ASK_SIZE_ROLLING)
+            KEY_DEPTH_BID_SIZE_ROLLING, KEY_DEPTH_ASK_SIZE_ROLLING,
+            KEY_SKEW_WIDTH_5M)
 
 __all__ = [
     "KEY_PRICE_5M", "KEY_PRICE_30M",
@@ -109,5 +113,6 @@ __all__ = [
     "KEY_EXTRINSIC_PROXY_5M", "KEY_PROB_MOMENTUM_5M",
     "KEY_GAMMA_ACCEL_5M",
     "KEY_CONSEC_LONG", "KEY_CONSEC_SHORT",
+    "KEY_SKEW_WIDTH_5M",
     "CORE_KEYS", "DEPTH_KEYS", "ALL_KEYS",
 ]

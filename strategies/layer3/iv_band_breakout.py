@@ -1,96 +1,92 @@
 """
-strategies/layer3/iv_band_breakout.py — IV Band Breakout
+strategies/layer3/iv_band_breakout.py — IV Band Breakout v2 (Breakout-Master)
 
 Micro-signal (1Hz) strategy: detects the transition from IV compression
-to expansion. When IV is in the bottom 25% of its 30m range, price is
-compressing, and delta is decelerating (proxy for theta coiling), a
-breakout is imminent.
+to expansion using the full volatility surface.
 
-Logic:
-    - Monitor ATM strike for IV compression (bottom 25% of 30m range)
-    - Price compression (narrow range relative to rolling average)
-    - Delta deceleration while gamma is high (coiled spring proxy)
-    - Trade the breakout direction when price slices through range
+v2 Architecture:
+    1. Skew Width Compression — monitors |OTM Put IV - OTM Call IV| instead
+       of ATM IV only. A true coiled spring compresses the entire surface.
+    2. Gamma-Regime Hard Gate — regime must be POSITIVE or NEGATIVE (not
+       NEUTRAL). POSITIVE = controlled trend (wider targets). NEGATIVE =
+       explosive mean-reversion (tighter targets).
+    3. Delta-Acceleration Snap Detection — at breakout, delta must accelerate
+       ≥10% (LONG) or decelerate ≥10% (SHORT) to confirm the "snap."
+    4. IV-Expansion Scaled Targets — target scales with current IV / mean IV,
+       capped at 4.0× risk.
 
-Entry:
-    - LONG:  IV compressed + price compression + delta coiling +
-             price breaks above range + VolumeUp + delta turning positive
-    - SHORT: IV compressed + price compression + delta coiling +
-             price breaks below range + VolumeDown + delta turning negative
-
-Confidence factors:
-    - IV compression depth (how far below p25 — deeper = higher confidence)
-    - Price compression tightness (tighter range = more coiled)
-    - Delta extremity (how much below rolling avg — coiling signal)
-    - Volume confirmation (strong volume trend)
-    - Regime alignment (positive gamma = higher confidence)
+Confidence (6 components, min 0.35):
+    1. Skew compression (hard gate — 0.0 or 0.20)
+    2. Gamma regime gate (hard gate — 0.0 or 0.15)
+    3. Delta acceleration (hard gate — 0.0 or 0.15)
+    4. Price compression (soft — 0.0–0.10)
+    5. IV expansion (soft — 0.0–0.10)
+    6. Volume confirmation (soft — 0.05–0.10)
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_keys import (
     KEY_PRICE_5M,
+    KEY_SKEW_WIDTH_5M,
     KEY_VOLUME_5M,
     KEY_VOLUME_DOWN_5M,
     KEY_VOLUME_UP_5M,
     KEY_TOTAL_DELTA_5M,
+    KEY_ATM_IV_5M,
 )
 
 logger = logging.getLogger("Syngex.Strategies.IVBandBreakout")
 
 # ---------------------------------------------------------------------------
-# Constants
+# Constants (defaults — overridden by config params)
 # ---------------------------------------------------------------------------
 
-# Delta acceleration threshold: current delta must be below rolling avg
-# by this ratio (< 1.0 means deceleration = coiling signal)
-DELTA_DECEL_RATIO = 0.95  # Delta must be below rolling avg
+# Delta deceleration ratio (v1 coiling proxy)
+DELTA_DECEL_RATIO = 0.95
 
-# IV compression: IV must be in bottom 25% of its 30m range
-# (checked via RollingWindow.is_in_bottom_quartile)
-
-# Price compression: high-low range must be < 30% of rolling mean range
+# Price compression: high-low range must be < 40% of rolling mean range
 PRICE_COMPRESSION_RATIO = 0.40
 
 # Minimum price move to count as breakout (0.05%)
 BREAKOUT_MOVE_PCT = 0.0005
 
-# Volume confirmation
-VOLUME_TREND_REQUIRED = True
+# Stop and target (v1 fallback)
+STOP_PCT = 0.005  # 0.5% stop
+TARGET_PCT = 0.010  # 1.0% target
 
-# Stop and target
-STOP_PCT = 0.005              # 0.5% stop
-TARGET_PCT = 0.010            # 1.0% target (2:1 R:R)
-
-# Min confidence
-MIN_CONFIDENCE = 0.25
-MAX_CONFIDENCE = 0.85         # Micro-signal cap
+# Min/max confidence
+MIN_CONFIDENCE = 0.35  # Raised from 0.25
+MAX_CONFIDENCE = 0.85  # Micro-signal cap
 
 # Min data points
-MIN_DATA_POINTS = 5           # Need enough data for stats
-MIN_IV_DATA_POINTS = 3        # Minimum for IV window
+MIN_DATA_POINTS = 5
+MIN_IV_DATA_POINTS = 3
+
+# v2 Breakout-Master defaults
+SKEW_OTM_PCT = 0.05  # OTM strike distance (5%)
+SKEW_COMPRESSION_PCT = 0.25  # skew must be in bottom 25% of range
+POSITIVE_GAMMA_TARGET_MULT = 2.5
+NEGATIVE_GAMMA_TARGET_MULT = 1.5
+DELTA_ACCEL_THRESHOLD = 1.10  # delta must accelerate ≥10% at breakout
+TARGET_IV_EXPANSION_MULT = 2.5  # base multiplier for POS regime
+TARGET_IV_EXPANSION_NEG_MULT = 1.5  # base multiplier for NEG regime
+TARGET_IV_EXPANSION_CAP = 4.0  # cap on multiplier
+TARGET_MIN_PCT = 0.005  # minimum 0.5% target
 
 
 class IVBandBreakout(BaseStrategy):
     """
-    Detects the transition from IV compression to expansion.
+    Detects the transition from IV compression to expansion using
+    full-surface skew width compression, gamma-regime gating,
+    delta-acceleration snap detection, and IV-expansion scaled targets.
 
-    When IV is compressed (bottom 25% of 30m range), price is coiling
-    (narrow range), and delta is decelerating while gamma is high
-    (coiled spring proxy), a breakout is imminent.
-
-    In a positive gamma regime:
-        - LONG:  IV compressed + price compression + delta coiling +
-                 price breaks above range + VolumeUp + delta turning positive
-        - SHORT: IV compressed + price compression + delta coiling +
-                 price breaks below range + VolumeDown + delta turning negative
-
-    Exits: 0.5% stop, 1.0% target (2:1 R:R).
+    Works in POSITIVE or NEGATIVE gamma regimes (NEUTRAL = skip).
     """
 
     strategy_id = "iv_band_breakout"
@@ -115,14 +111,6 @@ class IVBandBreakout(BaseStrategy):
         net_gamma = data.get("net_gamma", 0)
         regime = data.get("regime", "")
 
-        # Positive gamma regime required — stable environment
-        if regime != "POSITIVE":
-            return []
-
-        # Must have positive net gamma
-        if net_gamma <= 0:
-            return []
-
         signals: List[Signal] = []
 
         # Check LONG breakout
@@ -142,8 +130,8 @@ class IVBandBreakout(BaseStrategy):
         return signals
 
     # ------------------------------------------------------------------
-    # LONG entry: IV compressed + price compression + delta coiling +
-    #             price breaks above range + VolumeUp + delta turning positive
+    # LONG entry: skew compressed + regime gate + delta accel +
+    #             price breaks above range + VolumeUp
     # ------------------------------------------------------------------
 
     def _check_long(
@@ -158,40 +146,43 @@ class IVBandBreakout(BaseStrategy):
         Evaluate LONG breakout signal.
 
         Conditions:
-            1. Net Gamma > 0 (already checked in evaluate)
-            2. ATM strike IV in bottom 25% of 30m range (compression)
+            1. Gamma regime gate (POSITIVE or NEGATIVE, not NEUTRAL)
+            2. Skew width compression (bottom 25% of rolling range)
             3. Price compression: range < 30% of rolling mean range
-            4. Delta deceleration (proxy for theta coiling)
+            4. Delta acceleration at breakout (snap ≥10%)
             5. Price breaks above recent high
             6. Volume trending UP
-            7. Delta at ATM turning positive
         """
         # Get ATM strike
         atm_strike = self._get_atm_strike(gex_calc, price)
         if atm_strike is None:
             return None
 
-        # 1. IV compression check
-        iv_compressed, iv_depth = self._check_iv_compression(
+        # 1. Gamma regime gate (hard gate)
+        if not self._check_gamma_regime(regime):
+            return None
+
+        # 2. Skew compression check (hard gate)
+        skew_compressed, skew_depth = self._check_skew_compression(
             rolling_data, atm_strike,
         )
-        if not iv_compressed:
+        if not skew_compressed:
             return None
 
-        # 2. Price compression check
+        # 3. Price compression check
         if not self._check_price_compression(rolling_data):
-            return None
-
-        # 3. Delta coiling check (proxy for theta decay)
-        delta_decel = self._check_delta_coiling(rolling_data)
-        if delta_decel is None or delta_decel >= DELTA_DECEL_RATIO:
             return None
 
         # 4. Price breakout above recent high
         if not self._check_breakout_high(rolling_data):
             return None
 
-        # 5. Volume trending UP (call volume)
+        # 5. Delta acceleration at breakout (hard gate)
+        delta_accel = self._check_delta_acceleration(rolling_data, direction="LONG")
+        if delta_accel is None:
+            return None
+
+        # 6. Volume trending UP (call volume)
         vol_window = rolling_data.get(KEY_VOLUME_UP_5M)
         if vol_window is None or vol_window.count < 3:
             return None
@@ -199,13 +190,25 @@ class IVBandBreakout(BaseStrategy):
             return None
         vol_trend = "UP"
 
-        # 6. Delta at ATM turning positive
-        if not self._check_atm_delta_positive(gex_calc, atm_strike):
-            return None
-
         # All conditions met — compute confidence and build signal
-        confidence = self._compute_long_confidence(
-            iv_depth, rolling_data, delta_decel, vol_trend, net_gamma,
+        # Get IV expansion factor
+        iv_expansion = self._get_iv_expansion(rolling_data)
+
+        # Compute IV-scaled target
+        risk = price * TARGET_MIN_PCT  # minimum risk
+        target_price, target_mult, iv_expansion = self._compute_iv_scaled_target(
+            price, risk, rolling_data, regime, direction="LONG",
+        )
+
+        confidence = self._compute_confidence(
+            skew_depth=skew_depth,
+            delta_accel=delta_accel,
+            iv_expansion=iv_expansion,
+            price_compression=self._get_price_compression_ratio(rolling_data),
+            net_gamma=net_gamma,
+            regime=regime,
+            direction="LONG",
+            vol_trend=vol_trend,
         )
         if confidence < MIN_CONFIDENCE:
             return None
@@ -213,7 +216,6 @@ class IVBandBreakout(BaseStrategy):
         # Build signal
         entry = price
         stop = entry * (1 - STOP_PCT)
-        target = entry * (1 + TARGET_PCT)
 
         price_window = rolling_data.get(KEY_PRICE_5M)
         trend = price_window.trend if price_window else "UNKNOWN"
@@ -223,34 +225,46 @@ class IVBandBreakout(BaseStrategy):
             confidence=round(confidence, 3),
             entry=round(entry, 2),
             stop=round(stop, 2),
-            target=round(target, 2),
+            target=round(target_price, 2),
             strategy_id=self.strategy_id,
             reason=(
-                f"IV band breakout LONG: ATM {atm_strike} IV compressed, "
-                f"price coiling, delta decel x{delta_decel:.3f}, "
-                f"VolumeUp, delta turning positive"
+                f"IV band breakout v2 LONG: ATM {atm_strike} skew compressed, "
+                f"regime={regime}, delta_accel={delta_accel:.3f}, "
+                f"VolumeUp, IV_exp={iv_expansion:.2f}x"
             ),
             metadata={
+                # v1 fields (kept)
                 "atm_strike": atm_strike,
-                "iv_compression_depth": round(iv_depth, 4),
-                "price_compression_ratio": round(self._get_price_compression_ratio(rolling_data), 3),
-                "delta_deceleration_ratio": round(delta_decel, 3),
+                "price_compression_ratio": round(
+                    self._get_price_compression_ratio(rolling_data), 3
+                ),
                 "volume_trend": vol_trend,
                 "price_trend": trend,
                 "net_gamma": round(net_gamma, 2),
                 "regime": regime,
-                "stop": round(stop, 2),
-                "target": round(target, 2),
                 "risk": round(entry - stop, 2),
                 "risk_reward_ratio": round(
-                    (target - entry) / (entry - stop), 2
+                    (target_price - entry) / (entry - stop), 2
                 ) if (entry - stop) > 0 else 0,
+                # v2 new fields
+                "skew_width_current": round(
+                    rolling_data.get(KEY_SKEW_WIDTH_5M).latest if rolling_data.get(KEY_SKEW_WIDTH_5M) else 0, 4
+                ),
+                "skew_width_mean": round(
+                    rolling_data.get(KEY_SKEW_WIDTH_5M).mean if rolling_data.get(KEY_SKEW_WIDTH_5M) else 0, 4
+                ),
+                "skew_compression_depth": round(skew_depth, 4),
+                "delta_acceleration": round(delta_accel, 4),
+                "iv_expansion_factor": round(iv_expansion, 3),
+                "target_mult": round(target_mult, 2),
+                "regime_type": regime,
+                "target_type": "scaled",
             },
         )
 
     # ------------------------------------------------------------------
-    # SHORT entry: IV compressed + price compression + delta coiling +
-    #              price breaks below range + VolumeDown + delta turning negative
+    # SHORT entry: skew compressed + regime gate + delta accel +
+    #              price breaks below range + VolumeDown
     # ------------------------------------------------------------------
 
     def _check_short(
@@ -265,40 +279,43 @@ class IVBandBreakout(BaseStrategy):
         Evaluate SHORT breakout signal.
 
         Conditions:
-            1. Net Gamma > 0 (already checked in evaluate)
-            2. ATM strike IV in bottom 25% of 30m range (compression)
+            1. Gamma regime gate (POSITIVE or NEGATIVE, not NEUTRAL)
+            2. Skew width compression (bottom 25% of rolling range)
             3. Price compression: range < 30% of rolling mean range
-            4. Delta deceleration (proxy for theta coiling)
+            4. Delta acceleration at breakout (snap ≥10%)
             5. Price breaks below recent low
             6. Volume trending DOWN
-            7. Delta at ATM turning negative
         """
         # Get ATM strike
         atm_strike = self._get_atm_strike(gex_calc, price)
         if atm_strike is None:
             return None
 
-        # 1. IV compression check
-        iv_compressed, iv_depth = self._check_iv_compression(
+        # 1. Gamma regime gate (hard gate)
+        if not self._check_gamma_regime(regime):
+            return None
+
+        # 2. Skew compression check (hard gate)
+        skew_compressed, skew_depth = self._check_skew_compression(
             rolling_data, atm_strike,
         )
-        if not iv_compressed:
+        if not skew_compressed:
             return None
 
-        # 2. Price compression check
+        # 3. Price compression check
         if not self._check_price_compression(rolling_data):
-            return None
-
-        # 3. Delta coiling check (proxy for theta decay)
-        delta_decel = self._check_delta_coiling(rolling_data)
-        if delta_decel is None or delta_decel >= DELTA_DECEL_RATIO:
             return None
 
         # 4. Price breakout below recent low
         if not self._check_breakout_low(rolling_data):
             return None
 
-        # 5. Volume trending DOWN (put volume)
+        # 5. Delta acceleration at breakout (hard gate)
+        delta_accel = self._check_delta_acceleration(rolling_data, direction="SHORT")
+        if delta_accel is None:
+            return None
+
+        # 6. Volume trending DOWN (put volume)
         vol_window = rolling_data.get(KEY_VOLUME_DOWN_5M)
         if vol_window is None or vol_window.count < 3:
             return None
@@ -306,13 +323,23 @@ class IVBandBreakout(BaseStrategy):
             return None
         vol_trend = "DOWN"
 
-        # 6. Delta at ATM turning negative
-        if not self._check_atm_delta_negative(gex_calc, atm_strike):
-            return None
-
         # All conditions met — compute confidence and build signal
-        confidence = self._compute_short_confidence(
-            iv_depth, rolling_data, delta_decel, vol_trend, net_gamma,
+        iv_expansion = self._get_iv_expansion(rolling_data)
+
+        risk = price * TARGET_MIN_PCT
+        target_price, target_mult, iv_expansion = self._compute_iv_scaled_target(
+            price, risk, rolling_data, regime, direction="SHORT",
+        )
+
+        confidence = self._compute_confidence(
+            skew_depth=skew_depth,
+            delta_accel=delta_accel,
+            iv_expansion=iv_expansion,
+            price_compression=self._get_price_compression_ratio(rolling_data),
+            net_gamma=net_gamma,
+            regime=regime,
+            direction="SHORT",
+            vol_trend=vol_trend,
         )
         if confidence < MIN_CONFIDENCE:
             return None
@@ -320,7 +347,6 @@ class IVBandBreakout(BaseStrategy):
         # Build signal
         entry = price
         stop = entry * (1 + STOP_PCT)
-        target = entry * (1 - TARGET_PCT)
 
         price_window = rolling_data.get(KEY_PRICE_5M)
         trend = price_window.trend if price_window else "UNKNOWN"
@@ -330,33 +356,292 @@ class IVBandBreakout(BaseStrategy):
             confidence=round(confidence, 3),
             entry=round(entry, 2),
             stop=round(stop, 2),
-            target=round(target, 2),
+            target=round(target_price, 2),
             strategy_id=self.strategy_id,
             reason=(
-                f"IV band breakout SHORT: ATM {atm_strike} IV compressed, "
-                f"price coiling, delta decel x{delta_decel:.3f}, "
-                f"VolumeDown, delta turning negative"
+                f"IV band breakout v2 SHORT: ATM {atm_strike} skew compressed, "
+                f"regime={regime}, delta_accel={delta_accel:.3f}, "
+                f"VolumeDown, IV_exp={iv_expansion:.2f}x"
             ),
             metadata={
+                # v1 fields (kept)
                 "atm_strike": atm_strike,
-                "iv_compression_depth": round(iv_depth, 4),
-                "price_compression_ratio": round(self._get_price_compression_ratio(rolling_data), 3),
-                "delta_deceleration_ratio": round(delta_decel, 3),
+                "price_compression_ratio": round(
+                    self._get_price_compression_ratio(rolling_data), 3
+                ),
                 "volume_trend": vol_trend,
                 "price_trend": trend,
                 "net_gamma": round(net_gamma, 2),
                 "regime": regime,
-                "stop": round(stop, 2),
-                "target": round(target, 2),
                 "risk": round(stop - entry, 2),
                 "risk_reward_ratio": round(
-                    (entry - target) / (stop - entry), 2
+                    (entry - target_price) / (stop - entry), 2
                 ) if (stop - entry) > 0 else 0,
+                # v2 new fields
+                "skew_width_current": round(
+                    rolling_data.get(KEY_SKEW_WIDTH_5M).latest if rolling_data.get(KEY_SKEW_WIDTH_5M) else 0, 4
+                ),
+                "skew_width_mean": round(
+                    rolling_data.get(KEY_SKEW_WIDTH_5M).mean if rolling_data.get(KEY_SKEW_WIDTH_5M) else 0, 4
+                ),
+                "skew_compression_depth": round(skew_depth, 4),
+                "delta_acceleration": round(delta_accel, 4),
+                "iv_expansion_factor": round(iv_expansion, 3),
+                "target_mult": round(target_mult, 2),
+                "regime_type": regime,
+                "target_type": "scaled",
             },
         )
 
     # ------------------------------------------------------------------
-    # Helpers
+    # v2 Helper: Skew Width Compression
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _check_skew_compression(
+        rolling_data: Dict[str, Any],
+        atm_strike: float,
+    ) -> Tuple[bool, float]:
+        """
+        Check if skew width (|OTM Put IV - OTM Call IV|) is compressed.
+
+        Current skew_width must be in bottom 25% of its rolling range.
+
+        Returns (is_compressed, skew_depth) where skew_depth = p25 - current.
+        """
+        window = rolling_data.get(KEY_SKEW_WIDTH_5M)
+        if window is None or window.count < MIN_DATA_POINTS:
+            return False, 0.0
+
+        current_skew = window.latest
+        p25 = window.p25
+
+        if current_skew is None or p25 is None:
+            return False, 0.0
+
+        # Skew is compressed if latest is in bottom 25% of rolling range
+        is_compressed = current_skew <= p25
+
+        # Depth = how far below p25 (positive = compressed deeper)
+        skew_depth = p25 - current_skew
+
+        return is_compressed, skew_depth
+
+    # ------------------------------------------------------------------
+    # v2 Helper: Gamma-Regime Hard Gate
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _check_gamma_regime(regime: str) -> bool:
+        """
+        Hard gate: regime must be POSITIVE or NEGATIVE (not NEUTRAL).
+
+        Returns True if regime passes the gate.
+        """
+        return regime in ("POSITIVE", "NEGATIVE")
+
+    # ------------------------------------------------------------------
+    # v2 Helper: Delta-Acceleration Snap Detection
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _check_delta_acceleration(
+        rolling_data: Dict[str, Any],
+        direction: str,
+    ) -> Optional[float]:
+        """
+        Check if delta accelerated at the breakout moment.
+
+        For LONG: delta_accel > 1.10 (delta accelerated ≥10%)
+        For SHORT: delta_accel < 0.90 (delta decelerated ≥10%)
+
+        Returns delta_accel value or None if below threshold.
+        """
+        window = rolling_data.get(KEY_TOTAL_DELTA_5M)
+        if window is None or window.count < MIN_DATA_POINTS:
+            return None
+
+        current = window.latest
+        if current is None:
+            return None
+
+        # Get delta value ~5 ticks ago (use index offset)
+        values = window.values
+        if len(values) < 6:
+            return None
+
+        delta_ago = values[-6]  # 5 values back
+        if delta_ago is None or delta_ago == 0:
+            return None
+
+        delta_accel = current / delta_ago
+
+        if direction == "LONG":
+            # Delta must have accelerated (increased) by ≥10%
+            if delta_accel >= DELTA_ACCEL_THRESHOLD:
+                return delta_accel
+        elif direction == "SHORT":
+            # Delta must have decelerated (decreased) by ≥10%
+            if delta_accel <= (1.0 / DELTA_ACCEL_THRESHOLD):
+                return delta_accel
+
+        return None
+
+    # ------------------------------------------------------------------
+    # v2 Helper: IV-Expansion Scaled Target
+    # ------------------------------------------------------------------
+
+    def _compute_iv_scaled_target(
+        self,
+        entry: float,
+        risk: float,
+        rolling_data: Dict[str, Any],
+        regime: str,
+        direction: str,
+    ) -> Tuple[float, float, float]:
+        """
+        Compute target price scaled by IV expansion factor.
+
+        target_mult = base_mult × iv_expansion, capped at 4.0
+        For LONG: target = entry + risk × target_mult
+        For SHORT: target = entry - risk × target_mult
+        Minimum target: 0.5% from entry.
+
+        Returns (target_price, target_mult, iv_expansion).
+        """
+        iv_expansion = self._get_iv_expansion(rolling_data)
+
+        # Base multiplier depends on regime
+        if regime == "POSITIVE":
+            base_mult = self._get_param("positive_gamma_target_mult", POSITIVE_GAMMA_TARGET_MULT)
+        elif regime == "NEGATIVE":
+            base_mult = self._get_param("negative_gamma_target_mult", NEGATIVE_GAMMA_TARGET_MULT)
+        else:
+            # Fallback to positive gamma
+            base_mult = self._get_param("positive_gamma_target_mult", POSITIVE_GAMMA_TARGET_MULT)
+
+        # Scale by IV expansion and cap
+        target_mult = base_mult * iv_expansion
+        cap = self._get_param("target_iv_expansion_cap", TARGET_IV_EXPANSION_CAP)
+        target_mult = min(target_mult, cap)
+
+        # Compute target price
+        if direction == "LONG":
+            target = entry + risk * target_mult
+        else:
+            target = entry - risk * target_mult
+
+        # Minimum target: 0.5% from entry
+        min_pct = self._get_param("target_min_pct", TARGET_MIN_PCT)
+        if direction == "LONG":
+            min_target = entry * (1 + min_pct)
+            target = max(target, min_target)
+        else:
+            min_target = entry * (1 - min_pct)
+            target = min(target, min_target)
+
+        return target, target_mult, iv_expansion
+
+    # ------------------------------------------------------------------
+    # v2 Helper: IV Expansion Factor
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _get_iv_expansion(rolling_data: Dict[str, Any]) -> float:
+        """
+        Compute IV expansion factor = current IV / mean IV.
+        Returns 1.0 if no data available.
+        """
+        window = rolling_data.get(KEY_ATM_IV_5M)
+        if window is None or window.count < 2:
+            return 1.0
+
+        current_iv = window.latest
+        mean_iv = window.mean
+
+        if current_iv is None or mean_iv is None or mean_iv == 0:
+            return 1.0
+
+        return current_iv / mean_iv
+
+    # ------------------------------------------------------------------
+    # v2 Confidence: Unified for LONG and SHORT
+    # ------------------------------------------------------------------
+
+    def _compute_confidence(
+        self,
+        skew_depth: float,
+        delta_accel: float,
+        iv_expansion: float,
+        price_compression: float,
+        net_gamma: float,
+        regime: str,
+        direction: str,
+        vol_trend: str,
+    ) -> float:
+        """
+        Compute unified confidence for LONG and SHORT breakout signals.
+
+        6 components:
+            1. Skew compression (hard gate — 0.0 or 0.20)
+            2. Gamma regime gate (hard gate — 0.0 or 0.15)
+            3. Delta acceleration (hard gate — 0.0 or 0.15)
+            4. Price compression (soft — 0.0–0.10)
+            5. IV expansion (soft — 0.0–0.10)
+            6. Volume confirmation (soft — 0.05–0.10)
+        """
+        # 1. Skew compression (hard gate — 0.0 or 0.20)
+        skew_conf = 0.20 if skew_depth > 0 else 0.0
+
+        # 2. Gamma regime gate (hard gate — 0.0 or 0.15)
+        regime_conf = 0.15 if self._check_gamma_regime(regime) else 0.0
+
+        # 3. Delta acceleration (hard gate — 0.0 or 0.15)
+        delta_conf = 0.15 if delta_accel is not None else 0.0
+
+        # 4. Price compression (soft — 0.0–0.10)
+        price_conf = self._price_compression_confidence(price_compression)
+
+        # 5. IV expansion target quality (soft — 0.0–0.10)
+        iv_conf = self._iv_expansion_confidence(iv_expansion)
+
+        # 6. Volume confirmation (soft — 0.05–0.10)
+        vol_conf = self._volume_confidence(vol_trend)
+
+        confidence = skew_conf + regime_conf + delta_conf + price_conf + iv_conf + vol_conf
+        return min(MAX_CONFIDENCE, max(0.0, confidence))
+
+    # ------------------------------------------------------------------
+    # Soft confidence helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _price_compression_confidence(ratio: float) -> float:
+        """Price compression confidence: 0.0–0.10. Tighter = higher."""
+        # ratio < 0.40 is good, lower is better
+        if ratio <= 0:
+            return 0.10
+        if ratio >= 1.0:
+            return 0.0
+        return 0.10 * (1 - ratio)
+
+    @staticmethod
+    def _iv_expansion_confidence(iv_expansion: float) -> float:
+        """IV expansion confidence: 0.0–0.10. Higher expansion = higher."""
+        # iv_expansion > 1.0 means IV is expanding
+        if iv_expansion <= 0:
+            return 0.0
+        if iv_expansion >= 2.0:
+            return 0.10
+        return 0.10 * min(1.0, (iv_expansion - 0.5) / 1.5)
+
+    @staticmethod
+    def _volume_confidence(vol_trend: str) -> float:
+        """Volume confirmation: 0.05–0.10."""
+        return 0.10 if vol_trend in ("UP", "DOWN") else 0.05
+
+    # ------------------------------------------------------------------
+    # Shared helpers (v1 logic kept)
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -369,42 +654,11 @@ class IVBandBreakout(BaseStrategy):
             return None
 
     @staticmethod
-    def _check_iv_compression(
-        rolling_data: Dict[str, Any],
-        atm_strike: float,
-    ) -> tuple[bool, float]:
-        """
-        Check if IV at the ATM strike is in the bottom 25% of its 30m range.
-
-        Returns (is_compressed, depth) where depth is how far below p25
-        the current IV sits. Positive depth = compressed.
-        """
-        key = f"iv_{atm_strike}_5m"
-        iv_window = rolling_data.get(key)
-        if iv_window is None or iv_window.count < MIN_IV_DATA_POINTS:
-            return False, 0.0
-
-        iv_latest = iv_window.latest
-        iv_p25 = iv_window.p25
-
-        if iv_latest is None or iv_p25 is None:
-            return False, 0.0
-
-        # IV is compressed if latest is below p25
-        is_compressed = iv_latest < iv_p25
-
-        # Depth = how far below p25 (positive = compressed deeper)
-        depth = iv_p25 - iv_latest
-
-        return is_compressed, depth
-
-    @staticmethod
     def _check_price_compression(rolling_data: Dict[str, Any]) -> bool:
         """
         Check if price is compressing.
 
-        Current high-low range must be < 30% of 2 std devs of rolling prices.
-        Tighter range = more coiled = higher breakout probability.
+        Current high-low range must be < 30% of rolling mean range.
         """
         window = rolling_data.get(KEY_PRICE_5M)
         if window is None or window.count < MIN_DATA_POINTS:
@@ -435,41 +689,8 @@ class IVBandBreakout(BaseStrategy):
         return current_range / (std * 2)
 
     @staticmethod
-    def _check_delta_coiling(
-        rolling_data: Dict[str, Any],
-    ) -> Optional[float]:
-        """
-        Check if delta is decelerating (coiling proxy for theta).
-
-        When delta is declining while gamma is high, that's the coiling
-        signal — the spring is tightening.
-
-        Returns ratio of current delta to rolling avg.
-            < 1.0 = decelerating (coiling)
-            >= 1.0 = not coiling
-        """
-        window = rolling_data.get(KEY_TOTAL_DELTA_5M)
-        if window is None or window.count < MIN_DATA_POINTS:
-            return None
-
-        rolling_avg = window.mean
-        if rolling_avg is None or rolling_avg == 0:
-            return None
-
-        current = window.latest
-        if current is None:
-            return None
-
-        return current / rolling_avg
-
-    @staticmethod
     def _check_breakout_high(rolling_data: Dict[str, Any]) -> bool:
-        """
-        Check if price has broken above the recent high.
-
-        Latest price must be above the rolling window max by at least
-        BREAKOUT_MOVE_PCT.
-        """
+        """Check if price has broken above the recent high."""
         window = rolling_data.get(KEY_PRICE_5M)
         if window is None or window.count < 3:
             return False
@@ -480,22 +701,15 @@ class IVBandBreakout(BaseStrategy):
         if latest is None or window_max is None:
             return False
 
-        # Price must be above the recent high
         if latest <= window_max:
             return False
 
-        # Must have moved enough to count as breakout
         move_pct = (latest - window_max) / window_max
         return move_pct >= BREAKOUT_MOVE_PCT
 
     @staticmethod
     def _check_breakout_low(rolling_data: Dict[str, Any]) -> bool:
-        """
-        Check if price has broken below the recent low.
-
-        Latest price must be below the rolling window min by at least
-        BREAKOUT_MOVE_PCT.
-        """
+        """Check if price has broken below the recent low."""
         window = rolling_data.get(KEY_PRICE_5M)
         if window is None or window.count < 3:
             return False
@@ -506,138 +720,8 @@ class IVBandBreakout(BaseStrategy):
         if latest is None or window_min is None:
             return False
 
-        # Price must be below the recent low
         if latest >= window_min:
             return False
 
-        # Must have moved enough to count as breakout
         move_pct = (window_min - latest) / window_min
         return move_pct >= BREAKOUT_MOVE_PCT
-
-    @staticmethod
-    def _check_atm_delta_positive(gex_calc: Any, atm_strike: float) -> bool:
-        """
-        Check if net delta at the ATM strike is positive.
-
-        Net delta > 0 means delta is turning positive.
-        """
-        try:
-            delta_data = gex_calc.get_delta_by_strike(atm_strike)
-            net_delta = delta_data.get("net_delta", 0)
-            return net_delta > 0
-        except Exception as exc:
-            logger.debug("IVBandBreakout: failed to check ATM delta: %s", exc)
-            return False
-
-    @staticmethod
-    def _check_atm_delta_negative(gex_calc: Any, atm_strike: float) -> bool:
-        """
-        Check if net delta at the ATM strike is negative.
-
-        Net delta < 0 means delta is turning negative.
-        """
-        try:
-            delta_data = gex_calc.get_delta_by_strike(atm_strike)
-            net_delta = delta_data.get("net_delta", 0)
-            return net_delta < 0
-        except Exception as exc:
-            logger.debug("IVBandBreakout: failed to check ATM delta: %s", exc)
-            return False
-
-    def _compute_long_confidence(
-        self,
-        iv_depth: float,
-        rolling_data: Dict[str, Any],
-        delta_decel: float,
-        vol_trend: str,
-        net_gamma: float,
-    ) -> float:
-        """
-        Compute confidence for LONG breakout signal.
-
-        Factors:
-            1. IV compression depth     (0.30–0.45)
-            2. Price compression tightness (0.05–0.15)
-            3. Delta deceleration       (0.05–0.10)
-            4. Volume confirmation      (0.05–0.10)
-            5. Regime alignment         (0.0–0.10)
-
-        Returns 0.0–MAX_CONFIDENCE.
-        """
-        # 1. IV compression depth (0.30–0.45)
-        # Deeper compression = higher confidence
-        iv_conf = 0.30 + 0.15 * min(1.0, iv_depth / 0.20)
-
-        # 2. Price compression tightness (0.05–0.15)
-        # Tighter range = more coiled = higher confidence
-        ratio = self._get_price_compression_ratio(rolling_data)
-        compression_conf = 0.15 * (1 - ratio)  # lower ratio = higher conf
-
-        # 3. Delta deceleration (0.05–0.10)
-        # More negative ratio = more coiling = higher confidence
-        deviation = max(0, DELTA_DECEL_RATIO - delta_decel)
-        delta_conf = 0.05 + 0.05 * min(1.0, deviation / DELTA_DECEL_RATIO)
-
-        # 4. Volume confirmation (0.05–0.10)
-        vol_conf = 0.10 if vol_trend == "UP" else 0.05
-
-        # 5. Regime alignment (0.0–0.10)
-        # Positive gamma regime adds confidence
-        regime_conf = 0.10
-
-        # Normalize each component to [0,1] and average
-        norm_iv = (iv_conf - 0.30) / (0.45 - 0.30) if 0.45 != 0.30 else 1.0
-        norm_comp = compression_conf / 0.15 if 0.15 != 0 else 0.0
-        norm_delta = (delta_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
-        norm_vol = (vol_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
-        norm_regime = regime_conf / 0.10 if 0.10 != 0 else 0.0
-        confidence = (norm_iv + norm_comp + norm_delta + norm_vol + norm_regime) / 5.0
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
-
-    def _compute_short_confidence(
-        self,
-        iv_depth: float,
-        rolling_data: Dict[str, Any],
-        delta_decel: float,
-        vol_trend: str,
-        net_gamma: float,
-    ) -> float:
-        """
-        Compute confidence for SHORT breakout signal.
-
-        Same factors as LONG but with SHORT-specific volume check.
-
-        Factors:
-            1. IV compression depth     (0.30–0.45)
-            2. Price compression tightness (0.05–0.15)
-            3. Delta deceleration       (0.05–0.10)
-            4. Volume confirmation      (0.05–0.10)
-            5. Regime alignment         (0.0–0.10)
-
-        Returns 0.0–MAX_CONFIDENCE.
-        """
-        # 1. IV compression depth (0.30–0.45)
-        iv_conf = 0.30 + 0.15 * min(1.0, iv_depth / 0.20)
-
-        # 2. Price compression tightness (0.05–0.15)
-        ratio = self._get_price_compression_ratio(rolling_data)
-        compression_conf = 0.15 * (1 - ratio)
-
-        # 3. Delta deceleration (0.05–0.10)
-        deviation = max(0, DELTA_DECEL_RATIO - delta_decel)
-        delta_conf = 0.05 + 0.05 * min(1.0, deviation / DELTA_DECEL_RATIO)
-
-        # 4. Volume confirmation (0.05–0.10)
-        vol_conf = 0.10 if vol_trend == "DOWN" else 0.05
-
-        # 5. Regime alignment (0.0–0.10)
-        regime_conf = 0.10
-
-        # Normalize each component to [0,1] and average
-        norm_iv = (iv_conf - 0.30) / (0.45 - 0.30) if 0.45 != 0.30 else 1.0
-        norm_comp = compression_conf / 0.15 if 0.15 != 0 else 0.0
-        norm_delta = (delta_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
-        norm_vol = (vol_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
-        norm_regime = regime_conf / 0.10 if 0.10 != 0 else 0.0
-        confidence = (norm_iv + norm_comp + norm_delta + norm_vol + norm_regime) / 5.0
-        return min(MAX_CONFIDENCE, max(0.0, confidence))

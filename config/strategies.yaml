@@ -310,13 +310,32 @@ layer3:
     tracker:
       max_hold_seconds: 2700
     params:
-      price_compression_ratio: 0.30
-      volume_spike_ratio: 1.20
+      # === v1 params (kept for backwards compat) ===
+      delta_decel_ratio: 0.95
+      price_compression_ratio: 0.40
       stop_pct: 0.005
       target_pct: 0.010
       min_confidence: 0.35
       max_confidence: 0.85
       min_data_points: 3
+
+      # === v2 Breakout-Master params ===
+      # Skew compression
+      skew_otm_pct: 0.05
+      skew_compression_pct: 0.25
+
+      # Gamma regime
+      positive_gamma_target_mult: 2.5
+      negative_gamma_target_mult: 1.5
+
+      # Delta acceleration
+      delta_accel_threshold: 1.10
+
+      # IV-expansion targets
+      target_iv_expansion_mult: 2.5
+      target_iv_expansion_neg_mult: 1.5
+      target_iv_expansion_cap: 4.0
+      target_min_pct: 0.005
 
   strike_concentration:
     enabled: true
