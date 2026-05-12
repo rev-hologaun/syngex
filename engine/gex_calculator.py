@@ -258,11 +258,20 @@ class GEXCalculator:
         return self.get_strike_net_gamma(strike) * 100 * self.underlying_price
 
     def get_summary(self) -> Dict[str, Any]:
-        """Return a summary of the current state."""
+        """Return a summary of the current state.
+
+        Contains both cumulative and normalized net gamma:
+            - net_gamma: cumulative gamma that grows with message count.
+              Useful for sign detection (regime filtering).
+            - net_gamma_normalized: per-message average gamma, bounded
+              regardless of message count. The canonical scale for GEX
+              comparisons (walls, magnets, cross-session analysis).
+        """
         return {
             "symbol": self.symbol,
             "underlying_price": self.underlying_price,
             "net_gamma": self.get_net_gamma(),
+            "net_gamma_normalized": self.get_normalized_net_gamma(),
             "active_strikes": len(self._ladder),
             "total_messages": self._msg_count,
             "option_updates": self._option_count,
