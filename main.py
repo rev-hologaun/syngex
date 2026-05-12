@@ -72,7 +72,6 @@ if READ_ONLY:
 
 from ingestor.tradestation_client import TradeStationClient
 from engine.gex_calculator import GEXCalculator
-from engine.dashboard import SyngexDashboard
 from strategies.engine import StrategyEngine, EngineConfig
 from strategies.filters.net_gamma_filter import NetGammaFilter
 from strategies.rolling_window import RollingWindow
@@ -325,7 +324,6 @@ class SyngexOrchestrator:
         logger.info("Initializing components…")
 
         self._calculator = GEXCalculator(symbol=self.symbol)
-        self._dashboard = SyngexDashboard(orchestrator=self)
         self._client = TradeStationClient()
 
         # Phase 0: Strategy Engine + Filter
