@@ -73,6 +73,13 @@ KEY_MAGNET_DELTA_5M = "magnet_delta_5m"
 # --- Prob Distribution Shift v2 (Momentum-Master) ---
 KEY_MOMENTUM_ROC_5M = "momentum_roc_5m"
 
+# --- VAMP Momentum (Volume-Adjusted Mid-Price Momentum) ---
+KEY_VAMP_5M = "vamp_5m"
+KEY_VAMP_MID_DEV_5M = "vamp_mid_dev_5m"
+KEY_VAMP_ROC_5M = "vamp_roc_5m"
+KEY_VAMP_PARTICIPANTS_5M = "vamp_participants_5m"
+KEY_VAMP_DEPTH_DENSITY_5M = "vamp_depth_density_5m"
+
 # --- Convenience: all core keys in one tuple ---
 CORE_KEYS = (
     KEY_PRICE_5M,
@@ -106,6 +113,15 @@ DEPTH_KEYS = (
     KEY_DEPTH_ASK_SIZE_ROLLING,
 )
 
+# VAMP Momentum keys tuple
+VAMP_KEYS = (
+    KEY_VAMP_5M,
+    KEY_VAMP_MID_DEV_5M,
+    KEY_VAMP_ROC_5M,
+    KEY_VAMP_PARTICIPANTS_5M,
+    KEY_VAMP_DEPTH_DENSITY_5M,
+)
+
 # All keys in one tuple for validation
 ALL_KEYS = (*CORE_KEYS, *DEPTH_KEYS, KEY_FLOW_RATIO_5M,
             KEY_EXTRINSIC_PROXY_5M, KEY_EXTRINSIC_ROC_5M, KEY_PROB_MOMENTUM_5M,
@@ -118,7 +134,9 @@ ALL_KEYS = (*CORE_KEYS, *DEPTH_KEYS, KEY_FLOW_RATIO_5M,
             KEY_STRIKE_DELTA_5M, KEY_ATR_5M,
             KEY_SKEW_ROC_5M, KEY_DELTA_ROC_5M,
             KEY_MAGNET_DELTA_5M,
-            KEY_MOMENTUM_ROC_5M)
+            KEY_MOMENTUM_ROC_5M,
+            KEY_VAMP_5M, KEY_VAMP_MID_DEV_5M, KEY_VAMP_ROC_5M,
+            KEY_VAMP_PARTICIPANTS_5M, KEY_VAMP_DEPTH_DENSITY_5M)
 
 __all__ = [
     "KEY_PRICE_5M", "KEY_PRICE_30M",
@@ -140,5 +158,7 @@ __all__ = [
     "KEY_SKEW_ROC_5M", "KEY_DELTA_ROC_5M",
     "KEY_MAGNET_DELTA_5M",
     "KEY_MOMENTUM_ROC_5M",
+    "KEY_VAMP_5M", "KEY_VAMP_MID_DEV_5M", "KEY_VAMP_ROC_5M",
+    "KEY_VAMP_PARTICIPANTS_5M", "KEY_VAMP_DEPTH_DENSITY_5M",
     "CORE_KEYS", "DEPTH_KEYS", "ALL_KEYS",
 ]

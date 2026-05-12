@@ -2,7 +2,7 @@
 
 grid:
   columns: 6
-  rows: 4
+  rows: 8
 
 # Strategy placement in the 6×4 grid
 # Each strategy maps to its YAML config key → grid position
@@ -49,42 +49,47 @@ strategies:
     span_rows: 1
   delta_gamma_squeeze:
     row: 2
-    col: 5
+    col: 3
     span_cols: 1
     span_rows: 1
   delta_volume_exhaustion:
+    row: 2
+    col: 4
+    span_cols: 1
+    span_rows: 1
+  vamp_momentum:
     row: 2
     col: 6
     span_cols: 1
     span_rows: 1
   call_put_flow_asymmetry:
-    row: 3
-    col: 1
+    row: 2
+    col: 5
     span_cols: 1
     span_rows: 1
   iv_gex_divergence:
     row: 3
-    col: 2
+    col: 1
     span_cols: 1
     span_rows: 1
   gamma_volume_convergence:
     row: 3
-    col: 3
+    col: 2
     span_cols: 1
     span_rows: 1
   iv_band_breakout:
     row: 3
-    col: 4
+    col: 3
     span_cols: 1
     span_rows: 1
   strike_concentration:
     row: 3
-    col: 5
+    col: 4
     span_cols: 1
     span_rows: 1
   theta_burn:
     row: 3
-    col: 6
+    col: 5
     span_cols: 1
     span_rows: 1
   iv_skew_squeeze:
@@ -105,6 +110,11 @@ strategies:
   extrinsic_intrinsic_flow:
     row: 4
     col: 4
+    span_cols: 1
+    span_rows: 1
+  vamp_momentum:
+    row: 2
+    col: 6
     span_cols: 1
     span_rows: 1
 

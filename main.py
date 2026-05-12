@@ -92,6 +92,7 @@ from strategies.layer2 import (
     DeltaVolumeExhaustion,
     CallPutFlowAsymmetry,
     IVGEXDivergence,
+    VampMomentum,
 )
 from strategies.layer2.delta_iv_divergence import DeltaIVDivergence
 from strategies.layer3 import (
@@ -279,6 +280,12 @@ class SyngexOrchestrator:
             # Prob Weighted Magnet v2 (Velocity-Magnet)
             KEY_MAGNET_DELTA_5M: RollingWindow(window_type="time", window_size=300),
             KEY_MOMENTUM_ROC_5M: RollingWindow(window_type="time", window_size=300),
+            # VAMP Momentum (Volume-Adjusted Mid-Price Momentum)
+            KEY_VAMP_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_VAMP_MID_DEV_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_VAMP_ROC_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_VAMP_PARTICIPANTS_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_VAMP_DEPTH_DENSITY_5M: RollingWindow(window_type="time", window_size=300),
         }
 
         # Call/put update counters for volume_up/volume_down tracking
@@ -545,6 +552,7 @@ class SyngexOrchestrator:
                 "call_put_flow_asymmetry": CallPutFlowAsymmetry,
                 "iv_gex_divergence": IVGEXDivergence,
                 "delta_iv_divergence": DeltaIVDivergence,
+                "vamp_momentum": VampMomentum,
             },
             "layer3": {
                 "gamma_volume_convergence": GammaVolumeConvergence,
@@ -1169,6 +1177,66 @@ class SyngexOrchestrator:
                         "bid_levels": bid_levels,
                         "ask_levels": ask_levels,
                     }
+
+                    # ── VAMP Momentum: store top N levels + compute VAMP ──
+                    N_TOP_LEVELS = 10
+                    bid_levels_full = [
+                        {"price": float(b.get("Price", 0)), "size": int(b.get("TotalSize", 0)),
+                         "participants": int(b.get("NumParticipants", 1))}
+                        for b in bids[:N_TOP_LEVELS]
+                    ]
+                    ask_levels_full = [
+                        {"price": float(a.get("Price", 0)), "size": int(a.get("TotalSize", 0)),
+                         "participants": int(a.get("NumParticipants", 1))}
+                        for a in asks[:N_TOP_LEVELS]
+                    ]
+                    self._rolling_data["vamp_levels"] = {
+                        "bid_levels": bid_levels_full,
+                        "ask_levels": ask_levels_full,
+                        "mid_price": data.get("mid_price", 0),
+                        "spread": spread,
+                        "bid_avg_participants": data.get("bid_avg_participants", 0),
+                        "ask_avg_participants": data.get("ask_avg_participants", 0),
+                    }
+
+                    # VAMP computation: volume-weighted center of gravity
+                    bid_weighted = sum(l["price"] * l["size"] for l in bid_levels_full)
+                    bid_total = sum(l["size"] for l in bid_levels_full)
+                    ask_weighted = sum(l["price"] * l["size"] for l in ask_levels_full)
+                    ask_total = sum(l["size"] for l in ask_levels_full)
+                    total_weighted = bid_weighted + ask_weighted
+                    total_size = bid_total + ask_total
+                    mid_price = data.get("mid_price", 0)
+
+                    if total_size > 0 and mid_price > 0:
+                        vamp = total_weighted / total_size
+                        vamp_mid_dev = (vamp - mid_price) / mid_price
+                    else:
+                        vamp = mid_price
+                        vamp_mid_dev = 0
+
+                    # Push to rolling windows
+                    ts = time.time()
+                    vamp_roc = 0
+                    if KEY_VAMP_5M in self._rolling_data:
+                        self._rolling_data[KEY_VAMP_5M].push(vamp, ts)
+                        vamp_history = self._rolling_data[KEY_VAMP_5M]
+                        if vamp_history.count >= 5:
+                            past_vamp = vamp_history.values[-5]
+                            vamp_roc = (vamp - past_vamp) / past_vamp if past_vamp != 0 else 0
+                        else:
+                            vamp_roc = 0
+                    if KEY_VAMP_MID_DEV_5M in self._rolling_data:
+                        self._rolling_data[KEY_VAMP_MID_DEV_5M].push(vamp_mid_dev, ts)
+                    if KEY_VAMP_ROC_5M in self._rolling_data:
+                        self._rolling_data[KEY_VAMP_ROC_5M].push(vamp_roc, ts)
+                    if KEY_VAMP_PARTICIPANTS_5M in self._rolling_data:
+                        avg_participants = (
+                            data.get("bid_avg_participants", 0) + data.get("ask_avg_participants", 0)
+                        ) / 2
+                        self._rolling_data[KEY_VAMP_PARTICIPANTS_5M].push(avg_participants, ts)
+                    if KEY_VAMP_DEPTH_DENSITY_5M in self._rolling_data:
+                        self._rolling_data[KEY_VAMP_DEPTH_DENSITY_5M].push(total_size, ts)
 
 
         except Exception as exc:

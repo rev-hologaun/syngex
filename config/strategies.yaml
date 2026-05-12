@@ -270,6 +270,33 @@ layer2:
       wall_proximity_pct: 0.01
       wall_proximity_bonus: 0.10
 
+  vamp_momentum:
+    enabled: true
+    tracker:
+      max_hold_seconds: 1800
+    params:
+      # === Core VAMP params ===
+      vamp_mid_dev_threshold: 0.0005       # Δ_VAMP threshold for signal
+      vamp_roc_window: 5                    # Ticks for ROC calculation
+      vamp_roc_threshold: 0.0               # ROC must be > 0 for LONG, < 0 for SHORT
+      min_vamp_data_points: 10              # Min data points for VAMP stability
+
+      # === Gate A: Participant Conviction ===
+      min_avg_participants: 1.5             # Avg participants over top 10
+
+      # === Gate B: Liquidity Density ===
+      liquidity_density_min_mult: 1.2       # Σ size(top 10) > MA(total_depth, 60s) × 1.2
+      depth_ma_window_seconds: 60           # Rolling window for depth MA
+
+      # === Gate C: Spread Stability ===
+      spread_stability_ma_seconds: 300      # 5m MA for spread comparison
+
+      # === Execution ===
+      stop_pct: 0.005                       # 0.5% stop loss
+      target_risk_mult: 1.5                 # 1.5× risk for target
+      min_confidence: 0.40                  # Raised for microstructure strategy
+      max_confidence: 0.90
+
 # Layer 3: Micro-Signal (1Hz) — 4 strategies
 layer3:
   gamma_volume_convergence:
