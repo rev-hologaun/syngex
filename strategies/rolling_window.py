@@ -68,21 +68,6 @@ class RollingWindow:
         self._values.append(value)
         self._timestamps.append(now)
 
-    def push_pair(self, value: float, timestamp: float) -> None:
-        """Explicit value+timestamp push (avoids _now() call)."""
-        if self.window_type == "time":
-            cutoff = timestamp - self.window_size
-            while self._timestamps and self._timestamps[0] < cutoff:
-                self._values.popleft()
-                self._timestamps.popleft()
-        else:
-            if len(self._values) >= self.window_size:
-                self._values.popleft()
-                self._timestamps.popleft()
-
-        self._values.append(value)
-        self._timestamps.append(timestamp)
-
     # ------------------------------------------------------------------
     # Statistics
     # ------------------------------------------------------------------
