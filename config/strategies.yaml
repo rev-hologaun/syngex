@@ -153,10 +153,31 @@ layer2:
     tracker:
       max_hold_seconds: 2700
     params:
+      # === v1 params (kept for backwards compat) ===
       delta_decline_ratio: 0.90
       volume_decline_ratio: 0.85
       trend_duration: 3
       min_confidence: 0.35
+
+      # === v2 Exhaustion-Master params ===
+      # Liquidity vacuum
+      liquidity_vacuum_ratio_stability: 0.15
+      liquidity_vacuum_spread_widen_mult: 1.2
+
+      # IV acceleration
+      iv_accel_window: 5
+      iv_accel_bonus: 0.15
+      iv_accel_penalty: -0.05
+
+      # Wall proximity
+      wall_proximity_pct: 0.003
+      wall_proximity_bonus: 0.10
+
+      # Regime-adaptive targets
+      negative_gamma_target_mult: 1.5
+      positive_gamma_target_mult: 0.8
+      neutral_gamma_target_mult: 1.0
+      gamma_intensity_threshold: 500000
 
   call_put_flow_asymmetry:
     enabled: true
