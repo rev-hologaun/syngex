@@ -54,6 +54,33 @@ MIN_DIVERSION_STRENGTH = 0.3
 # Stop distance
 STOP_PCT = 0.008  # 0.8%
 
+# Confidence threshold
+MIN_CONFIDENCE = 0.40
+
+# Skew divergence threshold
+SK_DIV_THRESHOLD = 0.10
+
+# Decoupling history window (data points)
+DECOUPLE_HISTORY_WINDOW = 30
+
+# Decoupling correlation threshold
+DECOUPLE_THRESHOLD = 0.50
+
+# Gamma density decline threshold
+GAMMA_DECLINE_THRESHOLD = 0.70
+
+# IV expansion multiplier
+TARGET_IV_MULT = 2.0
+
+# IV expansion cap
+TARGET_IV_CAP = 4.0
+
+# Wall proximity percentage
+WALL_PROX_PCT = 0.01
+
+# Wall proximity confidence bonus
+WALL_PROX_BONUS = 0.10
+
 # ---------------------------------------------------------------------------
 # Strategy class
 # ---------------------------------------------------------------------------
@@ -73,10 +100,6 @@ class DeltaIVDivergence(BaseStrategy):
     strategy_id = "delta_iv_divergence"
     layer = "layer2"
 
-    def __init__(self, config: Any = None, **kwargs: Any) -> None:
-        """Initialize strategy with config."""
-        self.config = config
-
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """Evaluate current state for delta-IV divergence."""
         underlying_price = data.get("underlying_price", 0)
@@ -89,31 +112,12 @@ class DeltaIVDivergence(BaseStrategy):
         greeks_summary = data.get("greeks_summary", {})
         gex_calc = data.get("gex_calculator")
 
-        # Load v2 params from config
-        params = self.config.get("params", {})
-        min_confidence = params.get("min_confidence", 0.40)
-        skew_div_threshold = params.get("skew_divergence_threshold", 0.10)
-        decouple_history_window = params.get("decoupling_history_window", 30)
-        decouple_threshold = params.get("decoupling_threshold", 0.50)
-        gamma_decline_threshold = params.get("gamma_density_decline_threshold", 0.70)
-        target_iv_mult = params.get("target_iv_expansion_mult", 2.0)
-        target_iv_cap = params.get("target_iv_expansion_cap", 4.0)
-        wall_prox_pct = params.get("wall_proximity_pct", 0.01)
-        wall_prox_bonus = params.get("wall_proximity_bonus", 0.10)
-
         signals: List[Signal] = []
 
         # Check LONG setup: delta UP + IV DOWN
         long_sig = self._check_divergence(
             rolling_data, underlying_price, net_gamma, regime, "LONG",
             greeks_summary=greeks_summary, gex_calc=gex_calc,
-            skew_div_threshold=skew_div_threshold,
-            decouple_history_window=decouple_history_window,
-            decouple_threshold=decouple_threshold,
-            gamma_decline_threshold=gamma_decline_threshold,
-            target_iv_mult=target_iv_mult, target_iv_cap=target_iv_cap,
-            wall_prox_pct=wall_prox_pct, wall_prox_bonus=wall_prox_bonus,
-            min_confidence=min_confidence,
         )
         if long_sig:
             signals.append(long_sig)
@@ -122,13 +126,6 @@ class DeltaIVDivergence(BaseStrategy):
         short_sig = self._check_divergence(
             rolling_data, underlying_price, net_gamma, regime, "SHORT",
             greeks_summary=greeks_summary, gex_calc=gex_calc,
-            skew_div_threshold=skew_div_threshold,
-            decouple_history_window=decouple_history_window,
-            decouple_threshold=decouple_threshold,
-            gamma_decline_threshold=gamma_decline_threshold,
-            target_iv_mult=target_iv_mult, target_iv_cap=target_iv_cap,
-            wall_prox_pct=wall_prox_pct, wall_prox_bonus=wall_prox_bonus,
-            min_confidence=min_confidence,
         )
         if short_sig:
             signals.append(short_sig)
@@ -144,15 +141,6 @@ class DeltaIVDivergence(BaseStrategy):
         direction: str,  # "LONG" or "SHORT"
         greeks_summary: Dict,
         gex_calc: Any,
-        skew_div_threshold: float,
-        decouple_history_window: int,
-        decouple_threshold: float,
-        gamma_decline_threshold: float,
-        target_iv_mult: float,
-        target_iv_cap: float,
-        wall_prox_pct: float,
-        wall_prox_bonus: float,
-        min_confidence: float,
     ) -> Optional[Signal]:
         """Check for delta-IV divergence and return signal or None."""
         delta_window = rolling_data.get(KEY_ATM_DELTA_5M)
@@ -203,7 +191,7 @@ class DeltaIVDivergence(BaseStrategy):
 
         # 2. Decoupling coefficient (correlation collapsed)
         decoupling = self._check_decoupling(
-            rolling_data, decouple_history_window, decouple_threshold,
+            rolling_data, DECOUPLE_HISTORY_WINDOW, DECOUPLE_THRESHOLD,
         )
         if not decoupling:
             return None
@@ -219,7 +207,7 @@ class DeltaIVDivergence(BaseStrategy):
 
         # Wall proximity bonus
         wall_bonus, wall_dist_pct, wall_type = self._check_wall_proximity(
-            gex_calc, price, direction, wall_prox_pct,
+            gex_calc, price, direction, WALL_PROX_PCT,
         )
 
         # IV expansion factor (for vol-scaled targets)
@@ -239,7 +227,7 @@ class DeltaIVDivergence(BaseStrategy):
             direction=direction,
             greeks_summary=greeks_summary,
         )
-        if confidence < min_confidence:
+        if confidence < MIN_CONFIDENCE:
             return None
 
         # Compute vol-scaled target
@@ -250,7 +238,7 @@ class DeltaIVDivergence(BaseStrategy):
 
         target_price, target_mult, iv_expansion_factor = self._compute_vol_scaled_target(
             entry, risk, iv_window_for_target, direction,
-            iv_expansion, target_iv_mult, target_iv_cap,
+            iv_expansion, TARGET_IV_MULT, TARGET_IV_CAP,
         )
 
         # Gamma density stats for metadata
