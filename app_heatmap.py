@@ -19,12 +19,13 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Dict
 
 from flask import Flask, render_template
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO, emit, join_room
 
 # ---------------------------------------------------------------------------
 # Config
@@ -61,6 +62,7 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 # In-memory cache of latest data
 _latest_data: dict = {}
 _latest_ts: float = 0.0
+_latest_data_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +214,7 @@ def _push_latest() -> None:
     if data is None:
         # Emit a minimal payload with data_valid=False so the frontend
         # can show a "void" state instead of blank/neutral cards.
-        _latest_data = {
+        payload = {
             "symbol": SYMBOL,
             "underlying_price": 0.0,
             "net_gamma": 0.0,
