@@ -21,6 +21,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Dict
 
 from flask import Flask, render_template
 from flask_socketio import SocketIO, emit
