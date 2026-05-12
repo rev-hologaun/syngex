@@ -154,6 +154,7 @@ from strategies.layer2 import (
     DepthDecayMomentum,
     DepthImbalanceMomentum,
 )
+from strategies.layer2.exchange_flow_concentration import ExchangeFlowConcentration
 from strategies.layer2.delta_iv_divergence import DeltaIVDivergence
 from strategies.layer3 import (
     GammaVolumeConvergence,
@@ -632,6 +633,7 @@ class SyngexOrchestrator:
                 "obi_aggression_flow": ObiAggressionFlow,
                 "depth_decay_momentum": DepthDecayMomentum,
                 "depth_imbalance_momentum": DepthImbalanceMomentum,
+                "exchange_flow_concentration": ExchangeFlowConcentration,
             },
             "layer3": {
                 "gamma_volume_convergence": GammaVolumeConvergence,
@@ -1224,6 +1226,47 @@ class SyngexOrchestrator:
                     # Aggregated: TotalSize field
                     total_bid_size = sum(int(b.get("TotalSize", 0)) for b in bids)
                     total_ask_size = sum(int(a.get("TotalSize", 0)) for a in asks)
+
+                # ── Exchange Flow Concentration: parse per-exchange sizes (quotes only) ──
+                if msg_type == "market_depth_quotes":
+                    exchange_bid_sizes: Dict[str, int] = {}
+                    exchange_ask_sizes: Dict[str, int] = {}
+                    for b in bids:
+                        for venue, size_str in b.get("bid_exchanges", {}).items():
+                            exchange_bid_sizes[venue] = exchange_bid_sizes.get(venue, 0) + int(size_str)
+                    for a in asks:
+                        for venue, size_str in a.get("ask_exchanges", {}).items():
+                            exchange_ask_sizes[venue] = exchange_ask_sizes.get(venue, 0) + int(size_str)
+
+                    memx_bid = exchange_bid_sizes.get("MEMX", 0)
+                    memx_ask = exchange_ask_sizes.get("MEMX", 0)
+                    bats_bid = exchange_bid_sizes.get("BATS", 0)
+                    bats_ask = exchange_ask_sizes.get("BATS", 0)
+                    iex_bid = exchange_bid_sizes.get("IEX", 0)
+                    iex_ask = exchange_ask_sizes.get("IEX", 0)
+
+                    memx_vsi = memx_bid / memx_ask if memx_ask > 0 else 999.0
+                    bats_vsi = bats_bid / bats_ask if bats_ask > 0 else 999.0
+                    vsi_combined = max(memx_vsi, bats_vsi)
+
+                    total_depth = total_bid_size + total_ask_size
+                    iex_total = iex_bid + iex_ask
+                    iex_intent = iex_total / total_depth if total_depth > 0 else 0.0
+
+                    # VSI ROC over 5-tick lookback
+                    vsi_window = self._rolling_data.get(KEY_VSI_COMBINED_5M)
+                    vsi_roc = 0.0
+                    if vsi_window and vsi_window.count >= 5:
+                        past_vsi = vsi_window.values[-5]
+                        if past_vsi > 0:
+                            vsi_roc = (vsi_combined - past_vsi) / past_vsi
+
+                    if KEY_VSI_COMBINED_5M in self._rolling_data:
+                        self._rolling_data[KEY_VSI_COMBINED_5M].push(vsi_combined, ts)
+                    if KEY_VSI_ROC_5M in self._rolling_data:
+                        self._rolling_data[KEY_VSI_ROC_5M].push(vsi_roc, ts)
+                    if KEY_IEX_INTENT_5M in self._rolling_data:
+                        self._rolling_data[KEY_IEX_INTENT_5M].push(iex_intent, ts)
 
                 # Best bid/ask for spread
                 best_bid = float(bids[0].get("Price", 0)) if bids else 0.0

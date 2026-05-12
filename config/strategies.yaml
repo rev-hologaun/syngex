@@ -354,6 +354,29 @@ layer2:
       min_confidence: 0.40
       max_confidence: 0.90
 
+  exchange_flow_concentration:
+    enabled: true
+    tracker:
+      max_hold_seconds: 1800
+    params:
+      # === Core VSI params ===
+      vsi_threshold_long: 2.0
+      vsi_threshold_short: 0.5
+      vsi_roc_threshold_long: 0.0
+      vsi_roc_threshold_short: 0.0
+      min_vsi_data_points: 10
+      # Gate A: Exchange Dominance
+      min_exchange_dominance: 0.15
+      # Gate B: IEX Intent
+      max_iex_intent: 0.35
+      # Gate C: Volume Confirmation
+      volume_min_mult: 0.8
+      # Execution
+      stop_pct: 0.005
+      target_risk_mult: 1.5
+      min_confidence: 0.40
+      max_confidence: 0.90
+
 # Layer 3: Micro-Signal (1Hz) — 4 strategies
 layer3:
   gamma_volume_convergence:

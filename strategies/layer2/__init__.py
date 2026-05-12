@@ -22,6 +22,7 @@ from .vamp_momentum import VampMomentum
 from .obi_aggression_flow import ObiAggressionFlow
 from .depth_decay_momentum import DepthDecayMomentum
 from .depth_imbalance_momentum import DepthImbalanceMomentum
+from .exchange_flow_concentration import ExchangeFlowConcentration
 
 __all__ = [
     "DeltaGammaSqueeze",
@@ -33,4 +34,5 @@ __all__ = [
     "ObiAggressionFlow",
     "DepthDecayMomentum",
     "DepthImbalanceMomentum",
+    "ExchangeFlowConcentration",
 ]
