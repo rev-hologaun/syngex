@@ -1,0 +1,798 @@
+# ============================================
+# LEVEL 2 / TOTALVIEW / BATS DATA SAMPLES
+# TSLA — 2026-05-11 14:25-14:26 PDT
+# Source: NASDAQ Real-Time Data Package #3
+# (Level 1, Level 2, TotalView + BATS/Direct Edge)
+# ============================================
+
+## 1. QUOTES (Level 1 — Price, Bid/Ask, Volume, Venue)
+## Stream: quotes_parsed
+## Use case: Price action, VWAP deviation, venue analysis
+
+--- # Bullish: Tight spread (0.07), bid wall at 419.55, EDGX venue ---
+{
+  "type": "quote_update",
+  "symbol": "TSLA",
+  "last": 419.7,
+  "bid": 419.65,
+  "ask": 419.72,
+  "bid_size": "200",
+  "ask_size": "40",
+  "volume": "12656412",
+  "previous_volume": "65049970",
+  "open": 422.16,
+  "high": 425.70001,
+  "low": 418.64999,
+  "close": 419.70001,
+  "previous_close": 428.35001,
+  "net_change": -8.65001,
+  "net_change_pct": -0.0202,
+  "vwap": 421.249081014023,
+  "last_size": "40",
+  "last_venue": "IEX",
+  "52w_high": 498.82999,
+  "52w_low": 273.20999,
+  "is_delayed": false,
+  "is_halted": false,
+  "_probe_ts": "2026-05-11T14:25:43.847831Z"
+}
+
+--- # Bearish: Largest intraday drop (-2.09%), IEX venue, ask wall ---
+{
+  "type": "quote_update",
+  "symbol": "TSLA",
+  "last": 419.39,
+  "bid": 419.38,
+  "ask": 419.45,
+  "bid_size": "80",
+  "ask_size": 0,
+  "volume": "12711032",
+  "previous_volume": 0,
+  "open": 0.0,
+  "high": 0.0,
+  "low": 0.0,
+  "close": 419.39001,
+  "previous_close": 0.0,
+  "net_change": -8.96001,
+  "net_change_pct": -0.0209,
+  "vwap": 421.239989100977,
+  "last_size": "40",
+  "last_venue": "IEX",
+  "52w_high": 0.0,
+  "52w_low": 0.0,
+  "is_delayed": false,
+  "is_halted": false,
+  "_probe_ts": "2026-05-11T14:26:03.818430Z"
+}
+
+--- # Mixed: BATS venue trade, -2.03% day, 200-share print ---
+{
+  "type": "quote_update",
+  "symbol": "TSLA",
+  "last": 419.65,
+  "bid": 419.61,
+  "ask": 419.7,
+  "bid_size": "40",
+  "ask_size": 0,
+  "volume": "12658425",
+  "previous_volume": 0,
+  "open": 0.0,
+  "high": 0.0,
+  "low": 0.0,
+  "close": 419.64999,
+  "previous_close": 0.0,
+  "net_change": -8.70001,
+  "net_change_pct": -0.0203,
+  "vwap": 421.248795828597,
+  "last_size": "200",
+  "last_venue": "BATS",
+  "52w_high": 0.0,
+  "52w_low": 0.0,
+  "is_delayed": false,
+  "is_halted": false,
+  "_probe_ts": "2026-05-11T14:25:45.820959Z"
+}
+
+## 2. DEPTH AGGREGATED (Level 2 — Total size per price level, participant counts)
+## Stream: depthagg_parsed
+## Use case: Liquidity imbalances, bid/ask pressure, participant concentration
+
+--- # Bullish: Extreme bid pressure (8061 bid / 639 ask = ratio 12.62), 4 participants at best bid ---
+{
+  "type": "market_depth_agg",
+  "symbol": "",
+  "best_bid": 419.52,
+  "best_ask": 419.57,
+  "mid_price": 419.54499999999996,
+  "spread": 0.05000000000001137,
+  "total_bid_size": 8061,
+  "total_ask_size": 639,
+  "bid_levels": 20,
+  "ask_levels": 20,
+  "bid_avg_participants": 1.35,
+  "ask_avg_participants": 1.2,
+  "bid_max_participants": 4,
+  "ask_max_participants": 3,
+  "_probe_ts": "2026-05-11T14:25:53.077101Z",
+  "top_3_bids": [
+    {
+      "price": 419.52,
+      "total_size": 3,
+      "biggest_size": 3,
+      "smallest_size": 3,
+      "num_participants": 1,
+      "total_order_count": 2,
+      "earliest_time": "2026-05-11T14:25:52Z",
+      "latest_time": "2026-05-11T14:25:52Z"
+    },
+    {
+      "price": 419.5,
+      "total_size": 4681,
+      "biggest_size": 2321,
+      "smallest_size": 40,
+      "num_participants": 4,
+      "total_order_count": 17,
+      "earliest_time": "2026-05-11T14:25:49Z",
+      "latest_time": "2026-05-11T14:25:52Z"
+    },
+    {
+      "price": 419.49,
+      "total_size": 1,
+      "biggest_size": 1,
+      "smallest_size": 1,
+      "num_participants": 1,
+      "total_order_count": 1,
+      "earliest_time": "2026-05-11T14:25:52Z",
+      "latest_time": "2026-05-11T14:25:52Z"
+    }
+  ],
+  "top_3_asks": [
+    {
+      "price": 419.57,
+      "total_size": 8,
+      "biggest_size": 8,
+      "smallest_size": 8,
+      "num_participants": 1,
+      "total_order_count": 1,
+      "earliest_time": "2026-05-11T14:25:52Z",
+      "latest_time": "2026-05-11T14:25:52Z"
+    },
+    {
+      "price": 419.58,
+      "total_size": 128,
+      "biggest_size": 88,
+      "smallest_size": 40,
+      "num_participants": 2,
+      "total_order_count": 4,
+      "earliest_time": "2026-05-11T14:25:52Z",
+      "latest_time": "2026-05-11T14:25:52Z"
+    },
+    {
+      "price": 419.59,
+      "total_size": 8,
+      "biggest_size": 8,
+      "smallest_size": 8,
+      "num_participants": 1,
+      "total_order_count": 1,
+      "earliest_time": "2026-05-11T14:25:51Z",
+      "latest_time": "2026-05-11T14:25:51Z"
+    }
+  ]
+}
+
+--- # Bearish: Ask pressure dominates (2217 ask / 1940 bid = ratio 0.88), thin bids ---
+{
+  "type": "market_depth_agg",
+  "symbol": "",
+  "best_bid": 419.38,
+  "best_ask": 419.42,
+  "mid_price": 419.4,
+  "spread": 0.040000000000020464,
+  "total_bid_size": 1940,
+  "total_ask_size": 2217,
+  "bid_levels": 20,
+  "ask_levels": 20,
+  "bid_avg_participants": 1.25,
+  "ask_avg_participants": 1.2,
+  "bid_max_participants": 3,
+  "ask_max_participants": 3,
+  "_probe_ts": "2026-05-11T14:25:57.076353Z",
+  "top_3_bids": [
+    {
+      "price": 419.38,
+      "total_size": 4,
+      "biggest_size": 4,
+      "smallest_size": 4,
+      "num_participants": 1,
+      "total_order_count": 2,
+      "earliest_time": "2026-05-11T14:25:49Z",
+      "latest_time": "2026-05-11T14:25:49Z"
+    },
+    {
+      "price": 419.37,
+      "total_size": 201,
+      "biggest_size": 201,
+      "smallest_size": 201,
+      "num_participants": 1,
+      "total_order_count": 2,
+      "earliest_time": "2026-05-11T14:24:04Z",
+      "latest_time": "2026-05-11T14:24:04Z"
+    },
+    {
+      "price": 419.35,
+      "total_size": 93,
+      "biggest_size": 80,
+      "smallest_size": 13,
+      "num_participants": 2,
+      "total_order_count": 5,
+      "earliest_time": "2026-05-11T14:25:56Z",
+      "latest_time": "2026-05-11T14:25:56Z"
+    }
+  ],
+  "top_3_asks": [
+    {
+      "price": 419.42,
+      "total_size": 598,
+      "biggest_size": 560,
+      "smallest_size": 38,
+      "num_participants": 2,
+      "total_order_count": 4,
+      "earliest_time": "2026-05-11T14:25:56Z",
+      "latest_time": "2026-05-11T14:25:57Z"
+    },
+    {
+      "price": 419.45,
+      "total_size": 8,
+      "biggest_size": 8,
+      "smallest_size": 8,
+      "num_participants": 1,
+      "total_order_count": 1,
+      "earliest_time": "2026-05-11T14:25:56Z",
+      "latest_time": "2026-05-11T14:25:56Z"
+    },
+    {
+      "price": 419.46,
+      "total_size": 49,
+      "biggest_size": 49,
+      "smallest_size": 49,
+      "num_participants": 1,
+      "total_order_count": 3,
+      "earliest_time": "2026-05-11T14:25:56Z",
+      "latest_time": "2026-05-11T14:25:56Z"
+    }
+  ]
+}
+
+--- # Balanced: Near equal depth (2019 bid / 2270 ask), narrow spread 0.09 ---
+{
+  "type": "market_depth_agg",
+  "symbol": "",
+  "best_bid": 419.39,
+  "best_ask": 419.48,
+  "mid_price": 419.435,
+  "spread": 0.09000000000003183,
+  "total_bid_size": 2019,
+  "total_ask_size": 2270,
+  "bid_levels": 20,
+  "ask_levels": 20,
+  "bid_avg_participants": 1.25,
+  "ask_avg_participants": 1.15,
+  "bid_max_participants": 3,
+  "ask_max_participants": 2,
+  "_probe_ts": "2026-05-11T14:25:57.326993Z",
+  "top_3_bids": [
+    {
+      "price": 419.39,
+      "total_size": 140,
+      "biggest_size": 60,
+      "smallest_size": 40,
+      "num_participants": 3,
+      "total_order_count": 4,
+      "earliest_time": "2026-05-11T14:25:57Z",
+      "latest_time": "2026-05-11T14:25:57Z"
+    },
+    {
+      "price": 419.38,
+      "total_size": 49,
+      "biggest_size": 49,
+      "smallest_size": 49,
+      "num_participants": 1,
+      "total_order_count": 4,
+      "earliest_time": "2026-05-11T14:25:57Z",
+      "latest_time": "2026-05-11T14:25:57Z"
+    },
+    {
+      "price": 419.37,
+      "total_size": 267,
+      "biggest_size": 227,
+      "smallest_size": 40,
+      "num_participants": 2,
+      "total_order_count": 5,
+      "earliest_time": "2026-05-11T14:25:57Z",
+      "latest_time": "2026-05-11T14:25:57Z"
+    }
+  ],
+  "top_3_asks": [
+    {
+      "price": 419.48,
+      "total_size": 48,
+      "biggest_size": 40,
+      "smallest_size": 8,
+      "num_participants": 2,
+      "total_order_count": 2,
+      "earliest_time": "2026-05-11T14:25:57Z",
+      "latest_time": "2026-05-11T14:25:57Z"
+    },
+    {
+      "price": 419.49,
+      "total_size": 161,
+      "biggest_size": 161,
+      "smallest_size": 161,
+      "num_participants": 1,
+      "total_order_count": 2,
+      "earliest_time": "2026-05-11T14:25:57Z",
+      "latest_time": "2026-05-11T14:25:57Z"
+    },
+    {
+      "price": 419.5,
+      "total_size": 40,
+      "biggest_size": 40,
+      "smallest_size": 40,
+      "num_participants": 1,
+      "total_order_count": 1,
+      "earliest_time": "2026-05-11T14:25:57Z",
+      "latest_time": "2026-05-11T14:25:57Z"
+    }
+  ]
+}
+
+## 3. DEPTH QUOTES (TotalView — Per-exchange order book, Level 2 individual quotes)
+## Stream: depthquotes_parsed
+## Use case: Exchange-specific liquidity, MEMX/BATS/EDGX flow, venue-based signals
+
+--- # Multi-exchange ask diversity: 8 exchanges on asks (BATY, NSDQ, ARCX, EDGA, EDGX, BATS, CHXE, MEMX) ---
+{
+  "type": "market_depth_quotes",
+  "symbol": "",
+  "best_bid": 419.68,
+  "best_ask": 419.75,
+  "mid_price": 419.71500000000003,
+  "spread": 0.06999999999999318,
+  "total_bid_size": 5005,
+  "total_ask_size": 3871,
+  "bid_levels": 26,
+  "ask_levels": 27,
+  "bid_exchanges": {
+    "NSDQ": 4525,
+    "MEMX": 40,
+    "ARCX": 40,
+    "IEX": 80,
+    "EDGX": 240,
+    "MPRL": 40,
+    "BATS": 40
+  },
+  "ask_exchanges": {
+    "BATY": 40,
+    "NSDQ": 1151,
+    "ARCX": 320,
+    "EDGA": 40,
+    "EDGX": 40,
+    "BATS": 40,
+    "CHXE": 200,
+    "MEMX": 2040
+  },
+  "_probe_ts": "2026-05-11T14:25:45.094693Z",
+  "top_3_bids": [
+    {
+      "price": 419.68,
+      "size": 372,
+      "order_count": 3,
+      "timestamp": "2026-05-11T14:25:44Z",
+      "exchange": "NSDQ"
+    },
+    {
+      "price": 419.67,
+      "size": 1,
+      "order_count": 1,
+      "timestamp": "2026-05-11T14:25:44Z",
+      "exchange": "NSDQ"
+    },
+    {
+      "price": 419.66,
+      "size": 59,
+      "order_count": 4,
+      "timestamp": "2026-05-11T14:25:44Z",
+      "exchange": "NSDQ"
+    }
+  ],
+  "top_3_asks": [
+    {
+      "price": 419.75,
+      "size": 40,
+      "order_count": 1,
+      "timestamp": "2026-05-11T14:25:44Z",
+      "exchange": "BATY"
+    },
+    {
+      "price": 419.75,
+      "size": 80,
+      "order_count": 2,
+      "timestamp": "2026-05-11T14:25:44Z",
+      "exchange": "NSDQ"
+    },
+    {
+      "price": 419.76,
+      "size": 8,
+      "order_count": 1,
+      "timestamp": "2026-05-11T14:25:44Z",
+      "exchange": "NSDQ"
+    }
+  ]
+}
+
+--- # MEMX Wall on Asks (2040 shares): Large MEMX ask wall = potential support/resistance ---
+{
+  "type": "market_depth_quotes",
+  "symbol": "",
+  "best_bid": 419.65,
+  "best_ask": 419.74,
+  "mid_price": 419.695,
+  "spread": 0.09000000000003183,
+  "total_bid_size": 5342,
+  "total_ask_size": 4083,
+  "bid_levels": 26,
+  "ask_levels": 26,
+  "bid_exchanges": {
+    "NSDQ": 4582,
+    "IEX": 80,
+    "ARCX": 40,
+    "MEMX": 320,
+    "EDGX": 200,
+    "MPRL": 40,
+    "BATS": 80
+  },
+  "ask_exchanges": {
+    "EDGX": 560,
+    "NSDQ": 1163,
+    "ARCX": 40,
+    "EDGA": 40,
+    "BATS": 40,
+    "CHXE": 200,
+    "MEMX": 2040
+  },
+  "_probe_ts": "2026-05-11T14:25:43.846660Z",
+  "top_3_bids": [
+    {
+      "price": 419.65,
+      "size": 270,
+      "order_count": 4,
+      "timestamp": "2026-05-11T14:25:43Z",
+      "exchange": "NSDQ"
+    },
+    {
+      "price": 419.64,
+      "size": 375,
+      "order_count": 2,
+      "timestamp": "2026-05-11T14:25:43Z",
+      "exchange": "NSDQ"
+    },
+    {
+      "price": 419.63,
+      "size": 80,
+      "order_count": 1,
+      "timestamp": "2026-05-11T14:25:43Z",
+      "exchange": "IEX"
+    }
+  ],
+  "top_3_asks": [
+    {
+      "price": 419.74,
+      "size": 560,
+      "order_count": 1,
+      "timestamp": "2026-05-11T14:25:43Z",
+      "exchange": "EDGX"
+    },
+    {
+      "price": 419.74,
+      "size": 8,
+      "order_count": 1,
+      "timestamp": "2026-05-11T14:25:43Z",
+      "exchange": "NSDQ"
+    },
+    {
+      "price": 419.75,
+      "size": 40,
+      "order_count": 1,
+      "timestamp": "2026-05-11T14:25:43Z",
+      "exchange": "ARCX"
+    }
+  ]
+}
+
+--- # BATS on Bids (80 shares): BATS buying pressure, bullish demand signal ---
+{
+  "type": "market_depth_quotes",
+  "symbol": "",
+  "best_bid": 419.65,
+  "best_ask": 419.74,
+  "mid_price": 419.695,
+  "spread": 0.09000000000003183,
+  "total_bid_size": 5342,
+  "total_ask_size": 4083,
+  "bid_levels": 26,
+  "ask_levels": 26,
+  "bid_exchanges": {
+    "NSDQ": 4582,
+    "IEX": 80,
+    "ARCX": 40,
+    "MEMX": 320,
+    "EDGX": 200,
+    "MPRL": 40,
+    "BATS": 80
+  },
+  "ask_exchanges": {
+    "EDGX": 560,
+    "NSDQ": 1163,
+    "ARCX": 40,
+    "EDGA": 40,
+    "BATS": 40,
+    "CHXE": 200,
+    "MEMX": 2040
+  },
+  "_probe_ts": "2026-05-11T14:25:43.846660Z",
+  "top_3_bids": [
+    {
+      "price": 419.65,
+      "size": 270,
+      "order_count": 4,
+      "timestamp": "2026-05-11T14:25:43Z",
+      "exchange": "NSDQ"
+    },
+    {
+      "price": 419.64,
+      "size": 375,
+      "order_count": 2,
+      "timestamp": "2026-05-11T14:25:43Z",
+      "exchange": "NSDQ"
+    },
+    {
+      "price": 419.63,
+      "size": 80,
+      "order_count": 1,
+      "timestamp": "2026-05-11T14:25:43Z",
+      "exchange": "IEX"
+    }
+  ],
+  "top_3_asks": [
+    {
+      "price": 419.74,
+      "size": 560,
+      "order_count": 1,
+      "timestamp": "2026-05-11T14:25:43Z",
+      "exchange": "EDGX"
+    },
+    {
+      "price": 419.74,
+      "size": 8,
+      "order_count": 1,
+      "timestamp": "2026-05-11T14:25:43Z",
+      "exchange": "NSDQ"
+    },
+    {
+      "price": 419.75,
+      "size": 40,
+      "order_count": 1,
+      "timestamp": "2026-05-11T14:25:43Z",
+      "exchange": "ARCX"
+    }
+  ]
+}
+
+## 4. OPTION CHAIN (Greeks, IV, Probabilities — TotalView options data)
+## Stream: optionchain_parsed
+## Use case: Gamma walls, IV skew, delta density, probability analysis
+
+--- # ATM Call (420C): Gamma peak (0.0627), delta 0.48 — dealer hedging zone ---
+{
+  "type": "option_update",
+  "symbol": "TSLA 260511C420",
+  "strike": 420.0,
+  "side": "call",
+  "bid": 2.35,
+  "ask": 2.37,
+  "last": 2.35,
+  "mid": 2.36,
+  "bid_size": 10,
+  "ask_size": 9,
+  "volume": 26670,
+  "open_interest": 4642,
+  "iv": 0.6008,
+  "delta": 0.48152507,
+  "gamma": 0.06267249,
+  "theta": -2.65251343,
+  "vega": 0.04217486,
+  "rho": 0.00127008,
+  "intrinsic_value": 0.0,
+  "extrinsic_value": 2.37,
+  "theoretical_value": 1.4483,
+  "theoretical_value_iv": 2.37,
+  "probability_itm": 0.4643,
+  "probability_otm": 0.5357,
+  "probability_be": 0.3275,
+  "probability_itm_iv": 0.4755,
+  "probability_otm_iv": 0.5245,
+  "probability_be_iv": 0.3864,
+  "close": 2.35,
+  "net_change": -7.9,
+  "net_change_pct": -0.7707,
+  "52w_high": 0.0,
+  "52w_low": 0.0,
+  "expiration": "2026-05-11T00:00:00Z",
+  "_probe_ts": "2026-05-11T14:25:44.089316Z"
+}
+
+--- # ATM Put (420P): Gamma peak (0.0627), delta -0.52 — symmetric gamma exposure ---
+{
+  "type": "option_update",
+  "symbol": "TSLA 260511P420",
+  "strike": 420.0,
+  "side": "put",
+  "bid": 2.66,
+  "ask": 2.71,
+  "last": 2.65,
+  "mid": 2.685,
+  "bid_size": 29,
+  "ask_size": 38,
+  "volume": 39453,
+  "open_interest": 3001,
+  "iv": 0.6001,
+  "delta": -0.51850354,
+  "gamma": 0.06274548,
+  "theta": -2.6080439,
+  "vega": 0.04217472,
+  "rho": -0.00140108,
+  "intrinsic_value": 0.3525,
+  "extrinsic_value": 2.3575,
+  "theoretical_value": 1.7912,
+  "theoretical_value_iv": 2.71,
+  "probability_itm": 0.5357,
+  "probability_otm": 0.4643,
+  "probability_be": 0.3617,
+  "probability_itm_iv": 0.5245,
+  "probability_otm_iv": 0.4755,
+  "probability_be_iv": 0.4126,
+  "close": 2.65,
+  "net_change": 0.75,
+  "net_change_pct": 0.3947,
+  "52w_high": 0.0,
+  "52w_low": 0.0,
+  "expiration": "2026-05-11T00:00:00Z",
+  "_probe_ts": "2026-05-11T14:25:44.088442Z"
+}
+
+--- # OTM Call (425C): High volume (56k), low delta 0.22 — speculative bullish flow ---
+{
+  "type": "option_update",
+  "symbol": "TSLA 260511C425",
+  "strike": 425.0,
+  "side": "call",
+  "bid": 0.85,
+  "ask": 0.87,
+  "last": 0.86,
+  "mid": 0.86,
+  "bid_size": 14,
+  "ask_size": 64,
+  "volume": 56151,
+  "open_interest": 4094,
+  "iv": 0.6486,
+  "delta": 0.22206637,
+  "gamma": 0.04336573,
+  "theta": -2.68450041,
+  "vega": 0.03150375,
+  "rho": 0.00058714,
+  "intrinsic_value": 0.0,
+  "extrinsic_value": 0.87,
+  "theoretical_value": 0.1803,
+  "theoretical_value_iv": 0.87,
+  "probability_itm": 0.0938,
+  "probability_otm": 0.9062,
+  "probability_be": 0.0866,
+  "probability_itm_iv": 0.2172,
+  "probability_otm_iv": 0.7828,
+  "probability_be_iv": 0.2097,
+  "close": 0.86,
+  "net_change": -5.89,
+  "net_change_pct": -0.8726,
+  "52w_high": 0.0,
+  "52w_low": 0.0,
+  "expiration": "2026-05-11T00:00:00Z",
+  "_probe_ts": "2026-05-11T14:25:44.088316Z"
+}
+
+--- # Deep ITM Call (382.5C): Delta 0.97, IV 1.98 — substitute for shares, high premium ---
+{
+  "type": "option_update",
+  "symbol": "TSLA 260511C382.5",
+  "strike": 382.5,
+  "side": "call",
+  "bid": 36.95,
+  "ask": 37.4,
+  "last": 37.68,
+  "mid": 37.175,
+  "bid_size": 21,
+  "ask_size": 13,
+  "volume": 9,
+  "open_interest": 283,
+  "iv": 1.9751,
+  "delta": 0.97036366,
+  "gamma": 0.00322242,
+  "theta": -5.54550267,
+  "vega": 0.00712841,
+  "rho": 0.00235196,
+  "intrinsic_value": 37.1475,
+  "extrinsic_value": 0.2525,
+  "theoretical_value": 37.1563,
+  "theoretical_value_iv": 37.4,
+  "probability_itm": 1.0,
+  "probability_otm": 0.0,
+  "probability_be": 0.4982,
+  "probability_itm_iv": 0.9668,
+  "probability_otm_iv": 0.0332,
+  "probability_be_iv": 0.4901,
+  "close": 37.68,
+  "net_change": -5.47,
+  "net_change_pct": -0.1268,
+  "52w_high": 0.0,
+  "52w_low": 0.0,
+  "expiration": "2026-05-11T00:00:00Z",
+  "_probe_ts": "2026-05-11T14:25:43.934492Z"
+}
+
+--- # OTM Put (395P): Bearish hedge, prob_ITM 0%, IV 1.05 — tail risk pricing ---
+{
+  "type": "option_update",
+  "symbol": "TSLA 260511P395",
+  "strike": 395.0,
+  "side": "put",
+  "bid": 0.03,
+  "ask": 0.04,
+  "last": 0.03,
+  "mid": 0.035,
+  "bid_size": 137,
+  "ask_size": 220,
+  "volume": 344,
+  "open_interest": 1790,
+  "iv": 1.0465,
+  "delta": -0.01051286,
+  "gamma": 0.00251371,
+  "theta": -2.40463085,
+  "vega": 0.00294635,
+  "rho": -2.831e-05,
+  "intrinsic_value": 0.0,
+  "extrinsic_value": 0.04,
+  "theoretical_value": 0.0,
+  "theoretical_value_iv": 0.04,
+  "probability_itm": 0.0,
+  "probability_otm": 1.0,
+  "probability_be": 0.0,
+  "probability_itm_iv": 0.0113,
+  "probability_otm_iv": 0.9887,
+  "probability_be_iv": 0.0113,
+  "close": 0.03,
+  "net_change": -0.08,
+  "net_change_pct": -0.7273,
+  "52w_high": 0.0,
+  "52w_low": 0.0,
+  "expiration": "2026-05-11T00:00:00Z",
+  "_probe_ts": "2026-05-11T14:25:43.934426Z"
+}
+
+# ============================================
+# END OF SAMPLES
+# Each line is a complete JSON object from the parsed stream.
+# Use these patterns to calibrate strategy signals:
+#   - Bid/ask size ratios → liquidity vacuum detection
+#   - Exchange concentration → venue-specific flow
+#   - Option gamma/delta → dealer positioning
+#   - IV skew → fear/greed indicator
+# ============================================
