@@ -4,10 +4,10 @@ grid:
   columns: 6
   rows: 8
 
-# Strategy placement in the 6×8 grid
+# Strategy placement in the 6×7 grid (41 strategies)
 # Each strategy maps to its YAML config key → grid position
 strategies:
-  # Row 1: Layer 1 — Core GEX
+  # Row 1: Core GEX (Structural)
   gamma_wall_bounce:
     row: 1
     col: 1
@@ -38,7 +38,7 @@ strategies:
     col: 6
     span_cols: 1
     span_rows: 1
-  # Row 2: Layer 1/2 Alpha
+  # Row 2: GEX Alpha (Delta-Gamma)
   vol_compression_range:
     row: 2
     col: 1
@@ -69,28 +69,28 @@ strategies:
     col: 6
     span_cols: 1
     span_rows: 1
-  # Row 3: Layer 2/3 Microstructure
+  # Row 3: Flow & Microstructure
   iv_gex_divergence:
     row: 3
     col: 1
     span_cols: 1
     span_rows: 1
-  gamma_volume_convergence:
+  delta_iv_divergence:
     row: 3
     col: 2
     span_cols: 1
     span_rows: 1
-  iv_band_breakout:
+  depth_imbalance_momentum:
     row: 3
     col: 3
     span_cols: 1
     span_rows: 1
-  strike_concentration:
+  depth_decay_momentum:
     row: 3
     col: 4
     span_cols: 1
     span_rows: 1
-  depth_decay_momentum:
+  exchange_flow_concentration:
     row: 3
     col: 5
     span_cols: 1
@@ -100,71 +100,123 @@ strategies:
     col: 6
     span_cols: 1
     span_rows: 1
-  # Row 4: Layer 2 Advanced + Full Data
-  depth_imbalance_momentum:
+  # Row 4: Exchange & Order Book
+  participant_diversity_conviction:
     row: 4
     col: 1
     span_cols: 1
     span_rows: 1
-  exchange_flow_concentration:
+  participant_divergence_scalper:
     row: 4
     col: 2
     span_cols: 1
     span_rows: 1
-  iv_skew_squeeze:
+  exchange_flow_imbalance:
     row: 4
     col: 3
     span_cols: 1
     span_rows: 1
-  prob_weighted_magnet:
+  exchange_flow_asymmetry:
     row: 4
     col: 4
     span_cols: 1
     span_rows: 1
-  prob_distribution_shift:
+  order_book_fragmentation:
     row: 4
     col: 5
     span_cols: 1
     span_rows: 1
-  extrinsic_intrinsic_flow:
+  order_book_stacking:
     row: 4
     col: 6
     span_cols: 1
     span_rows: 1
-  # Row 5: Full Data remainder
-  theta_burn:
+  # Row 5: Volatility Surface
+  gamma_volume_convergence:
     row: 5
     col: 1
     span_cols: 1
     span_rows: 1
-  participant_diversity_conviction:
+  iv_band_breakout:
     row: 5
     col: 2
     span_cols: 1
     span_rows: 1
-  participant_divergence_scalper:
+  strike_concentration:
     row: 5
     col: 3
     span_cols: 1
     span_rows: 1
-  exchange_flow_imbalance:
+  iv_skew_squeeze:
     row: 5
     col: 4
     span_cols: 1
     span_rows: 1
-  exchange_flow_asymmetry:
+  skew_dynamics:
     row: 5
     col: 5
     span_cols: 1
     span_rows: 1
-  order_book_fragmentation:
+  smile_dynamics:
+    row: 5
+    col: 6
+    span_cols: 1
+    span_rows: 1
+  # Row 6: Volume & Sentiment
+  theta_burn:
     row: 6
     col: 1
     span_cols: 1
     span_rows: 1
-  order_book_stacking:
+  prob_weighted_magnet:
     row: 6
     col: 2
+    span_cols: 1
+    span_rows: 1
+  prob_distribution_shift:
+    row: 6
+    col: 3
+    span_cols: 1
+    span_rows: 1
+  extrinsic_intrinsic_flow:
+    row: 6
+    col: 4
+    span_cols: 1
+    span_rows: 1
+  ghost_premium:
+    row: 6
+    col: 5
+    span_cols: 1
+    span_rows: 1
+  extrinsic_flow:
+    row: 6
+    col: 6
+    span_cols: 1
+    span_rows: 1
+  # Row 7: Confluence
+  gamma_breaker:
+    row: 7
+    col: 1
+    span_cols: 1
+    span_rows: 1
+  iron_anchor:
+    row: 7
+    col: 2
+    span_cols: 1
+    span_rows: 1
+  vortex_compression_breakout:
+    row: 7
+    col: 3
+    span_cols: 1
+    span_rows: 1
+  sentiment_sync:
+    row: 7
+    col: 4
+    span_cols: 1
+    span_rows: 1
+  whale_tracker:
+    row: 7
+    col: 5
     span_cols: 1
     span_rows: 1
 
@@ -177,7 +229,7 @@ widgets:
     span_rows: 1
     type: regime
   system_log:
-    row: 5
+    row: 8
     col: 1
     span_cols: 6
     span_rows: 1

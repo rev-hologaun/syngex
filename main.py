@@ -200,6 +200,10 @@ from strategies.rolling_keys import (
     KEY_IEX_INTENT_5M,
     KEY_VSI_COMBINED_5M,
     KEY_VSI_ROC_5M,
+    KEY_SPREAD_ZSCORE_5M,
+    KEY_LIQUIDITY_DENSITY_5M,
+    KEY_PARTICIPANT_EQUILIBRIUM_5M,
+    KEY_VOLUME_SPIKE_5M,
 )
 from strategies.layer1 import (
     GammaWallBounce,
@@ -229,6 +233,7 @@ from strategies.layer2.exchange_flow_imbalance import ExchangeFlowImbalance
 from strategies.layer2.exchange_flow_asymmetry import ExchangeFlowAsymmetry
 from strategies.layer2.order_book_fragmentation import OrderBookFragmentation
 from strategies.layer2.order_book_stacking import OrderBookStacking
+from strategies.layer2.vortex_compression_breakout import VortexCompressionBreakout
 from strategies.layer3 import (
     GammaVolumeConvergence,
     IVBandBreakout,
@@ -452,6 +457,11 @@ class SyngexOrchestrator:
             KEY_DEPTH_SPREAD_5M: RollingWindow(window_type="time", window_size=300),
             KEY_DEPTH_BID_LEVELS_5M: RollingWindow(window_type="time", window_size=300),
             KEY_DEPTH_ASK_LEVELS_5M: RollingWindow(window_type="time", window_size=300),
+            # Vortex Compression Breakout rolling windows
+            KEY_SPREAD_ZSCORE_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_LIQUIDITY_DENSITY_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_PARTICIPANT_EQUILIBRIUM_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_VOLUME_SPIKE_5M: RollingWindow(window_type="time", window_size=300),
             # Squeeze depth rolling windows (liquidity vacuum detection)
             KEY_DEPTH_BID_SIZE_ROLLING: RollingWindow(window_type="time", window_size=60),
             KEY_DEPTH_ASK_SIZE_ROLLING: RollingWindow(window_type="time", window_size=60),
@@ -2098,6 +2108,45 @@ class SyngexOrchestrator:
                     self._rolling_data[KEY_DEPTH_BID_LEVELS_5M].push(len(bids), ts)
                 if KEY_DEPTH_ASK_LEVELS_5M in self._rolling_data:
                     self._rolling_data[KEY_DEPTH_ASK_LEVELS_5M].push(len(asks), ts)
+
+                # ── Vortex Compression: spread z-score, liquidity density, participant equilibrium, volume spike ──
+                if KEY_SPREAD_ZSCORE_5M in self._rolling_data:
+                    spread_window = self._rolling_data[KEY_DEPTH_SPREAD_5M]
+                    if spread_window.count >= 10:
+                        mean_spread = spread_window.mean
+                        std_spread = spread_window.std
+                        current_spread = spread_window.latest
+                        if std_spread is not None and std_spread > 0 and mean_spread is not None and current_spread is not None:
+                            spread_z = (current_spread - mean_spread) / std_spread
+                        else:
+                            spread_z = 0.0
+                        self._rolling_data[KEY_SPREAD_ZSCORE_5M].push(spread_z, ts)
+
+                # liquidity_density = (total_bid_size + total_ask_size) / spread
+                if spread > 0:
+                    liquidity_density = (total_bid_size + total_ask_size) / spread
+                    if KEY_LIQUIDITY_DENSITY_5M in self._rolling_data:
+                        self._rolling_data[KEY_LIQUIDITY_DENSITY_5M].push(liquidity_density, ts)
+
+                # participant_equilibrium = bid_avg_participants / ask_avg_participants
+                bid_avg_p = data.get("bid_avg_participants", 0)
+                ask_avg_p = data.get("ask_avg_participants", 0)
+                if ask_avg_p > 0:
+                    participant_equil = bid_avg_p / ask_avg_p
+                else:
+                    participant_equil = 1.0
+                if KEY_PARTICIPANT_EQUILIBRIUM_5M in self._rolling_data:
+                    self._rolling_data[KEY_PARTICIPANT_EQUILIBRIUM_5M].push(participant_equil, ts)
+
+                # volume_spike = current_volume / 5m_avg_volume
+                volume_window = self._rolling_data.get(KEY_VOLUME_5M)
+                if volume_window and volume_window.count > 0 and volume_window.mean and volume_window.mean > 0:
+                    current_vol = volume_window.latest if volume_window.latest else 0
+                    volume_spike = current_vol / volume_window.mean if current_vol > 0 else 0.0
+                else:
+                    volume_spike = 1.0
+                if KEY_VOLUME_SPIKE_5M in self._rolling_data:
+                    self._rolling_data[KEY_VOLUME_SPIKE_5M].push(volume_spike, ts)
 
                 # Squeeze-specific: track depth on the breakout side for liquidity vacuum detection
                 if KEY_DEPTH_BID_SIZE_ROLLING in self._rolling_data:

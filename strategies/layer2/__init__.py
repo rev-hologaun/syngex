@@ -29,6 +29,7 @@ from .exchange_flow_imbalance import ExchangeFlowImbalance
 from .exchange_flow_asymmetry import ExchangeFlowAsymmetry
 from .order_book_fragmentation import OrderBookFragmentation
 from .order_book_stacking import OrderBookStacking
+from .vortex_compression_breakout import VortexCompressionBreakout
 
 __all__ = [
     "DeltaGammaSqueeze",
@@ -47,4 +48,5 @@ __all__ = [
     "ExchangeFlowAsymmetry",
     "OrderBookFragmentation",
     "OrderBookStacking",
+    "VortexCompressionBreakout",
 ]

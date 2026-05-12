@@ -700,43 +700,56 @@
 
     <script>
     // ── Strategy card definitions ──────────────────────────────────
+    // 41 strategies across 7 rows × 6 cols
     const STRATEGIES = [
-        // Row 1: Layer 1 — Core GEX
-        { id: 'gamma_wall_bounce',     label: 'GEX_WALL',        layer: 'L1', row: 1, col: 1 },
-        { id: 'magnet_accelerate',     label: 'MAGNET',          layer: 'L1', row: 1, col: 2 },
-        { id: 'gamma_flip_breakout',   label: 'FLIP_BREAKOUT',   layer: 'L1', row: 1, col: 3 },
-        { id: 'gamma_squeeze',         label: 'GAMMA_SQ',        layer: 'L1', row: 1, col: 4 },
-        { id: 'gex_imbalance',         label: 'GEX_IMBAL',       layer: 'L1', row: 1, col: 5 },
-        { id: 'confluence_reversal',   label: 'CONFLUENCE',      layer: 'L1', row: 1, col: 6 },
-        // Row 2: Layer 1/2 Alpha
-        { id: 'vol_compression_range', label: 'VOL_COMP',        layer: 'L1', row: 2, col: 1 },
-        { id: 'gex_divergence',        label: 'GEX_DIV',         layer: 'L1', row: 2, col: 2 },
-        { id: 'delta_gamma_squeeze',   label: 'DELTA_GAMMA',     layer: 'L2', row: 2, col: 3 },
-        { id: 'delta_volume_exhaustion', label: 'DELTA_VOL',      layer: 'L2', row: 2, col: 4 },
-        { id: 'obi_aggression_flow',   label: 'OBI_AF',          layer: 'L2', row: 2, col: 5 },
-        { id: 'call_put_flow_asymmetry', label: 'CALL_PUT_FLOW',  layer: 'L2', row: 2, col: 6 },
-        // Row 3: Layer 2/3 Microstructure
-        { id: 'iv_gex_divergence',     label: 'IV_GEX_DIV',      layer: 'L2', row: 3, col: 1 },
-        { id: 'gamma_volume_convergence', label: 'GAMMA_VOL',    layer: 'L3', row: 3, col: 2 },
-        { id: 'iv_band_breakout',      label: 'IV_BAND',         layer: 'L3', row: 3, col: 3 },
-        { id: 'strike_concentration',  label: 'STRIKE_CONC',     layer: 'L3', row: 3, col: 4 },
-        { id: 'depth_decay_momentum',  label: 'DEPTH_DECAY',     layer: 'L2', row: 3, col: 5 },
-        { id: 'vamp_momentum',         label: 'VAMP',            layer: 'L2', row: 3, col: 6 },
-        // Row 4: Layer 2 Advanced + Full Data
-        { id: 'depth_imbalance_momentum', label: 'DEPTH_IMBAL',  layer: 'L2', row: 4, col: 1 },
-        { id: 'exchange_flow_concentration', label: 'EXCHANGE',   layer: 'L2', row: 4, col: 2 },
-        { id: 'iv_skew_squeeze',       label: 'IV_SKEW',         layer: 'FULL', row: 4, col: 3 },
-        { id: 'prob_weighted_magnet',  label: 'PROB_MAGNET',     layer: 'FULL', row: 4, col: 4 },
-        { id: 'prob_distribution_shift', label: 'PROB_DIST',     layer: 'FULL', row: 4, col: 5 },
-        { id: 'extrinsic_intrinsic_flow', label: 'EXTRINSIC',    layer: 'FULL', row: 4, col: 6 },
-        // Row 5: Full Data remainder
-        { id: 'theta_burn',            label: 'THETA_BURN',      layer: 'FULL', row: 5, col: 1 },
-        { id: 'participant_diversity_conviction', label: 'PARTICIPANT_CONV', layer: 'L2', row: 5, col: 2 },
-        { id: 'participant_divergence_scalper', label: 'DIVERGENCE_SCALP', layer: 'L2', row: 5, col: 3 },
-        { id: 'exchange_flow_imbalance', label: 'FLOW_IMBALANCE', layer: 'L2', row: 5, col: 4 },
-        { id: 'exchange_flow_asymmetry', label: 'FLOW_ASYMMETRY', layer: 'L2', row: 5, col: 5 },
-        { id: 'order_book_fragmentation', label: 'OB_FRAGMENT',  layer: 'L2', row: 6, col: 1 },
-        { id: 'order_book_stacking',      label: 'STACKING',     layer: 'L2', row: 6, col: 2 },
+        // ── Row 1: Core GEX (Structural) ──
+        { id: 'gamma_wall_bounce',     label: 'GEX_WALL',          layer: 'L1', row: 1, col: 1 },
+        { id: 'magnet_accelerate',     label: 'MAGNET',            layer: 'L1', row: 1, col: 2 },
+        { id: 'gamma_flip_breakout',   label: 'FLIP_BREAKOUT',     layer: 'L1', row: 1, col: 3 },
+        { id: 'gamma_squeeze',         label: 'GAMMA_SQ',          layer: 'L1', row: 1, col: 4 },
+        { id: 'gex_imbalance',         label: 'GEX_IMBAL',         layer: 'L1', row: 1, col: 5 },
+        { id: 'confluence_reversal',   label: 'CONFLUENCE',        layer: 'L1', row: 1, col: 6 },
+        // ── Row 2: GEX Alpha (Delta-Gamma) ──
+        { id: 'vol_compression_range', label: 'VOL_COMP',          layer: 'L1', row: 2, col: 1 },
+        { id: 'gex_divergence',        label: 'GEX_DIV',           layer: 'L1', row: 2, col: 2 },
+        { id: 'delta_gamma_squeeze',   label: 'DELTA_GAMMA',       layer: 'L2', row: 2, col: 3 },
+        { id: 'delta_volume_exhaustion', label: 'DELTA_VOL',        layer: 'L2', row: 2, col: 4 },
+        { id: 'obi_aggression_flow',   label: 'OBI_AF',            layer: 'L2', row: 2, col: 5 },
+        { id: 'call_put_flow_asymmetry', label: 'CALL_PUT_FLOW',    layer: 'L2', row: 2, col: 6 },
+        // ── Row 3: Flow & Microstructure ──
+        { id: 'iv_gex_divergence',     label: 'IV_GEX_DIV',        layer: 'L2', row: 3, col: 1 },
+        { id: 'delta_iv_divergence',   label: 'TAIL_RISK',         layer: 'L2', row: 3, col: 2 },
+        { id: 'depth_imbalance_momentum', label: 'DEPTH_IMBAL',    layer: 'L2', row: 3, col: 3 },
+        { id: 'depth_decay_momentum',  label: 'DEPTH_DECAY',       layer: 'L2', row: 3, col: 4 },
+        { id: 'exchange_flow_concentration', label: 'EXCHANGE',    layer: 'L2', row: 3, col: 5 },
+        { id: 'vamp_momentum',         label: 'VAMP',              layer: 'L2', row: 3, col: 6 },
+        // ── Row 4: Exchange & Order Book ──
+        { id: 'participant_diversity_conviction', label: 'PARTICIPANT_CONV', layer: 'L2', row: 4, col: 1 },
+        { id: 'participant_divergence_scalper', label: 'DIVERGENCE_SCALP', layer: 'L2', row: 4, col: 2 },
+        { id: 'exchange_flow_imbalance', label: 'FLOW_IMBALANCE',  layer: 'L2', row: 4, col: 3 },
+        { id: 'exchange_flow_asymmetry', label: 'FLOW_ASYMMETRY',  layer: 'L2', row: 4, col: 4 },
+        { id: 'order_book_fragmentation', label: 'OB_FRAGMENT',     layer: 'L2', row: 4, col: 5 },
+        { id: 'order_book_stacking',   label: 'STACKING',          layer: 'L2', row: 4, col: 6 },
+        // ── Row 5: Volatility Surface ──
+        { id: 'gamma_volume_convergence', label: 'GAMMA_VOL',       layer: 'L3', row: 5, col: 1 },
+        { id: 'iv_band_breakout',      label: 'IV_BAND',           layer: 'L3', row: 5, col: 2 },
+        { id: 'strike_concentration',  label: 'STRIKE_CONC',       layer: 'L3', row: 5, col: 3 },
+        { id: 'iv_skew_squeeze',       label: 'IV_SKEW',           layer: 'FULL', row: 5, col: 4 },
+        { id: 'skew_dynamics',         label: 'SKEW_DYN',          layer: 'FULL', row: 5, col: 5 },
+        { id: 'smile_dynamics',        label: 'SMILE_DYN',         layer: 'FULL', row: 5, col: 6 },
+        // ── Row 6: Volume & Sentiment ──
+        { id: 'theta_burn',            label: 'THETA_BURN',        layer: 'L3', row: 6, col: 1 },
+        { id: 'prob_weighted_magnet',  label: 'PROB_MAGNET',       layer: 'FULL', row: 6, col: 2 },
+        { id: 'prob_distribution_shift', label: 'PROB_DIST',       layer: 'FULL', row: 6, col: 3 },
+        { id: 'extrinsic_intrinsic_flow', label: 'EXTRINSIC',      layer: 'FULL', row: 6, col: 4 },
+        { id: 'ghost_premium',         label: 'GHOST_PREM',        layer: 'FULL', row: 6, col: 5 },
+        { id: 'extrinsic_flow',        label: 'EXTRINSIC_FLOW',    layer: 'FULL', row: 6, col: 6 },
+        // ── Row 7: Confluence ──
+        { id: 'gamma_breaker',         label: 'GAMMA_BREAK',       layer: 'FULL', row: 7, col: 1 },
+        { id: 'iron_anchor',           label: 'IRON_ANCHOR',       layer: 'FULL', row: 7, col: 2 },
+        { id: 'vortex_compression_breakout', label: 'VORTEX',      layer: 'L2', row: 7, col: 3 },
+        { id: 'sentiment_sync',        label: 'SENT_SYNC',         layer: 'FULL', row: 7, col: 4 },
+        { id: 'whale_tracker',         label: 'WHALE_TRACK',       layer: 'FULL', row: 7, col: 5 },
     ];
 
     // ── Health classification ──────────────────────────────────────
