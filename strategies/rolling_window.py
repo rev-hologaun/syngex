@@ -44,6 +44,9 @@ class RollingWindow:
     window_size: int = 20            # seconds for time, periods for count
     _values: deque = field(default_factory=deque)
     _timestamps: deque = field(default_factory=deque)
+    _trend: str = "FLAT"
+    _trend_z_threshold: float = 0.8       # z-score needed to ENTER a trend
+    _trend_exit_threshold: float = 0.3    # z-score below which we EXIT
 
     # ------------------------------------------------------------------
     # Core
@@ -147,11 +150,12 @@ class RollingWindow:
     @property
     def trend(self) -> str:
         """
-        Trend direction based on recent vs older half of window.
+        Trend direction with hysteresis to prevent flip-flopping.
 
         Returns: "UP", "DOWN", or "FLAT"
         """
         if len(self._values) < 4:
+            self._trend = "FLAT"
             return "FLAT"
 
         vals = list(self._values)
@@ -162,15 +166,26 @@ class RollingWindow:
         diff = second_half - first_half
         std = self.std
         if std is None or std == 0:
+            self._trend = "FLAT"
             return "FLAT"
 
-        # Normalize by std to avoid noise
-        if diff / std > 0.5:
-            return "UP"
-        elif diff / std < -0.5:
-            return "DOWN"
-        else:
-            return "FLAT"
+        z = diff / std
+
+        # Hysteresis: different thresholds for entering vs exiting trends
+        if self._trend in ("UP", "FLAT"):
+            # Need strong signal to go UP, weak signal to stay UP
+            if z > self._trend_z_threshold:
+                self._trend = "UP"
+            elif self._trend == "UP" and z < self._trend_exit_threshold:
+                self._trend = "FLAT"
+        elif self._trend == "DOWN":
+            # Need strong negative signal to go DOWN, weak signal to stay DOWN
+            if z < -self._trend_z_threshold:
+                self._trend = "DOWN"
+            elif z > -self._trend_exit_threshold:
+                self._trend = "FLAT"
+
+        return self._trend
 
     @property
     def latest(self) -> Optional[float]:

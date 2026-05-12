@@ -48,6 +48,8 @@ from strategies.rolling_keys import (
     KEY_TOP_WALL_ASK_SIZE_5M,
     KEY_DEPTH_BID_SIZE_5M,
     KEY_DEPTH_ASK_SIZE_5M,
+    KEY_DEPTH_BID_LEVELS_5M,
+    KEY_DEPTH_ASK_LEVELS_5M,
     KEY_DEPTH_SPREAD_5M,
     KEY_VOLUME_5M,
 )

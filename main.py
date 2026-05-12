@@ -244,6 +244,12 @@ from strategies.full_data import (
     ProbWeightedMagnet,
     ProbDistributionShift,
     ExtrinsicIntrinsicFlow,
+    GhostPremium,
+    SkewDynamics,
+    SmileDynamics,
+    ExtrinsicFlow,
+    GammaBreaker,
+    IronAnchor,
     SentimentSync,
     WhaleTracker,
 )
@@ -296,6 +302,7 @@ class SyngexOrchestrator:
         self._exchange_bid_sizes: Dict[str, int] = {}
         self._exchange_ask_sizes: Dict[str, int] = {}
         self._profile_timer: float = 0.0
+        self._strategy_eval_timer: float = 0.0
         self._signal_timer: float = 0.0
         self._dashboard_process: subprocess.Popen | None = None
         self._heatmap_process: subprocess.Popen | None = None
@@ -327,7 +334,6 @@ class SyngexOrchestrator:
         self._client = TradeStationClient()
 
         # Phase 0: Strategy Engine + Filter
-        self._gamma_filter = NetGammaFilter(flip_buffer=0.5)
 
         # Load strategy configuration from YAML
         config_path = Path(__file__).parent / "config" / "strategies.yaml"
@@ -374,8 +380,6 @@ class SyngexOrchestrator:
                 dedup_window_seconds=global_config.get("dedup_window_seconds", 60.0),
             )
         )
-        self._strategy_engine.register_filter(self._gamma_filter.evaluate_signal)
-
         # Register strategies from config (config-driven, not hardcoded)
         self._register_strategies_from_config()
 
@@ -444,6 +448,7 @@ class SyngexOrchestrator:
 
         self._running = True
         self._profile_timer = time.monotonic()
+        self._strategy_eval_timer = time.monotonic()
         self._state_export_timer = time.monotonic()
 
         # Start strategy engine
@@ -492,8 +497,9 @@ class SyngexOrchestrator:
                     self._signal_timer = now
 
                 # Strategy evaluation (every ~1s)
-                if now - self._profile_timer >= 1.0:
+                if now - self._strategy_eval_timer >= 1.0:
                     self._evaluate_strategies()
+                    self._strategy_eval_timer = now
 
                 # Fail-fast: option chain critical error
                 if self._client._option_chain_failed:
@@ -693,6 +699,12 @@ class SyngexOrchestrator:
                 "prob_weighted_magnet": ProbWeightedMagnet,
                 "prob_distribution_shift": ProbDistributionShift,
                 "extrinsic_intrinsic_flow": ExtrinsicIntrinsicFlow,
+                "ghost_premium": GhostPremium,
+                "skew_dynamics": SkewDynamics,
+                "smile_dynamics": SmileDynamics,
+                "extrinsic_flow": ExtrinsicFlow,
+                "gamma_breaker": GammaBreaker,
+                "iron_anchor": IronAnchor,
                 "sentiment_sync": SentimentSync,
                 "whale_tracker": WhaleTracker,
             },
@@ -1654,6 +1666,12 @@ class SyngexOrchestrator:
                 bids = data.get("Bids", [])
                 asks = data.get("Asks", [])
 
+                # Initialize timestamps and state variables at top of block
+                # to avoid UnboundLocalError in both msg_type branches
+                ts = time.time()
+                old_bid = 0.0
+                old_ask = 0.0
+
                 # Aggregate size from all bid/ask levels
                 if msg_type == "market_depth_quotes":
                     # Per-exchange: Size field is string → int
@@ -1891,12 +1909,8 @@ class SyngexOrchestrator:
                     )
 
                     # Unique exchanges across all levels
-                    top_bid_exchanges = len(
-                        set(b.get("bid_exchanges", {}).keys()) for b in bids if b.get("bid_exchanges")
-                    ) if bids else 0
-                    top_ask_exchanges = len(
-                        set(a.get("ask_exchanges", {}).keys()) for a in asks if a.get("ask_exchanges")
-                    ) if asks else 0
+                    top_bid_exchanges = len({k for b in bids if b.get("bid_exchanges") for k in b["bid_exchanges"].keys()}) if bids else 0
+                    top_ask_exchanges = len({k for a in asks if a.get("ask_exchanges") for k in a["ask_exchanges"].keys()}) if asks else 0
 
                     # Avg participants across top N levels
                     top_n = min(5, len(bids)) if bids else 0
@@ -1986,7 +2000,6 @@ class SyngexOrchestrator:
                 best_ask = float(asks[0].get("Price", 0)) if asks else 0.0
                 spread = best_ask - best_bid if best_bid > 0 and best_ask > 0 else 0.0
 
-                ts = time.time()
                 if KEY_DEPTH_BID_SIZE_5M in self._rolling_data:
                     self._rolling_data[KEY_DEPTH_BID_SIZE_5M].push(total_bid_size, ts)
                 if KEY_DEPTH_ASK_SIZE_5M in self._rolling_data:

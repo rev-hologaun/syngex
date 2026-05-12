@@ -66,6 +66,16 @@ class NetGammaFilter:
 
         logger.info("NetGammaFilter initialized (flip_buffer=$%.2f)", flip_buffer)
 
+    @property
+    def flip_buffer(self) -> float:
+        """Current flip buffer value (read/write for config hot-reload)."""
+        return self._flip_buffer
+
+    @flip_buffer.setter
+    def flip_buffer(self, value: float) -> None:
+        """Update flip buffer (used by config hot-reload)."""
+        self._flip_buffer = value
+
     # ------------------------------------------------------------------
     # State update (called each tick with current market data)
     # ------------------------------------------------------------------

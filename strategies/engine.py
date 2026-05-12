@@ -238,9 +238,6 @@ class StrategyEngine:
                             expiry=signal.expiry,
                             metadata=signal.metadata,
                         )
-                    # Apply minimum confidence threshold
-                    if signal.confidence < self.config.min_confidence:
-                        continue
                     # Dedup: skip if same strategy fired recently
                     last_time = self._last_signals.get(signal.strategy_id, 0)
                     if now - last_time < self.config.dedup_window_seconds:

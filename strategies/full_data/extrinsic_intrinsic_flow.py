@@ -75,8 +75,7 @@ EXTRINSIC_COLLAPSE_THRESHOLD = 0.10     # 10% collapse
 # Volume spike threshold for new money
 VOLUME_SPIKE_RATIO = 1.30               # 130% of avg (1.3×)
 
-# Min net gamma for positive regime
-MIN_NET_GAMMA = 500000.0
+# Min net gamma for positive regime — read from config, default 5000
 
 # Stop and target
 STOP_PCT = 0.005                        # 0.5% stop
@@ -142,6 +141,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
 
         rolling_data = data.get("rolling_data", {})
         net_gamma = data.get("net_gamma", 0.0)
+        self._min_net_gamma = self._params.get("min_net_gamma", 5000.0)
         greeks_summary = data.get("greeks_summary", {})
 
         # --- Validate data ---
@@ -149,7 +149,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
             return []
 
         # --- Net gamma check ---
-        if net_gamma < MIN_NET_GAMMA:
+        if net_gamma < self._min_net_gamma:
             return []
 
         # --- Use main.py's populated extrinsic window ---
@@ -456,7 +456,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
             vol_dir_component = 0.05
 
         # 7. Net gamma (0.05–0.10) — soft
-        gamma_scaled = min(1.0, net_gamma / (MIN_NET_GAMMA * 4))
+        gamma_scaled = min(1.0, net_gamma / (self._min_net_gamma * 4))
         gamma_component = 0.05 + 0.05 * gamma_scaled
 
         # Sum all components
@@ -675,7 +675,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
 
         # Compute IV-scaled target
         risk = price * STOP_PCT
-        target = self._compute_iv_scaled_target(price, risk, rolling_data, "expansion")
+        target = self._compute_iv_scaled_target(price, risk, rolling_data, "short")
 
         # Extract trend from price window for metadata
         price_window = rolling_data.get(KEY_VOLUME_UP_5M)
