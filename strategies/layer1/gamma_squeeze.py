@@ -399,7 +399,7 @@ class GammaSqueeze(BaseStrategy):
         Check if price has stayed beyond the wall for 2+ consecutive ticks.
 
         Args:
-            price_window: Rolling price window with prices list.
+            price_window: Rolling price window with .values attribute.
             wall_strike: The gamma wall strike to check against.
             above: True = check price > wall_strike (LONG),
                    False = check price < wall_strike (SHORT).
@@ -409,21 +409,21 @@ class GammaSqueeze(BaseStrategy):
         if price_window is None:
             return True  # No price data — don't block
 
-        prices = getattr(price_window, "prices", None)
-        if prices is None:
-            return True  # No prices list — don't block
+        values = getattr(price_window, "values", None)
+        if values is None:
+            return True  # No values — don't block
 
         # Need at least 2 data points to check sustain
-        if len(prices) < 2:
+        if len(values) < 2:
             return True
 
         # Check last 2 data points
         if above:
             # LONG: last 2 prices must be > wall_strike
-            return prices[-1] > wall_strike and prices[-2] > wall_strike
+            return values[-1] > wall_strike and values[-2] > wall_strike
         else:
             # SHORT: last 2 prices must be < wall_strike
-            return prices[-1] < wall_strike and prices[-2] < wall_strike
+            return values[-1] < wall_strike and values[-2] < wall_strike
 
     # ------------------------------------------------------------------
     # Liquidity Vacuum Detection (NEW)

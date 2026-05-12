@@ -22,12 +22,11 @@ class VolumeFilter:
       - reason: str — explanation
     """
 
-    THRESHOLDS = {
-        "HIGH": 1.3,
-        "NORMAL": 1.0,
-        "LOW": 0.5,
-        "CRITICAL": 0.0,
-    }
+    # Thresholds are inlined in evaluate() — this dict was dead config
+    # (ratio < 0.01 → CRITICAL via the else branch)
+    THRESHOLD_HIGH = 1.3
+    THRESHOLD_NORMAL = 1.0
+    THRESHOLD_LOW = 0.01
 
     @staticmethod
     def evaluate(rolling_data: Dict[str, Any], min_confidence: float = 0.0) -> Dict:
@@ -60,7 +59,7 @@ class VolumeFilter:
         elif ratio >= 1.0:
             status = "NORMAL"
             reason = "Volume at average"
-        elif ratio >= 0.5:
+        elif ratio >= 0.01:
             status = "LOW"
             reason = f"Volume at {ratio:.0%} of average"
         else:

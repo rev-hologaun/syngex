@@ -217,6 +217,7 @@ class SignalTracker:
                 self._resolved_signals.append(resolution)
                 to_remove.append(signal_id)
                 self._update_strategy_stats(resolution)
+                self._recompute_strategy_averages(resolution.open_signal.strategy_id)
 
         for sig_id in to_remove:
             del self._open_signals[sig_id]
@@ -341,16 +342,14 @@ class SignalTracker:
         # Win rate
         stats["win_rate"] = stats["wins"] / resolved_count if resolved_count > 0 else 0.0
 
-        # Hold time and RR averages use resolved count
-        if resolved_count > 0:
-            stats["avg_hold_time"] = (
-                (stats["avg_hold_time"] * (resolved_count - 1) + resolution.hold_time)
-                / resolved_count
-            )
-            rr = resolution.open_signal.rr_ratio
-            stats["avg_rr"] = (
-                (stats["avg_rr"] * (resolved_count - 1) + rr) / resolved_count
-            )
+    def _recompute_strategy_averages(self, strat: str) -> None:
+        """Recompute avg_hold_time, avg_rr, avg_pnl_pct from the resolved signals list."""
+        stats = self._strategy_stats[strat]
+        resolved = [r for r in self._resolved_signals if r.open_signal.strategy_id == strat]
+        if resolved:
+            stats["avg_hold_time"] = sum(r.hold_time for r in resolved) / len(resolved)
+            stats["avg_rr"] = sum(r.open_signal.rr_ratio for r in resolved) / len(resolved)
+            stats["avg_pnl_pct"] = sum(r.pnl_pct for r in resolved) / len(resolved)
 
     def get_open_signals(self) -> List[OpenSignal]:
         """Return list of currently open signals."""
@@ -464,5 +463,13 @@ class SignalTracker:
                     }
                 # Update strategy stats
                 self._update_strategy_stats(resolution)
+
+            # Post-load: recompute all averages from the resolved signals list
+            for strat, stats in self._strategy_stats.items():
+                resolved = [r for r in self._resolved_signals if r.open_signal.strategy_id == strat]
+                if resolved:
+                    stats["avg_hold_time"] = sum(r.hold_time for r in resolved) / len(resolved)
+                    stats["avg_rr"] = sum(r.open_signal.rr_ratio for r in resolved) / len(resolved)
+                    stats["avg_pnl_pct"] = sum(r.pnl_pct for r in resolved) / len(resolved)
         except (json.JSONDecodeError, OSError, KeyError):
             pass

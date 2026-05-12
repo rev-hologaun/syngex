@@ -232,6 +232,7 @@ class StrategyEngine:
                             stop=signal.stop,
                             target=signal.target,
                             strategy_id=signal.strategy_id,
+                            _layer=strategy.layer,
                             symbol=signal_symbol,
                             timestamp=signal.timestamp,
                             reason=signal.reason,
@@ -243,7 +244,6 @@ class StrategyEngine:
                     if now - last_time < self.config.dedup_window_seconds:
                         continue
                     all_signals.append(signal)
-                    self._last_signals[signal.strategy_id] = now
             except Exception as exc:
                 logger.error("Strategy %s error: %s", strategy.strategy_id, exc, exc_info=True)
 
@@ -273,6 +273,7 @@ class StrategyEngine:
 
         # Phase 4: Deliver signals
         for signal in all_signals:
+            self._last_signals[signal.strategy_id] = now
             self._signal_count += 1
             # Log to file
             self._log_signal(signal)
@@ -397,7 +398,7 @@ class StrategyEngine:
         # Group signals by layer (across both directions)
         all_by_layer: Dict[str, List[Signal]] = defaultdict(list)
         for s in longs + shorts:
-            layer = getattr(s, "_layer", "") or self._get_strategy_layer(s.strategy_id)
+            layer = s._layer or self._get_strategy_layer(s.strategy_id)
             all_by_layer[layer].append(s)
 
         all_layers = set(all_by_layer.keys())

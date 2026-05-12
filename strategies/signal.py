@@ -58,6 +58,7 @@ class Signal:
     stop: float                # Stop loss price
     target: float              # Take profit price
     strategy_id: str           # e.g. "gamma_wall_bounce"
+    _layer: str = ""           # Strategy layer (e.g. "layer1", "layer2")
     timestamp: float = field(default_factory=time.time)
 
     # Optional
@@ -98,12 +99,14 @@ class Signal:
             "stop": self.stop,
             "target": self.target,
             "strategy_id": self.strategy_id,
+            "layer": self._layer,
             "symbol": self.symbol,
             "reason": self.reason,
             "risk_reward_ratio": round(self.risk_reward_ratio, 2),
             "strength": self.strength.value,
+            "expiry": self.expiry,
             "timestamp": self.timestamp,
-            "metadata": self.metadata,
+            "metadata": dict(self.metadata) if hasattr(self.metadata, "items") else self.metadata,
         }
 
     @classmethod
@@ -116,6 +119,7 @@ class Signal:
             stop=data["stop"],
             target=data["target"],
             strategy_id=data["strategy_id"],
+            layer=data.get("layer", ""),
             symbol=data.get("symbol", ""),
             timestamp=data.get("timestamp", time.time()),
             reason=data.get("reason", ""),
@@ -126,6 +130,7 @@ class Signal:
     def __repr__(self) -> str:
         return (
             f"Signal({self.direction.value} | {self.strategy_id} | "
-            f"conf={self.confidence:.2f} | strength={self.strength.value} | "
-            f"RR={self.risk_reward_ratio:.2f} | {self.reason})"
+            f"layer={self._layer} | conf={self.confidence:.2f} | "
+            f"strength={self.strength.value} | RR={self.risk_reward_ratio:.2f} | "
+            f"{self.reason})"
         )

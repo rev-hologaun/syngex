@@ -106,7 +106,6 @@ from strategies.rolling_keys import (
     KEY_OTM_DELTA_5M,
     KEY_OTM_IV_5M,
     KEY_DELTA_IV_CORR_5M,
-    KEY_GAMMA_ACCEL_5M,
     KEY_CONSEC_LONG,
     KEY_CONSEC_SHORT,
     KEY_WALL_DISTANCE_5M,
@@ -817,12 +816,12 @@ class SyngexOrchestrator:
         assert self._calculator is not None
         try:
             self._calculator.process_message(data)
+            ts = time.time()
 
             # Update rolling windows with underlying price
             if data.get("type") == "underlying_update":
                 price = data.get("price")
                 if price and price > 0:
-                    ts = time.time()
                     self._rolling_data[KEY_PRICE_5M].push(price, ts)
                     self._rolling_data[KEY_PRICE_30M].push(price, ts)
 
@@ -912,17 +911,6 @@ class SyngexOrchestrator:
                 )
 
                 # gamma_accel_5m — 2nd derivative of gamma (v2 Ignition-Master)
-                gamma_window = self._rolling_data.get(KEY_TOTAL_GAMMA_5M)
-                if gamma_window is not None and gamma_window.count >= 10:
-                    vals = list(gamma_window.values)
-                    if len(vals) >= 10:
-                        # 1st derivative: ROC over last 5 points
-                        roc_current = (vals[-1] - vals[-5]) / abs(vals[-5]) if vals[-5] != 0 else 0.0
-                        roc_prev = (vals[-5] - vals[-10]) / abs(vals[-10]) if vals[-10] != 0 else 0.0
-                        # 2nd derivative (acceleration)
-                        gamma_accel = roc_current - roc_prev
-                        self._rolling_data[KEY_GAMMA_ACCEL_5M].push(gamma_accel)
-
                 # iv_skew_5m — avg call IV minus avg put IV
                 try:
                     iv_skew = self._calculator.get_iv_skew()
@@ -946,6 +934,7 @@ class SyngexOrchestrator:
                 # IV Skew Dynamics — Ψ (Skewness Coefficient)
                 # Ψ = (IV_Put_Wing - IV_Call_Wing) / IV_ATM
                 try:
+                    underlying_price = self._calculator.underlying_price
                     iv_by_strike = self._calculator.get_iv_by_strike_avg()
                     if iv_by_strike:
                         strikes = sorted(iv_by_strike.keys())
@@ -1021,6 +1010,7 @@ class SyngexOrchestrator:
                 # Ω = |Slope_Put_Wing| / |Slope_Call_Wing|
                 # Slope = dIV/dK (derivative of IV vs moneyness via least-squares)
                 try:
+                    underlying_price = self._calculator.underlying_price
                     iv_by_strike = self._calculator.get_iv_by_strike_avg()
                     if iv_by_strike:
                         strikes = sorted(iv_by_strike.keys())
@@ -1333,26 +1323,6 @@ class SyngexOrchestrator:
                 if prob_mom is not None:
                     self._rolling_data[KEY_PROB_MOMENTUM_5M].push(prob_mom)
 
-                # Push probability momentum for prob_distribution_shift
-                try:
-                    atm_strike = self._calculator.get_atm_strike(self._calculator.underlying_price)
-                    if atm_strike is not None and KEY_PROB_MOMENTUM_5M in self._rolling_data:
-                        momentum = 0.0
-                        for strike_str, strike_data in gex_summary.items():
-                            try:
-                                strike = float(strike_str)
-                            except (ValueError, TypeError):
-                                continue
-                            call_delta = strike_data.get("call_delta_sum", 0.0)
-                            put_delta = strike_data.get("put_delta_sum", 0.0)
-                            if call_delta == 0 and put_delta == 0:
-                                continue
-                            distance = strike - atm_strike
-                            momentum += (call_delta - put_delta) * distance
-                        self._rolling_data[KEY_PROB_MOMENTUM_5M].push(momentum, time.time())
-                except Exception:
-                    pass
-
                 # ── prob_distribution_shift v2: Momentum ROC & acceleration ──
                 try:
                     mom_window = self._rolling_data.get(KEY_PROB_MOMENTUM_5M)
@@ -1615,6 +1585,9 @@ class SyngexOrchestrator:
                 try:
                     price = self._calculator.underlying_price
                     if price and price > 0 and gex_summary:
+                        params = data.get("params", {})
+                        iv_gex_params = params.get("iv_gex_divergence", {})
+                        window_pct = iv_gex_params.get("gamma_density_window_pct", 0.01)
                         gamma_density = 0.0
                         for strike_str, strike_data in gex_summary.items():
                             try:
@@ -1666,9 +1639,6 @@ class SyngexOrchestrator:
                 bids = data.get("Bids", [])
                 asks = data.get("Asks", [])
 
-                # Initialize timestamps and state variables at top of block
-                # to avoid UnboundLocalError in both msg_type branches
-                ts = time.time()
                 old_bid = 0.0
                 old_ask = 0.0
 
@@ -2103,7 +2073,6 @@ class SyngexOrchestrator:
                         vamp_mid_dev = 0
 
                     # Push to rolling windows
-                    ts = time.time()
                     vamp_roc = 0
                     if KEY_VAMP_5M in self._rolling_data:
                         self._rolling_data[KEY_VAMP_5M].push(vamp, ts)
@@ -2210,7 +2179,6 @@ class SyngexOrchestrator:
                         obi = (total_bid_size - total_ask_size) / total_depth
                     else:
                         obi = 0.0
-                    ts = time.time()
                     if KEY_OBI_5M in self._rolling_data:
                         self._rolling_data[KEY_OBI_5M].push(obi, ts)
 
