@@ -15,9 +15,9 @@ Syngex is a well-architected options-trading signal pipeline with 41 strategies 
 |----------|-------|
 | 🔴 Critical | 3 ✅(3 fixed) |
 | 🟡 Significant | 6 ✅(6 fixed) |
-| 🟠 Moderate | 8 ✅(3 fixed) |
-| 🔵 Minor | 12 |
-| **Total** | **29 ✅(24 fixed, 5 remaining)** |
+| 🟠 Moderate | 8 ✅(8 fixed) |
+| 🔵 Minor | 12 ✅(12 fixed) |
+| **Total** | **29 ✅(29 fixed)** |
 
 ---
 
@@ -49,6 +49,11 @@ Syngex is a well-architected options-trading signal pipeline with 41 strategies 
 | **D6** | ✅ **FIXED** | 2026-05-12 | Added `__all__` export to `config/trade_guard.py` |
 | **D7** | ✅ **FIXED** | 2026-05-12 | `risk_reward_ratio` already handles `risk == 0` returning `0.0` |
 | **D8** | ✅ **FIXED** | 2026-05-12 | `strategies/__init__.py` `__all__` already matches actual exports (same as D4) |
+| **M4** | ✅ **FIXED** | 2026-05-12 | Used env var for `SECRET_KEY` in `app_heatmap.py` |
+| **M5** | ✅ **FIXED** | 2026-05-12 | Added error handling for missing `heatmap.html` template |
+| **M6** | ✅ **FIXED** | 2026-05-12 | Removed module-level `while True` + `st.rerun()` incompatible with Streamlit |
+| **M7** | ✅ **FIXED** | 2026-05-12 | No `"data" in dir()` pattern exists — already clean |
+| **M8** | ✅ **FIXED** | 2026-05-12 | Replaced `duration_seconds` mutation with deadline pattern in `orb_probe.py` |
 
 ---
 
