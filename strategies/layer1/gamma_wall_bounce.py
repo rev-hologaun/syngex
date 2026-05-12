@@ -165,7 +165,7 @@ class GammaWallBounce(BaseStrategy):
         trend = pw.trend if pw else "UNKNOWN"
 
         # ── NEW: Liquidity decay check ──
-        depth_snapshot = data.get("depth_snapshot") if "data" in dir() else None
+        depth_snapshot = data.get("depth_snapshot")
         if depth_snapshot and not self._check_liquidity_decay(wall, depth_snapshot):
             logger.debug("Call wall at %s: liquidity decay detected, skipping",
                          wall_strike)
@@ -289,7 +289,7 @@ class GammaWallBounce(BaseStrategy):
         trend = pw.trend if pw else "UNKNOWN"
 
         # ── NEW: Liquidity decay check ──
-        depth_snapshot = data.get("depth_snapshot") if "data" in dir() else None
+        depth_snapshot = data.get("depth_snapshot")
         if depth_snapshot and not self._check_liquidity_decay(wall, depth_snapshot):
             logger.debug("Put wall at %s: liquidity decay detected, skipping",
                          wall_strike)
