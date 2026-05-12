@@ -214,8 +214,29 @@ layer2:
     tracker:
       max_hold_seconds: 2700
     params:
+      # === v1 params (kept for backwards compat) ===
       iv_decline_pct: 0.05
       min_confidence: 0.35
+      stop_pct: 0.006
+      target_risk_mult: 1.5
+
+      # === v2 Volatility-Snap params ===
+      # IV skew gradient
+      iv_skew_otm_pct: 0.05
+      iv_skew_roc_window: 5
+      iv_skew_roc_threshold: 0.15
+
+      # Gamma density
+      gamma_density_window_pct: 0.01
+      gamma_density_decline_threshold: 0.70
+
+      # Volume-weighted IV
+      iv_volume_min: 100
+
+      # Wall-based stops
+      wall_stop_buffer_pct: 0.002
+      wall_stop_max_distance_pct: 0.02
+      fallback_stop_pct: 0.006
 
   delta_iv_divergence:
     enabled: true

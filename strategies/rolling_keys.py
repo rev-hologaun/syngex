@@ -39,6 +39,10 @@ KEY_FLOW_RATIO_5M = "flow_ratio_5m"
 KEY_EXTRINSIC_PROXY_5M = "extrinsic_proxy_5m"
 KEY_PROB_MOMENTUM_5M = "prob_momentum_5m"
 
+# --- IV skew gradient (iv_gex_divergence v2) ---
+KEY_IV_SKEW_GRADIENT_5M = "iv_skew_gradient_5m"
+KEY_GAMMA_DENSITY_5M = "gamma_density_5m"
+
 # --- Signal tracking keys (used in rolling_data for signal state) ---
 KEY_CONSEC_LONG = "consec_long"
 KEY_CONSEC_SHORT = "consec_short"
@@ -73,6 +77,7 @@ DEPTH_KEYS = (
 # All keys in one tuple for validation
 ALL_KEYS = (*CORE_KEYS, *DEPTH_KEYS, KEY_FLOW_RATIO_5M,
             KEY_EXTRINSIC_PROXY_5M, KEY_PROB_MOMENTUM_5M,
+            KEY_IV_SKEW_GRADIENT_5M, KEY_GAMMA_DENSITY_5M,
             KEY_CONSEC_LONG, KEY_CONSEC_SHORT,
             KEY_DEPTH_BID_SIZE_ROLLING, KEY_DEPTH_ASK_SIZE_ROLLING)
 
@@ -83,6 +88,7 @@ __all__ = [
     "KEY_TOTAL_DELTA_5M", "KEY_WALL_DELTA_5M", "KEY_TOTAL_GAMMA_5M", "KEY_IV_SKEW_5M",
     "KEY_ATM_DELTA_5M", "KEY_ATM_IV_5M",
     "KEY_FLOW_RATIO_5M",
+    "KEY_IV_SKEW_GRADIENT_5M", "KEY_GAMMA_DENSITY_5M",
     "KEY_DEPTH_BID_SIZE_5M", "KEY_DEPTH_ASK_SIZE_5M", "KEY_DEPTH_SPREAD_5M",
     "KEY_DEPTH_BID_LEVELS_5M", "KEY_DEPTH_ASK_LEVELS_5M",
     "KEY_DEPTH_BID_SIZE_ROLLING", "KEY_DEPTH_ASK_SIZE_ROLLING",

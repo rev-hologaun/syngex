@@ -250,6 +250,9 @@ class SyngexOrchestrator:
             KEY_FLOW_RATIO_5M: RollingWindow(window_type="time", window_size=300),
             KEY_EXTRINSIC_PROXY_5M: RollingWindow(window_type="time", window_size=300),
             KEY_PROB_MOMENTUM_5M: RollingWindow(window_type="time", window_size=300),
+            # iv_gex_divergence v2 — Volatility-Snap rolling windows
+            KEY_IV_SKEW_GRADIENT_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_GAMMA_DENSITY_5M: RollingWindow(window_type="time", window_size=300),
             # Depth / L2 rolling windows
             KEY_DEPTH_BID_SIZE_5M: RollingWindow(window_type="time", window_size=300),
             KEY_DEPTH_ASK_SIZE_5M: RollingWindow(window_type="time", window_size=300),
@@ -779,6 +782,48 @@ class SyngexOrchestrator:
 
                     if KEY_FLOW_RATIO_5M in self._rolling_data:
                         self._rolling_data[KEY_FLOW_RATIO_5M].push(flow_ratio)
+                except Exception:
+                    pass
+
+                # ── iv_gex_divergence v2: IV skew gradient ──
+                try:
+                    atm_strike = self._calculator.get_atm_strike(
+                        self._calculator.underlying_price,
+                    )
+                    if atm_strike is not None:
+                        atm_iv = self._calculator.get_iv_by_strike(atm_strike)
+                        if atm_iv is not None and atm_iv > 0:
+                            # Compute IV skew: OTM Put IV - ATM IV
+                            otm_put_strike = atm_strike * 0.95  # 5% OTM
+                            otm_put_iv = self._calculator.get_iv_by_strike(otm_put_strike)
+                            if otm_put_iv is not None and otm_put_iv > 0:
+                                iv_skew = otm_put_iv - atm_iv
+                                if KEY_IV_SKEW_GRADIENT_5M in self._rolling_data:
+                                    self._rolling_data[KEY_IV_SKEW_GRADIENT_5M].push(
+                                        iv_skew,
+                                    )
+                except Exception:
+                    pass
+
+                # ── iv_gex_divergence v2: Gamma density ──
+                try:
+                    price = self._calculator.underlying_price
+                    if price and price > 0 and gex_summary:
+                        gamma_density = 0.0
+                        for strike_str, strike_data in gex_summary.items():
+                            try:
+                                strike = float(strike_str)
+                            except (ValueError, TypeError):
+                                continue
+                            distance = abs(strike - price) / price
+                            if distance <= window_pct:
+                                call_gamma = strike_data.get("call_gamma", 0.0)
+                                put_gamma = strike_data.get("put_gamma", 0.0)
+                                gamma_density += abs(call_gamma) + abs(put_gamma)
+                        if KEY_GAMMA_DENSITY_5M in self._rolling_data:
+                            self._rolling_data[KEY_GAMMA_DENSITY_5M].push(
+                                gamma_density,
+                            )
                 except Exception:
                     pass
 
