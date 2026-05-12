@@ -364,15 +364,30 @@ layer3:
     tracker:
       max_hold_seconds: 480
     params:
+      # === v1 params (kept for backwards compat) ===
       min_net_gamma: 10000.0
       wall_proximity_pct: 0.005
       stop_past_wall_pct: 0.003
       min_target_pct: 0.002
       max_target_pct: 0.004
       range_narrowness_ratio: 0.30
-      min_confidence: 0.35
+      min_confidence: 0.35          # raised from 0.25
       max_confidence: 0.80
       min_data_points: 3
+
+      # === v2 Pinning-Master params ===
+      # Wall liquidity
+      wall_min_bid_depth: 100
+      wall_min_ask_depth: 100
+      wall_vacuum_depth: 50
+
+      # Delta-gamma divergence
+      divergence_threshold: 0.15    # min divergence score for hard rejection
+
+      # IV-scaled targets
+      iv_target_bounce_max_pct: 0.006
+      iv_target_slice_max_pct: 0.008
+      iv_target_bounce_min_pct: 0.002
 
 # Layer 4: Full-Data (v2) — 4 strategies
 full_data:

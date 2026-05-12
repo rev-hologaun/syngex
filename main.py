@@ -787,6 +787,27 @@ class SyngexOrchestrator:
                     if atm_iv is not None and KEY_ATM_IV_5M in self._rolling_data:
                         self._rolling_data[KEY_ATM_IV_5M].push(atm_iv)
 
+                # ── theta_burn v2: Wall delta tracking ──
+                try:
+                    if KEY_WALL_DELTA_5M in self._rolling_data:
+                        walls = self._calculator.get_gamma_walls(threshold=5000)
+                        if walls:
+                            wall_deltas = []
+                            for wall in walls:
+                                try:
+                                    ws = wall.get("strike", 0)
+                                    if ws and ws > 0:
+                                        dd = self._calculator.get_delta_by_strike(ws)
+                                        nd = dd.get("net_delta", 0.0)
+                                        wall_deltas.append(nd)
+                                except Exception:
+                                    pass
+                            if wall_deltas:
+                                avg_wall_delta = sum(wall_deltas) / len(wall_deltas)
+                                self._rolling_data[KEY_WALL_DELTA_5M].push(avg_wall_delta)
+                except Exception:
+                    pass
+
                 # ── iv_band_breakout v2: Skew width (|OTM Put IV - OTM Call IV|) ──
                 try:
                     if atm_strike is not None and KEY_SKEW_WIDTH_5M in self._rolling_data:
