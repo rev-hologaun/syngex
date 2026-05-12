@@ -157,6 +157,11 @@ strategies:
     col: 5
     span_cols: 1
     span_rows: 1
+  order_book_fragmentation:
+    row: 6
+    col: 1
+    span_cols: 1
+    span_rows: 1
 
 # System widgets (non-strategy cells)
 widgets:

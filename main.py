@@ -185,6 +185,7 @@ from strategies.layer2.participant_divergence_scalper import ParticipantDivergen
 from strategies.layer2.delta_iv_divergence import DeltaIVDivergence
 from strategies.layer2.exchange_flow_imbalance import ExchangeFlowImbalance
 from strategies.layer2.exchange_flow_asymmetry import ExchangeFlowAsymmetry
+from strategies.layer2.order_book_fragmentation import OrderBookFragmentation
 from strategies.layer3 import (
     GammaVolumeConvergence,
     IVBandBreakout,
@@ -669,6 +670,7 @@ class SyngexOrchestrator:
                 "participant_divergence_scalper": ParticipantDivergenceScalper,
                 "exchange_flow_imbalance": ExchangeFlowImbalance,
                 "exchange_flow_asymmetry": ExchangeFlowAsymmetry,
+                "order_book_fragmentation": OrderBookFragmentation,
             },
             "layer3": {
                 "gamma_volume_convergence": GammaVolumeConvergence,
