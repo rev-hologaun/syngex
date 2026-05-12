@@ -37,6 +37,7 @@ KEY_FLOW_RATIO_5M = "flow_ratio_5m"
 
 # --- Strategy-specific keys (created by individual strategies) ---
 KEY_EXTRINSIC_PROXY_5M = "extrinsic_proxy_5m"
+KEY_EXTRINSIC_ROC_5M = "extrinsic_roc_5m"
 KEY_PROB_MOMENTUM_5M = "prob_momentum_5m"
 
 # --- IV Band Breakout v2 (Breakout-Master) ---
@@ -91,6 +92,7 @@ CORE_KEYS = (
     KEY_DELTA_IV_CORR_5M,
     KEY_SKEW_ROC_5M,
     KEY_DELTA_ROC_5M,
+    KEY_EXTRINSIC_ROC_5M,
 )
 
 # Depth keys tuple
@@ -106,7 +108,7 @@ DEPTH_KEYS = (
 
 # All keys in one tuple for validation
 ALL_KEYS = (*CORE_KEYS, *DEPTH_KEYS, KEY_FLOW_RATIO_5M,
-            KEY_EXTRINSIC_PROXY_5M, KEY_PROB_MOMENTUM_5M,
+            KEY_EXTRINSIC_PROXY_5M, KEY_EXTRINSIC_ROC_5M, KEY_PROB_MOMENTUM_5M,
             KEY_IV_SKEW_GRADIENT_5M, KEY_GAMMA_DENSITY_5M,
             KEY_OTM_DELTA_5M, KEY_OTM_IV_5M, KEY_DELTA_IV_CORR_5M,
             KEY_GAMMA_ACCEL_5M,
@@ -130,7 +132,7 @@ __all__ = [
     "KEY_DEPTH_BID_SIZE_5M", "KEY_DEPTH_ASK_SIZE_5M", "KEY_DEPTH_SPREAD_5M",
     "KEY_DEPTH_BID_LEVELS_5M", "KEY_DEPTH_ASK_LEVELS_5M",
     "KEY_DEPTH_BID_SIZE_ROLLING", "KEY_DEPTH_ASK_SIZE_ROLLING",
-    "KEY_EXTRINSIC_PROXY_5M", "KEY_PROB_MOMENTUM_5M",
+    "KEY_EXTRINSIC_PROXY_5M", "KEY_EXTRINSIC_ROC_5M", "KEY_PROB_MOMENTUM_5M",
     "KEY_GAMMA_ACCEL_5M",
     "KEY_CONSEC_LONG", "KEY_CONSEC_SHORT",
     "KEY_SKEW_WIDTH_5M",

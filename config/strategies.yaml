@@ -474,6 +474,13 @@ full_data:
       min_confidence: 0.35
       max_confidence: 0.80
       min_data_points: 10
+      # v2 Conviction-Master params
+      extrinsic_accel_threshold: 0.10
+      aggressor_threshold: 0.55
+      target_iv_expansion_mult: 1.6
+      target_iv_expansion_fade_mult: 1.2
+      target_iv_expansion_cap: 2.5
+      target_min_pct: 0.005
 
 # Layer 0: Master Filter
 filter:

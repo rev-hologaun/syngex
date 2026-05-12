@@ -1,9 +1,18 @@
 """
-strategies/full_data/extrinsic_intrinsic_flow.py — Extrinsic/Intrinsic Flow
+strategies/full_data/extrinsic_intrinsic_flow.py — Extrinsic/Intrinsic Flow v2
+"Conviction-Master" upgrade
 
 Full-data (v2) strategy: tracks conviction through extrinsic value flow.
 Extrinsic value expansion = new money entering the market with conviction.
 Collapse = money leaving.
+
+v2 Conviction-Master changes:
+    - Extrinsic acceleration gate (hard gate: 0.20–0.30 confidence)
+    - Aggressor volume gate (hard gate: 0.15–0.20 confidence)
+    - Delta-skew coupling gate (hard gate: 0.15–0.20 confidence)
+    - IV-scaled targets (dynamic based on ATM IV regime)
+    - 7-component confidence unified for all signal types
+    - MIN_CONFIDENCE raised from 0.25 → 0.35
 
 Logic:
     - Track extrinsic value proxy (abs(net_delta) × abs(net_gamma)) across the chain
@@ -25,12 +34,14 @@ Entry (FADE — extrinsic collapse):
     - Net gamma positive (range environment)
     - Fade the previous trend
 
-Confidence factors:
-    - Extrinsic expansion/collapse magnitude
-    - Volume spike magnitude
-    - Volume direction alignment
-    - Theoretical vs market alignment (if available)
-    - Net gamma strength
+Confidence factors (v2 — 7 components, unified):
+    1. Extrinsic magnitude: 0.05–0.10 (soft)
+    2. Extrinsic acceleration: 0.0 or 0.20–0.30 (hard gate)
+    3. Aggressor volume: 0.0 or 0.15–0.20 (hard gate)
+    4. Delta-skew coupling: 0.0 or 0.15–0.20 (hard gate)
+    5. Volume spike: 0.05–0.10 (soft)
+    6. Volume direction: 0.05–0.10 (soft)
+    7. Net gamma: 0.05–0.10 (soft)
 """
 
 from __future__ import annotations
@@ -40,7 +51,14 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
-from strategies.rolling_keys import KEY_EXTRINSIC_PROXY_5M, KEY_VOLUME_UP_5M, KEY_VOLUME_DOWN_5M
+from strategies.rolling_keys import (
+    KEY_EXTRINSIC_PROXY_5M,
+    KEY_EXTRINSIC_ROC_5M,
+    KEY_IV_SKEW_5M,
+    KEY_ATM_IV_5M,
+    KEY_VOLUME_UP_5M,
+    KEY_VOLUME_DOWN_5M,
+)
 
 logger = logging.getLogger("Syngex.Strategies.ExtrinsicIntrinsicFlow")
 
@@ -62,10 +80,9 @@ MIN_NET_GAMMA = 500000.0
 
 # Stop and target
 STOP_PCT = 0.005                        # 0.5% stop
-TARGET_PCT = 0.008                      # 0.8% target (1.6:1 R:R)
 
-# Min confidence
-MIN_CONFIDENCE = 0.25
+# Min confidence — raised from 0.25 to 0.35 (v2 Conviction-Master)
+MIN_CONFIDENCE = 0.35
 MAX_CONFIDENCE = 0.80                   # v2 cap
 
 # Min data points — need more data for extrinsic tracking
@@ -91,6 +108,12 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
 
     When extrinsic value collapses (-10% from avg) AND volume declines,
     that's money leaving — fade the remaining momentum.
+
+    v2 Conviction-Master adds:
+    - Extrinsic acceleration gate (must be accelerating in signal direction)
+    - Aggressor volume gate (market depth confirms aggressive side)
+    - Delta-skew coupling gate (IV skew normalizing in signal direction)
+    - IV-scaled targets (dynamic based on ATM IV regime)
 
     This is a conviction-tracking strategy (15min–3hr holds) — signals are
     meaningful but not rapid-fire.
@@ -192,6 +215,258 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         return signals
 
     # ------------------------------------------------------------------
+    # v2 Conviction-Master: Hard gates
+    # ------------------------------------------------------------------
+
+    def _check_extrinsic_acceleration(
+        self, rolling_data: Dict[str, Any], signal_type: str,
+    ) -> Optional[float]:
+        """
+        Check extrinsic acceleration as a hard gate.
+
+        For expansion signals: extrinsic_accel > 0.10 (accelerating upward ≥10%)
+        For collapse/fade signals: extrinsic_accel < -0.10 (accelerating downward ≥10%)
+
+        Returns extrinsic_accel value if gate passes, None otherwise.
+        """
+        window = rolling_data.get(KEY_EXTRINSIC_ROC_5M)
+        if window is None or window.latest is None:
+            return None
+
+        extrinsic_accel = window.latest
+
+        if signal_type == "expansion":
+            if extrinsic_accel > 0.10:
+                return extrinsic_accel
+        elif signal_type in ("collapse", "fade"):
+            if extrinsic_accel < -0.10:
+                return extrinsic_accel
+
+        return None
+
+    def _check_aggressor_volume(
+        self, data: Dict[str, Any], direction: str,
+    ) -> bool:
+        """
+        Check aggressor volume from market depth as a hard gate.
+
+        For LONG: ask_total / (bid_total + ask_total) > 0.55 (aggressive buying)
+        For SHORT: bid_total / (bid_total + ask_total) > 0.55 (aggressive selling)
+        For FADE: any direction acceptable
+
+        Returns True if gate passes, False otherwise.
+        Returns True if depth data unavailable (backwards compat).
+        """
+        depth = data.get("market_depth_agg", {})
+        bids = depth.get("bids", [])
+        asks = depth.get("asks", [])
+
+        if not bids and not asks:
+            return True  # No depth data — backwards compat
+
+        bid_total = sum(b.get("size", 0) for b in bids)
+        ask_total = sum(a.get("size", 0) for a in asks)
+        total = bid_total + ask_total
+
+        if total == 0:
+            return True
+
+        if direction == "LONG":
+            # Aggressive buying: asks are being hit
+            return ask_total / total > 0.55
+        elif direction == "SHORT":
+            # Aggressive selling: bids are being hit
+            return bid_total / total > 0.55
+        elif direction == "FADE":
+            # Any direction acceptable for fade
+            return True
+
+        return True
+
+    def _check_delta_skew_coupling(
+        self, rolling_data: Dict[str, Any], signal_type: str,
+    ) -> bool:
+        """
+        Check delta-skew coupling as a hard gate.
+
+        Skew normalizing from negative toward zero = bullish
+        Skew normalizing from positive toward zero = bearish
+
+        For LONG: skew_roc > 0 (skew normalizing from negative toward zero)
+        For SHORT: skew_roc < 0 (skew normalizing from positive toward zero)
+        For FADE: always True (skew direction doesn't matter)
+
+        Returns True if gate passes, False otherwise.
+        Returns True if skew data unavailable (backwards compat).
+        """
+        window = rolling_data.get(KEY_IV_SKEW_5M)
+        if window is None or window.latest is None or window.mean is None:
+            return True  # No skew data — backwards compat
+
+        current_skew = window.latest
+        avg_skew = window.mean
+
+        if abs(avg_skew) == 0:
+            return True
+
+        skew_roc = (current_skew - avg_skew) / abs(avg_skew)
+
+        if signal_type == "expansion":
+            return skew_roc > 0  # Skew normalizing from negative toward zero
+        elif signal_type in ("collapse", "fade"):
+            # For collapse: skew direction doesn't matter as much
+            # but we still want some coupling — allow both directions
+            return True  # Fade signals don't require skew coupling
+        elif signal_type == "short":
+            return skew_roc < 0  # Skew normalizing from positive toward zero
+
+        return True
+
+    # ------------------------------------------------------------------
+    # v2 Conviction-Master: IV-scaled targets
+    # ------------------------------------------------------------------
+
+    def _compute_iv_scaled_target(
+        self, entry: float, risk: float, rolling_data: Dict[str, Any],
+        signal_type: str,
+    ) -> float:
+        """
+        Compute IV-scaled target based on ATM IV regime.
+
+        Higher IV → wider targets (more room to move).
+        Lower IV → tighter targets (less room to move).
+
+        For expansion: base_mult = 1.6
+        For fade: base_mult = 1.2
+
+        target_mult = base_mult × iv_factor, capped at 2.5
+        """
+        window = rolling_data.get(KEY_ATM_IV_5M)
+        if window is None or window.latest is None or window.mean is None:
+            # No IV data — use default multiplier
+            base_mult = 1.6 if signal_type == "expansion" else 1.2
+            target_mult = base_mult
+        else:
+            current_iv = window.latest
+            mean_iv = window.mean
+            iv_factor = current_iv / mean_iv if mean_iv > 0 else 1.0
+
+            base_mult = 1.6 if signal_type == "expansion" else 1.2
+            target_mult = base_mult * iv_factor
+
+        # Cap at 2.5
+        target_mult = min(target_mult, 2.5)
+
+        if signal_type == "expansion":
+            # LONG: target = entry + risk × target_mult
+            target = entry + risk * target_mult
+        else:
+            # SHORT or FADE: target = entry - risk × target_mult
+            target = entry - risk * target_mult
+
+        # Minimum target: 0.5% from entry
+        min_target = entry * (1 + 0.005) if signal_type == "expansion" else entry * (1 - 0.005)
+        if signal_type == "expansion":
+            target = max(target, min_target)
+        else:
+            target = min(target, min_target)
+
+        return target
+
+    # ------------------------------------------------------------------
+    # v2 Conviction-Master: Unified 7-component confidence
+    # ------------------------------------------------------------------
+
+    def _compute_confidence_v2(
+        self,
+        extrinsic_change_pct: float,
+        vol_ratio: float,
+        vol_trend: str,
+        net_gamma: float,
+        signal_type: str,
+        extrinsic_accel: Optional[float],
+        aggressor_ratio: Optional[float],
+        skew_coupled: bool,
+    ) -> float:
+        """
+        Compute confidence using 7 unified components for all signal types.
+
+        1. Extrinsic magnitude: 0.05–0.10 (soft — how extreme is the change)
+        2. Extrinsic acceleration: 0.0 or 0.20–0.30 (hard gate)
+        3. Aggressor volume: 0.0 or 0.15–0.20 (hard gate, scaled by aggressor_ratio)
+        4. Delta-skew coupling: 0.0 or 0.15–0.20 (hard gate)
+        5. Volume spike: 0.05–0.10 (soft — unchanged)
+        6. Volume direction: 0.05–0.10 (soft — unchanged)
+        7. Net gamma: 0.05–0.10 (soft — unchanged)
+        """
+        # 1. Extrinsic magnitude (0.05–0.10)
+        #    How extreme is the extrinsic change?
+        if signal_type == "expansion":
+            exp_scaled = min(1.0, (extrinsic_change_pct - EXTRINSIC_EXPANSION_THRESHOLD)
+                             / (EXTRINSIC_EXPANSION_THRESHOLD * 3))
+        else:
+            # Collapse: use absolute value
+            collapse_magnitude = abs(extrinsic_change_pct)
+            exp_scaled = min(1.0, (collapse_magnitude - EXTRINSIC_COLLAPSE_THRESHOLD)
+                             / (EXTRINSIC_COLLAPSE_THRESHOLD * 1.5))
+        extrinsic_component = 0.05 + 0.05 * exp_scaled
+
+        # 2. Extrinsic acceleration (0.0 or 0.20–0.30) — hard gate
+        if extrinsic_accel is not None:
+            # Scale from 0.10 (threshold) → 0.30 (max)
+            accel_scaled = min(1.0, (abs(extrinsic_accel) - 0.10) / 0.20)
+            accel_component = 0.20 + 0.10 * accel_scaled
+        else:
+            accel_component = 0.0
+
+        # 3. Aggressor volume (0.0 or 0.15–0.20) — hard gate, scaled by aggressor_ratio
+        if aggressor_ratio is not None and aggressor_ratio > 0:
+            # Scale by how far above threshold the aggressor ratio is
+            aggressor_scaled = min(1.0, (aggressor_ratio - 0.55) / 0.20)
+            aggressor_component = 0.15 + 0.05 * aggressor_scaled
+        else:
+            aggressor_component = 0.0
+
+        # 4. Delta-skew coupling (0.0 or 0.15–0.20) — hard gate
+        if skew_coupled:
+            skew_component = 0.15 + 0.05  # Base confidence when coupled
+        else:
+            skew_component = 0.0
+
+        # 5. Volume spike (0.05–0.10) — soft
+        vol_scaled = min(1.0, (vol_ratio - VOLUME_SPIKE_RATIO) / VOLUME_SPIKE_RATIO)
+        volume_spike_component = 0.05 + 0.05 * vol_scaled
+
+        # 6. Volume direction (0.05–0.10) — soft
+        if signal_type == "expansion":
+            if vol_trend == "UP" and "LONG" in str(signal_type):
+                vol_dir_component = 0.10
+            elif vol_trend == "DOWN" and "SHORT" in str(signal_type):
+                vol_dir_component = 0.10
+            else:
+                vol_dir_component = 0.05
+        elif signal_type == "collapse":
+            if vol_trend == "DOWN":
+                vol_dir_component = 0.10
+            elif vol_trend == "FLAT":
+                vol_dir_component = 0.08
+            else:
+                vol_dir_component = 0.05
+        else:
+            vol_dir_component = 0.05
+
+        # 7. Net gamma (0.05–0.10) — soft
+        gamma_scaled = min(1.0, net_gamma / (MIN_NET_GAMMA * 4))
+        gamma_component = 0.05 + 0.05 * gamma_scaled
+
+        # Sum all components
+        confidence = (extrinsic_component + accel_component + aggressor_component +
+                      skew_component + volume_spike_component + vol_dir_component +
+                      gamma_component)
+
+        return min(MAX_CONFIDENCE, max(0.0, confidence))
+
+    # ------------------------------------------------------------------
     # LONG: Extrinsic expansion + bullish volume
     # ------------------------------------------------------------------
 
@@ -212,7 +487,10 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         - Volume spiking >50% above avg
         - Volume trend is UP
         - Net gamma positive
+        - v2: Extrinsic accelerating upward, aggressive buying, skew coupling
         """
+        rolling_data = data.get("rolling_data", {})
+
         # Extrinsic must be expanding
         if extrinsic_change_pct < EXTRINSIC_EXPANSION_THRESHOLD:
             return None
@@ -225,23 +503,66 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         if vol_trend not in VALID_VOLUME_TREND_LONG:
             return None
 
+        # --- v2 Conviction-Master: Hard gates ---
+        # 1. Extrinsic acceleration gate
+        extrinsic_accel = self._check_extrinsic_acceleration(rolling_data, "expansion")
+        if extrinsic_accel is None:
+            return None
+
+        # 2. Aggressor volume gate
+        aggressor_pass = self._check_aggressor_volume(data, "LONG")
+        if not aggressor_pass:
+            return None
+
+        # 3. Delta-skew coupling gate
+        skew_coupled = self._check_delta_skew_coupling(rolling_data, "expansion")
+        if not skew_coupled:
+            return None
+
+        # Compute aggressor ratio for confidence scaling
+        depth = data.get("market_depth_agg", {})
+        bids = depth.get("bids", [])
+        asks = depth.get("asks", [])
+        aggressor_ratio = None
+        if bids or asks:
+            bid_total = sum(b.get("size", 0) for b in bids)
+            ask_total = sum(a.get("size", 0) for a in asks)
+            total = bid_total + ask_total
+            if total > 0:
+                aggressor_ratio = ask_total / total  # Ask-heavy = aggressive buying
+
         # Compute confidence
-        confidence = self._compute_long_confidence(
+        confidence = self._compute_confidence_v2(
             extrinsic_change_pct, vol_ratio, vol_trend,
-            net_gamma, price,
+            net_gamma, "expansion", extrinsic_accel,
+            aggressor_ratio, skew_coupled,
         )
 
         if confidence < MIN_CONFIDENCE:
             return None
 
+        # Compute IV-scaled target
+        risk = price * STOP_PCT
+        target = self._compute_iv_scaled_target(price, risk, rolling_data, "expansion")
+
         # Extract trend from price window for metadata
-        rolling_data = data.get("rolling_data", {})
         price_window = rolling_data.get(KEY_VOLUME_UP_5M)
         trend = price_window.trend if price_window else "UNKNOWN"
 
+        # Compute skew_roc for metadata
+        skew_window = rolling_data.get(KEY_IV_SKEW_5M)
+        skew_roc = None
+        if skew_window and skew_window.latest and skew_window.mean and abs(skew_window.mean) > 0:
+            skew_roc = (skew_window.latest - skew_window.mean) / abs(skew_window.mean)
+
+        # Compute iv_factor for metadata
+        iv_window = rolling_data.get(KEY_ATM_IV_5M)
+        iv_factor = None
+        if iv_window and iv_window.latest and iv_window.mean and iv_window.mean > 0:
+            iv_factor = iv_window.latest / iv_window.mean
+
         # Build signal
         stop = price * (1 - STOP_PCT)
-        target = price * (1 + TARGET_PCT)
 
         return Signal(
             direction=Direction.LONG,
@@ -258,12 +579,19 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
             metadata={
                 "signal_type": "expansion",
                 "extrinsic_change_pct": round(extrinsic_change_pct, 4),
+                "extrinsic_roc": round(extrinsic_accel, 4),
+                "extrinsic_accel": round(extrinsic_accel, 4),
                 "volume_ratio": round(vol_ratio, 2),
                 "volume_trend": vol_trend,
                 "trend": trend,
                 "net_gamma": round(net_gamma, 2),
+                "aggressor_ratio": round(aggressor_ratio, 4) if aggressor_ratio else None,
+                "skew_roc": round(skew_roc, 4) if skew_roc else None,
+                "delta_skew_coupled": skew_coupled,
+                "iv_factor": round(iv_factor, 4) if iv_factor else None,
+                "target_mult": round(target / (price * STOP_PCT), 2) if risk > 0 else None,
                 "stop_pct": STOP_PCT,
-                "target_pct": TARGET_PCT,
+                "target_pct": round((target - price) / price, 4),
                 "risk_reward_ratio": round(
                     abs(target - price) / (price - stop), 2
                 ),
@@ -291,7 +619,10 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         - Volume spiking >50% above avg
         - Volume trend is DOWN
         - Net gamma positive
+        - v2: Extrinsic accelerating upward, aggressive selling, skew coupling
         """
+        rolling_data = data.get("rolling_data", {})
+
         # Extrinsic must be expanding
         if extrinsic_change_pct < EXTRINSIC_EXPANSION_THRESHOLD:
             return None
@@ -304,23 +635,66 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         if vol_trend not in VALID_VOLUME_TREND_SHORT:
             return None
 
+        # --- v2 Conviction-Master: Hard gates ---
+        # 1. Extrinsic acceleration gate
+        extrinsic_accel = self._check_extrinsic_acceleration(rolling_data, "expansion")
+        if extrinsic_accel is None:
+            return None
+
+        # 2. Aggressor volume gate
+        aggressor_pass = self._check_aggressor_volume(data, "SHORT")
+        if not aggressor_pass:
+            return None
+
+        # 3. Delta-skew coupling gate
+        skew_coupled = self._check_delta_skew_coupling(rolling_data, "short")
+        if not skew_coupled:
+            return None
+
+        # Compute aggressor ratio for confidence scaling
+        depth = data.get("market_depth_agg", {})
+        bids = depth.get("bids", [])
+        asks = depth.get("asks", [])
+        aggressor_ratio = None
+        if bids or asks:
+            bid_total = sum(b.get("size", 0) for b in bids)
+            ask_total = sum(a.get("size", 0) for a in asks)
+            total = bid_total + ask_total
+            if total > 0:
+                aggressor_ratio = bid_total / total  # Bid-heavy = aggressive selling
+
         # Compute confidence
-        confidence = self._compute_short_confidence(
+        confidence = self._compute_confidence_v2(
             extrinsic_change_pct, vol_ratio, vol_trend,
-            net_gamma, price,
+            net_gamma, "short", extrinsic_accel,
+            aggressor_ratio, skew_coupled,
         )
 
         if confidence < MIN_CONFIDENCE:
             return None
 
+        # Compute IV-scaled target
+        risk = price * STOP_PCT
+        target = self._compute_iv_scaled_target(price, risk, rolling_data, "expansion")
+
         # Extract trend from price window for metadata
-        rolling_data = data.get("rolling_data", {})
         price_window = rolling_data.get(KEY_VOLUME_UP_5M)
         trend = price_window.trend if price_window else "UNKNOWN"
 
+        # Compute skew_roc for metadata
+        skew_window = rolling_data.get(KEY_IV_SKEW_5M)
+        skew_roc = None
+        if skew_window and skew_window.latest and skew_window.mean and abs(skew_window.mean) > 0:
+            skew_roc = (skew_window.latest - skew_window.mean) / abs(skew_window.mean)
+
+        # Compute iv_factor for metadata
+        iv_window = rolling_data.get(KEY_ATM_IV_5M)
+        iv_factor = None
+        if iv_window and iv_window.latest and iv_window.mean and iv_window.mean > 0:
+            iv_factor = iv_window.latest / iv_window.mean
+
         # Build signal
         stop = price * (1 + STOP_PCT)
-        target = price * (1 - TARGET_PCT)
 
         return Signal(
             direction=Direction.SHORT,
@@ -337,12 +711,19 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
             metadata={
                 "signal_type": "expansion",
                 "extrinsic_change_pct": round(extrinsic_change_pct, 4),
+                "extrinsic_roc": round(extrinsic_accel, 4),
+                "extrinsic_accel": round(extrinsic_accel, 4),
                 "volume_ratio": round(vol_ratio, 2),
                 "volume_trend": vol_trend,
                 "trend": trend,
                 "net_gamma": round(net_gamma, 2),
+                "aggressor_ratio": round(aggressor_ratio, 4) if aggressor_ratio else None,
+                "skew_roc": round(skew_roc, 4) if skew_roc else None,
+                "delta_skew_coupled": skew_coupled,
+                "iv_factor": round(iv_factor, 4) if iv_factor else None,
+                "target_mult": round((price - target) / (price * STOP_PCT), 2) if risk > 0 else None,
                 "stop_pct": STOP_PCT,
-                "target_pct": TARGET_PCT,
+                "target_pct": round((price - target) / price, 4),
                 "risk_reward_ratio": round(
                     abs(target - price) / (stop - price), 2
                 ),
@@ -374,7 +755,10 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         Fade direction is determined by the volume trend:
         - If volume was UP → fade LONG (go SHORT)
         - If volume was FLAT → fade based on recent price momentum
+        - v2: Extrinsic accelerating downward, skew coupling not required
         """
+        rolling_data = data.get("rolling_data", {})
+
         # Extrinsic must be collapsing
         if extrinsic_change_pct > -EXTRINSIC_COLLAPSE_THRESHOLD:
             return None
@@ -387,40 +771,79 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         if vol_trend == "DOWN":
             # Volume declining from a downtrend → fade SHORT (go LONG)
             fade_direction = Direction.LONG
+            fade_signal_type = "expansion"  # For IV-scaled target
         elif vol_trend == "FLAT":
             # Volume flat during collapse → check recent price momentum
-            price_5m = data.get("rolling_data", {}).get("price_5m")
+            price_5m = rolling_data.get("price_5m")
             if price_5m is not None and price_5m.change_pct is not None:
                 if price_5m.change_pct > 0:
                     fade_direction = Direction.SHORT  # Price was up → fade
+                    fade_signal_type = "expansion"
                 else:
                     fade_direction = Direction.LONG   # Price was down → fade
+                    fade_signal_type = "expansion"
             else:
                 fade_direction = Direction.LONG  # Default: fade down
+                fade_signal_type = "expansion"
         else:
             return None
 
+        # --- v2 Conviction-Master: Hard gates ---
+        # 1. Extrinsic acceleration gate
+        extrinsic_accel = self._check_extrinsic_acceleration(rolling_data, "collapse")
+        if extrinsic_accel is None:
+            return None
+
+        # 2. Aggressor volume gate — not required for fade
+        # 3. Delta-skew coupling gate — not required for fade
+
+        # Compute aggressor ratio for confidence scaling (use available depth)
+        depth = data.get("market_depth_agg", {})
+        bids = depth.get("bids", [])
+        asks = depth.get("asks", [])
+        aggressor_ratio = None
+        if bids or asks:
+            bid_total = sum(b.get("size", 0) for b in bids)
+            ask_total = sum(a.get("size", 0) for a in asks)
+            total = bid_total + ask_total
+            if total > 0:
+                aggressor_ratio = max(bid_total / total, ask_total / total)
+
         # Compute confidence
-        confidence = self._compute_fade_confidence(
+        confidence = self._compute_confidence_v2(
             extrinsic_change_pct, vol_ratio, vol_trend,
-            net_gamma, price,
+            net_gamma, "collapse", extrinsic_accel,
+            aggressor_ratio, True,  # skew_coupled = True for fade
         )
 
         if confidence < MIN_CONFIDENCE:
             return None
 
+        # Compute IV-scaled target (fade uses base_mult = 1.2)
+        risk = price * STOP_PCT
+        target = self._compute_iv_scaled_target(price, risk, rolling_data, "fade")
+
         # Extract trend from price window for metadata
-        rolling_data = data.get("rolling_data", {})
         price_window = rolling_data.get(KEY_VOLUME_UP_5M)
         trend = price_window.trend if price_window else "UNKNOWN"
+
+        # Compute skew_roc for metadata
+        skew_window = rolling_data.get(KEY_IV_SKEW_5M)
+        skew_roc = None
+        if skew_window and skew_window.latest and skew_window.mean and abs(skew_window.mean) > 0:
+            skew_roc = (skew_window.latest - skew_window.mean) / abs(skew_window.mean)
+
+        # Compute iv_factor for metadata
+        iv_window = rolling_data.get(KEY_ATM_IV_5M)
+        iv_factor = None
+        if iv_window and iv_window.latest and iv_window.mean and iv_window.mean > 0:
+            iv_factor = iv_window.latest / iv_window.mean
 
         # Build signal
         if fade_direction == Direction.LONG:
             stop = price * (1 + STOP_PCT)
-            target = price * (1 + TARGET_PCT)
         else:
             stop = price * (1 - STOP_PCT)
-            target = price * (1 - TARGET_PCT)
 
         return Signal(
             direction=fade_direction,
@@ -437,13 +860,20 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
             metadata={
                 "signal_type": "collapse",
                 "extrinsic_change_pct": round(extrinsic_change_pct, 4),
+                "extrinsic_roc": round(extrinsic_accel, 4),
+                "extrinsic_accel": round(extrinsic_accel, 4),
                 "volume_ratio": round(vol_ratio, 2),
                 "volume_trend": vol_trend,
                 "trend": trend,
                 "fade_direction": fade_direction.value,
                 "net_gamma": round(net_gamma, 2),
+                "aggressor_ratio": round(aggressor_ratio, 4) if aggressor_ratio else None,
+                "skew_roc": round(skew_roc, 4) if skew_roc else None,
+                "delta_skew_coupled": True,
+                "iv_factor": round(iv_factor, 4) if iv_factor else None,
+                "target_mult": round(abs(target - price) / risk, 2) if risk > 0 else None,
                 "stop_pct": STOP_PCT,
-                "target_pct": TARGET_PCT,
+                "target_pct": round(abs(target - price) / price, 4),
                 "risk_reward_ratio": round(
                     abs(target - price) / abs(stop - price), 2
                 ),
@@ -451,7 +881,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         )
 
     # ------------------------------------------------------------------
-    # Confidence scoring
+    # Legacy confidence methods (kept for backwards compat)
     # ------------------------------------------------------------------
 
     def _compute_long_confidence(
@@ -462,36 +892,24 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         net_gamma: float,
         price: float,
     ) -> float:
-        """
-        Compute confidence for LONG (extrinsic expansion + bullish volume).
-
-        Factors (each 0–1, capped at MAX_CONFIDENCE):
-        1. Extrinsic expansion magnitude (0.20–0.30)
-        2. Volume spike magnitude (0.20–0.25)
-        3. Volume direction alignment (0.10–0.15)
-        4. Net gamma strength (0.15–0.20)
-        """
+        """Legacy LONG confidence — kept for backwards compat."""
         # 1. Extrinsic expansion magnitude (0.20–0.30)
-        #    Extrapolate: 5% = baseline, 20%+ = max weight
         exp_scaled = min(1.0, (extrinsic_change_pct - EXTRINSIC_EXPANSION_THRESHOLD)
                          / (EXTRINSIC_EXPANSION_THRESHOLD * 3))
         exp_component = 0.20 + 0.10 * exp_scaled
 
         # 2. Volume spike magnitude (0.20–0.25)
-        #    1.5× = baseline, 3×+ = max weight
         vol_scaled = min(1.0, (vol_ratio - VOLUME_SPIKE_RATIO)
                          / (VOLUME_SPIKE_RATIO))
         vol_component = 0.20 + 0.05 * vol_scaled
 
         # 3. Volume direction alignment (0.10–0.15)
-        #    UP trend = confirmed bullish
         if vol_trend == "UP":
             vol_dir_component = 0.15
         else:
             vol_dir_component = 0.05
 
         # 4. Net gamma strength (0.15–0.20)
-        #    Higher positive gamma = stronger positive regime
         gamma_scaled = min(1.0, net_gamma / (MIN_NET_GAMMA * 4))
         gamma_component = 0.15 + 0.05 * gamma_scaled
 
@@ -512,11 +930,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         net_gamma: float,
         price: float,
     ) -> float:
-        """
-        Compute confidence for SHORT (extrinsic expansion + bearish volume).
-
-        Same factors as LONG but for bearish direction.
-        """
+        """Legacy SHORT confidence — kept for backwards compat."""
         # 1. Extrinsic expansion magnitude (0.20–0.30)
         exp_scaled = min(1.0, (extrinsic_change_pct - EXTRINSIC_EXPANSION_THRESHOLD)
                          / (EXTRINSIC_EXPANSION_THRESHOLD * 3))
@@ -554,34 +968,21 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         net_gamma: float,
         price: float,
     ) -> float:
-        """
-        Compute confidence for FADE (extrinsic collapse).
-
-        Factors (each 0–1, capped at MAX_CONFIDENCE):
-        1. Extrinsic collapse magnitude (0.25–0.35) — collapse is a stronger signal
-        2. Volume decline (0.15–0.20)
-        3. Volume trend alignment (0.10–0.15)
-        4. Net gamma strength (0.15–0.20)
-        """
+        """Legacy FADE confidence — kept for backwards compat."""
         # 1. Extrinsic collapse magnitude (0.25–0.35)
-        #    10% = baseline, 25%+ = max weight
-        #    Use absolute value since change is negative
         collapse_magnitude = abs(extrinsic_change_pct)
         collapse_scaled = min(1.0, (collapse_magnitude - EXTRINSIC_COLLAPSE_THRESHOLD)
                               / (EXTRINSIC_COLLAPSE_THRESHOLD * 1.5))
         collapse_component = 0.25 + 0.10 * collapse_scaled
 
         # 2. Volume decline (0.15–0.20)
-        #    Lower volume ratio = stronger evidence of money leaving
         if vol_ratio is not None and vol_ratio > 0:
-            # vol_ratio < 1.0 = declining; < 0.5 = strong decline
             vol_decline = 1.0 - min(1.0, vol_ratio)
             vol_decline_component = 0.15 + 0.05 * vol_decline
         else:
-            vol_decline_component = 0.15  # Neutral
+            vol_decline_component = 0.15
 
         # 3. Volume trend alignment (0.10–0.15)
-        #    DOWN trend during collapse = confirmed money leaving
         if vol_trend == "DOWN":
             vol_dir_component = 0.15
         elif vol_trend == "FLAT":
@@ -590,7 +991,6 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
             vol_dir_component = 0.05
 
         # 4. Net gamma strength (0.15–0.20)
-        #    Higher positive gamma = stronger range environment (good for fades)
         gamma_scaled = min(1.0, net_gamma / (MIN_NET_GAMMA * 4))
         gamma_component = 0.15 + 0.05 * gamma_scaled
 
@@ -606,5 +1006,3 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-
-

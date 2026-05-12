@@ -252,6 +252,7 @@ class SyngexOrchestrator:
             KEY_SKEW_WIDTH_5M: RollingWindow(window_type="time", window_size=300),
             KEY_FLOW_RATIO_5M: RollingWindow(window_type="time", window_size=300),
             KEY_EXTRINSIC_PROXY_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_EXTRINSIC_ROC_5M: RollingWindow(window_type="time", window_size=300),
             KEY_PROB_MOMENTUM_5M: RollingWindow(window_type="time", window_size=300),
             # iv_gex_divergence v2 — Volatility-Snap rolling windows
             KEY_IV_SKEW_GRADIENT_5M: RollingWindow(window_type="time", window_size=300),
@@ -766,6 +767,28 @@ class SyngexOrchestrator:
                 extrinsic_proxy = self._calculate_extrinsic_proxy(gex_summary)
                 if extrinsic_proxy is not None:
                     self._rolling_data[KEY_EXTRINSIC_PROXY_5M].push(extrinsic_proxy)
+
+                # extrinsic_roc_5m — v2 Conviction-Master: ROC + acceleration of extrinsic
+                try:
+                    ext_window = self._rolling_data.get(KEY_EXTRINSIC_PROXY_5M)
+                    if (ext_window is not None and ext_window.count >= 6
+                            and KEY_EXTRINSIC_ROC_5M in self._rolling_data):
+                        vals = list(ext_window.values)
+                        current_ext = vals[-1]
+                        # Extrinsic ROC: change over last 5 data points (~5 min)
+                        if len(vals) >= 6 and abs(vals[-6]) > 0:
+                            ext_roc = (current_ext - vals[-6]) / abs(vals[-6])
+                        else:
+                            ext_roc = 0.0
+                        # Extrinsic acceleration: ROC change over last 5 points
+                        if len(vals) >= 11 and abs(vals[-11]) > 0:
+                            prev_roc = (vals[-6] - vals[-11]) / abs(vals[-11])
+                            ext_accel = (ext_roc - prev_roc) / abs(prev_roc) if abs(prev_roc) > 0 else 0.0
+                        else:
+                            ext_accel = 0.0
+                        self._rolling_data[KEY_EXTRINSIC_ROC_5M].push(ext_accel, time.time())
+                except Exception:
+                    pass
 
                 # prob_momentum_5m — probability distribution momentum
                 prob_mom = self._calculate_prob_momentum(gex_summary)
