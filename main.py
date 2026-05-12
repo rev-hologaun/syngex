@@ -362,7 +362,6 @@ class SyngexOrchestrator:
             strategy_hold_times=strategy_hold_times,
             log_dir=str(log_dir),
             symbol=self.symbol,
-            signal_log_path=signal_log_path,
         )
 
         # Apply global config to EngineConfig

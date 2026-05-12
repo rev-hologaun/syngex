@@ -85,7 +85,6 @@ class SignalTracker:
         log_dir: str = "log",
         symbol: str = "UNKNOWN",
         strategy_hold_times: Optional[Dict[str, int]] = None,
-        signal_log_path: Optional[str] = None,
     ) -> None:
         """
         Initialize the SignalTracker.
@@ -96,7 +95,6 @@ class SignalTracker:
             log_dir: Directory for signal outcome logs.
             symbol: Symbol this tracker is monitoring.
             strategy_hold_times: Optional dict mapping strategy_id to max_hold_seconds.
-            signal_log_path: Optional path to global signals.jsonl for master ledger.
         """
         self.max_hold_seconds = max_hold_seconds
         self._strategy_hold_times = strategy_hold_times or {}
@@ -105,7 +103,6 @@ class SignalTracker:
         self._log_dir = Path(log_dir)
         self._log_dir.mkdir(parents=True, exist_ok=True)
         self._symbol = symbol
-        self._signal_log_path = signal_log_path  # global signals.jsonl path
 
         # Per-strategy statistics
         self._strategy_stats: Dict[str, Dict[str, Any]] = {}
@@ -188,20 +185,15 @@ class SignalTracker:
         json_line = json.dumps(log_entry) + "\n"
 
         # 1. Per-symbol log: log/signals_{SYMBOL}.jsonl
+        # Note: Global master ledger (log/signals.jsonl) is written by
+        # StrategyEngine._log_signal() only — SignalTracker owns per-symbol
+        # and outcome tracking, not the global signal log.
         try:
             sym_path = self._log_dir / f"signals_{self._symbol}.jsonl"
             with open(sym_path, "a") as f:
                 f.write(json_line)
         except OSError:
             pass
-
-        # 2. Global master ledger: log/signals.jsonl (if configured)
-        if self._signal_log_path:
-            try:
-                with open(self._signal_log_path, "a") as f:
-                    f.write(json_line)
-            except OSError:
-                pass
 
     def update(self, underlying_price: float, timestamp: Optional[float] = None) -> List[ResolvedSignal]:
         """

@@ -108,8 +108,9 @@ async def collect_quotes(session, symbol, headers, raw_path, parsed_path, durati
     log.info("[%s] Opening quote stream: %s", symbol, url)
     count = 0
     retry_delay = 1
+    deadline = time.monotonic() + duration_seconds
 
-    while duration_seconds > 0:
+    while time.monotonic() < deadline:
         try:
             async with session.get(url, headers=headers) as resp:
                 if resp.status == 401:
@@ -123,9 +124,9 @@ async def collect_quotes(session, symbol, headers, raw_path, parsed_path, durati
                     continue
                 resp.raise_for_status()
                 log.info("[%s] Quote stream connected", symbol)
-                deadline = time.monotonic() + duration_seconds
+                line_deadline = time.monotonic() + (deadline - time.monotonic())
                 async for line in resp.content:
-                    remaining = deadline - time.monotonic()
+                    remaining = line_deadline - time.monotonic()
                     if remaining <= 0:
                         break
                     line_str = line.decode("utf-8", errors="replace").strip()
@@ -144,7 +145,6 @@ async def collect_quotes(session, symbol, headers, raw_path, parsed_path, durati
                     else:
                         write_line(parsed_path, raw_data)
                     count += 1
-                    duration_seconds = max(0, duration_seconds - 1)
         except aiohttp.ClientResponseError as e:
             if e.status == 429:
                 backoff = min(retry_delay * 2, 120)
@@ -339,8 +339,9 @@ async def collect_option_chain(session, symbol, headers, raw_path, parsed_path, 
     log.info("[%s] Opening option-chain stream: %s", symbol, url)
     count = 0
     retry_delay = 1
+    deadline = time.monotonic() + duration_seconds
 
-    while duration_seconds > 0:
+    while time.monotonic() < deadline:
         try:
             async with session.get(url, headers=headers, params=params) as resp:
                 if resp.status == 401:
@@ -353,9 +354,9 @@ async def collect_option_chain(session, symbol, headers, raw_path, parsed_path, 
                     continue
                 resp.raise_for_status()
                 log.info("[%s] Option-chain stream connected", symbol)
-                deadline = time.monotonic() + duration_seconds
+                line_deadline = time.monotonic() + (deadline - time.monotonic())
                 async for line in resp.content:
-                    remaining = deadline - time.monotonic()
+                    remaining = line_deadline - time.monotonic()
                     if remaining <= 0:
                         break
                     line_str = line.decode("utf-8", errors="replace").strip()
@@ -374,7 +375,6 @@ async def collect_option_chain(session, symbol, headers, raw_path, parsed_path, 
                     else:
                         write_line(parsed_path, raw_data)
                     count += 1
-                    duration_seconds = max(0, duration_seconds - 1)
         except aiohttp.ClientResponseError as e:
             if e.status == 429:
                 backoff = min(retry_delay * 2, 120)
@@ -473,8 +473,9 @@ async def collect_market_depth_quotes(session, symbol, headers, raw_path, parsed
     log.info("[%s] Opening market depth quotes stream: %s", symbol, url)
     count = 0
     retry_delay = 1
+    deadline = time.monotonic() + duration_seconds
 
-    while duration_seconds > 0:
+    while time.monotonic() < deadline:
         try:
             async with session.get(url, headers=headers, params=params) as resp:
                 if resp.status == 401:
@@ -487,9 +488,9 @@ async def collect_market_depth_quotes(session, symbol, headers, raw_path, parsed
                     continue
                 resp.raise_for_status()
                 log.info("[%s] Market depth quotes stream connected", symbol)
-                deadline = time.monotonic() + duration_seconds
+                line_deadline = time.monotonic() + (deadline - time.monotonic())
                 async for line in resp.content:
-                    remaining = deadline - time.monotonic()
+                    remaining = line_deadline - time.monotonic()
                     if remaining <= 0:
                         break
                     line_str = line.decode("utf-8", errors="replace").strip()
@@ -508,7 +509,6 @@ async def collect_market_depth_quotes(session, symbol, headers, raw_path, parsed
                     else:
                         write_line(parsed_path, raw_data)
                     count += 1
-                    duration_seconds = max(0, duration_seconds - 1)
         except aiohttp.ClientResponseError as e:
             if e.status == 429:
                 backoff = min(retry_delay * 2, 120)
@@ -610,8 +610,9 @@ async def collect_market_depth_agg(session, symbol, headers, raw_path, parsed_pa
     log.info("[%s] Opening market depth aggregates stream: %s", symbol, url)
     count = 0
     retry_delay = 1
+    deadline = time.monotonic() + duration_seconds
 
-    while duration_seconds > 0:
+    while time.monotonic() < deadline:
         try:
             async with session.get(url, headers=headers, params=params) as resp:
                 if resp.status == 401:
@@ -624,9 +625,9 @@ async def collect_market_depth_agg(session, symbol, headers, raw_path, parsed_pa
                     continue
                 resp.raise_for_status()
                 log.info("[%s] Market depth aggregates stream connected", symbol)
-                deadline = time.monotonic() + duration_seconds
+                line_deadline = time.monotonic() + (deadline - time.monotonic())
                 async for line in resp.content:
-                    remaining = deadline - time.monotonic()
+                    remaining = line_deadline - time.monotonic()
                     if remaining <= 0:
                         break
                     line_str = line.decode("utf-8", errors="replace").strip()
