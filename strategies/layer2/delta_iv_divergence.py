@@ -73,6 +73,10 @@ class DeltaIVDivergence(BaseStrategy):
     strategy_id = "delta_iv_divergence"
     layer = "layer2"
 
+    def __init__(self, config: Any = None, **kwargs: Any) -> None:
+        """Initialize strategy with config."""
+        self.config = config
+
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """Evaluate current state for delta-IV divergence."""
         underlying_price = data.get("underlying_price", 0)
