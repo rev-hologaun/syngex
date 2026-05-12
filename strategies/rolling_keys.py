@@ -69,6 +69,9 @@ KEY_ATR_5M = "atr_5m"
 # --- Prob Weighted Magnet v2 (Velocity-Magnet) ---
 KEY_MAGNET_DELTA_5M = "magnet_delta_5m"
 
+# --- Prob Distribution Shift v2 (Momentum-Master) ---
+KEY_MOMENTUM_ROC_5M = "momentum_roc_5m"
+
 # --- Convenience: all core keys in one tuple ---
 CORE_KEYS = (
     KEY_PRICE_5M,
@@ -112,7 +115,8 @@ ALL_KEYS = (*CORE_KEYS, *DEPTH_KEYS, KEY_FLOW_RATIO_5M,
             KEY_SKEW_WIDTH_5M,
             KEY_STRIKE_DELTA_5M, KEY_ATR_5M,
             KEY_SKEW_ROC_5M, KEY_DELTA_ROC_5M,
-            KEY_MAGNET_DELTA_5M)
+            KEY_MAGNET_DELTA_5M,
+            KEY_MOMENTUM_ROC_5M)
 
 __all__ = [
     "KEY_PRICE_5M", "KEY_PRICE_30M",
@@ -133,5 +137,6 @@ __all__ = [
     "KEY_STRIKE_DELTA_5M", "KEY_ATR_5M",
     "KEY_SKEW_ROC_5M", "KEY_DELTA_ROC_5M",
     "KEY_MAGNET_DELTA_5M",
+    "KEY_MOMENTUM_ROC_5M",
     "CORE_KEYS", "DEPTH_KEYS", "ALL_KEYS",
 ]

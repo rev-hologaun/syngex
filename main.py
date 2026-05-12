@@ -277,6 +277,7 @@ class SyngexOrchestrator:
             KEY_STRIKE_DELTA_5M: RollingWindow(window_type="time", window_size=300),
             # Prob Weighted Magnet v2 (Velocity-Magnet)
             KEY_MAGNET_DELTA_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_MOMENTUM_ROC_5M: RollingWindow(window_type="time", window_size=300),
         }
 
         # Call/put update counters for volume_up/volume_down tracking
@@ -788,6 +789,28 @@ class SyngexOrchestrator:
                             distance = strike - atm_strike
                             momentum += (call_delta - put_delta) * distance
                         self._rolling_data[KEY_PROB_MOMENTUM_5M].push(momentum, time.time())
+                except Exception:
+                    pass
+
+                # ── prob_distribution_shift v2: Momentum ROC & acceleration ──
+                try:
+                    mom_window = self._rolling_data.get(KEY_PROB_MOMENTUM_5M)
+                    if (mom_window is not None and mom_window.count >= 6
+                            and KEY_MOMENTUM_ROC_5M in self._rolling_data):
+                        vals = list(mom_window.values)
+                        current_momentum = vals[-1]
+                        # Momentum ROC: change over last 5 data points (~5 min)
+                        if len(vals) >= 6 and abs(vals[-6]) > 0:
+                            momentum_roc = (current_momentum - vals[-6]) / abs(vals[-6])
+                        else:
+                            momentum_roc = 0.0
+                        # Momentum acceleration: ROC change over last 5 points
+                        if len(vals) >= 11 and abs(vals[-11]) > 0:
+                            prev_roc = (vals[-6] - vals[-11]) / abs(vals[-11])
+                            momentum_accel = (momentum_roc - prev_roc) / abs(prev_roc) if abs(prev_roc) > 0 else 0.0
+                        else:
+                            momentum_accel = 0.0
+                        self._rolling_data[KEY_MOMENTUM_ROC_5M].push(momentum_accel, time.time())
                 except Exception:
                     pass
 

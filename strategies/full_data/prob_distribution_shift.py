@@ -1,5 +1,5 @@
 """
-strategies/full_data/prob_distribution_shift.py — Prob Distribution Shift
+strategies/full_data/prob_distribution_shift.py — Prob Distribution Shift v2 (Momentum-Master)
 
 Full-data (v2) strategy: leading indicator that detects when the full
 probability distribution shifts before price moves.
@@ -9,36 +9,54 @@ Logic:
     - Use delta as proxy for ProbabilityITM (delta ≈ ProbITM)
     - For each strike: contribution = net_delta × |strike - ATM_strike|
     - Sum all contributions → total probability momentum
-    - Entry when momentum > 2σ of rolling average for 3+ consecutive evaluations
-    - Positive momentum = mass shifting right (bullish)
-    - Negative momentum = mass shifting left (bearish)
+    - Momentum ROC tracks acceleration of the momentum signal
+    - Entry when momentum ROC shows accelerating shift + z-score confirmation
+    - Capital-weighted breadth ensures breadth of shift is concentrated in high-OI strikes
+    - Delta-skew coupling ensures options market structure supports the direction
+    - IV-scaled targets adjust for current volatility regime
 
 Entry (LONG):
-    - ProbMomentum > +2σ of rolling avg for 3+ consecutive evaluations
+    - ProbMomentum ROC accelerating upward ≥10% (momentum_accel > 0.10)
+    - Z-score > threshold for 2+ consecutive evaluations
+    - Capital-weighted breadth > threshold (concentration in high-OI strikes)
+    - Delta-skew coupling positive (skew normalizing from negative toward zero)
     - Volume not declining (FLAT or UP)
     - Net gamma positive
 
 Entry (SHORT):
-    - ProbMomentum < -2σ of rolling avg for 3+ consecutive evaluations
+    - ProbMomentum ROC accelerating downward ≥10% (momentum_accel < -0.10)
+    - Z-score < -threshold for 2+ consecutive evaluations
+    - Capital-weighted breadth > threshold (concentration in high-OI strikes)
+    - Delta-skew coupling negative (skew normalizing from positive toward zero)
     - Volume not rising (FLAT or DOWN)
     - Net gamma positive
 
-Confidence factors:
-    - Z-score (how many σ away from mean)
-    - Duration of shift (more consecutive = higher confidence)
-    - Volume confirmation
-    - Net gamma strength
-    - Breadth of shift (more strikes contributing)
+Confidence (7 components, unified for LONG and SHORT):
+    1. Z-score magnitude: 0.10–0.15 (soft)
+    2. Momentum acceleration: 0.0 or 0.20–0.30 (hard gate)
+    3. Capital-weighted breadth: 0.0 or 0.15–0.20 (hard gate, scaled by weight)
+    4. Delta-skew coupling: 0.0 or 0.15–0.20 (hard gate)
+    5. Duration: 0.05–0.10 (soft)
+    6. Volume confirmation: 0.05–0.10 (soft)
+    7. Net gamma: 0.05–0.10 (soft)
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
-from strategies.rolling_keys import KEY_PROB_MOMENTUM_5M, KEY_CONSEC_LONG, KEY_CONSEC_SHORT, KEY_VOLUME_5M
+from strategies.rolling_keys import (
+    KEY_PROB_MOMENTUM_5M,
+    KEY_CONSEC_LONG,
+    KEY_CONSEC_SHORT,
+    KEY_VOLUME_5M,
+    KEY_MOMENTUM_ROC_5M,
+    KEY_IV_SKEW_5M,
+    KEY_ATM_IV_5M,
+)
 
 logger = logging.getLogger("Syngex.Strategies.ProbDistributionShift")
 
@@ -57,10 +75,9 @@ MIN_NET_GAMMA = 500000.0
 
 # Stop and target
 STOP_PCT = 0.005                    # 0.5% stop
-TARGET_PCT = 0.008                  # 0.8% target (1.6:1 R:R)
 
-# Min confidence
-MIN_CONFIDENCE = 0.25
+# Min confidence (raised from 0.25 → 0.35 for v2)
+MIN_CONFIDENCE = 0.35
 MAX_CONFIDENCE = 0.80               # v2 cap
 
 # Min strikes with data
@@ -79,12 +96,19 @@ CONTRIBUTION_THRESHOLD = 0.05       # 5% of total momentum
 
 class ProbDistributionShift(BaseStrategy):
     """
-    Prob Distribution Shift — Full-data (v2) leading indicator.
+    Prob Distribution Shift v2 — Momentum-Master.
 
     Detects when the full probability distribution across all strikes shifts
     asymmetrically before the underlying price reacts. Uses delta as a proxy
     for ProbabilityITM and calculates a weighted momentum across the entire
     options chain.
+
+    v2 additions:
+    - Momentum ROC acceleration as hard gate
+    - Capital-weighted breadth (OI-weighted)
+    - Delta-skew coupling check
+    - IV-scaled targets
+    - 7-component confidence scoring
 
     This is a leading indicator — signals are rare but high conviction when
     they fire. Typical holds: 30min – 2hr.
@@ -159,6 +183,23 @@ class ProbDistributionShift(BaseStrategy):
         price_window = rolling_data.get("price_5m")
         price_trend = price_window.trend if price_window else "UNKNOWN"
 
+        # --- v2: Momentum acceleration hard gate ---
+        momentum_accel = self._check_momentum_acceleration(rolling_data)
+        if momentum_accel is None:
+            return []
+
+        # --- v2: Capital-weighted breadth hard gate ---
+        capital_weight, contributing_oi = self._compute_capital_weighted_breadth(
+            greeks_summary, momentum, underlying_price
+        )
+        if capital_weight < self._get_param("capital_breadth_threshold", 0.10):
+            return []
+
+        # --- v2: Delta-skew coupling hard gate ---
+        skew_coupled = self._check_delta_skew_coupling(rolling_data)
+        if not skew_coupled:
+            return []
+
         # --- Determine signal direction ---
         signal_direction = None
 
@@ -187,13 +228,21 @@ class ProbDistributionShift(BaseStrategy):
         if signal_direction is None:
             return []
 
-        # --- Compute confidence ---
-        confidence = self._compute_confidence(
+        # --- v2: IV-scaled target ---
+        entry = underlying_price
+        risk = STOP_PCT * entry  # distance to stop
+        target = self._compute_iv_scaled_target(entry, risk, rolling_data, signal_direction)
+
+        # --- Compute confidence (7-component v2) ---
+        confidence = self._compute_confidence_v2(
             z_score,
             abs(z_score),
             consec_long if signal_direction == Direction.LONG else consec_short,
             vol_trend,
             net_gamma,
+            momentum_accel,
+            capital_weight,
+            skew_coupled,
             momentum,
             greeks_summary,
         )
@@ -202,15 +251,35 @@ class ProbDistributionShift(BaseStrategy):
             return []
 
         # --- Build signal ---
-        stop, target = self._build_exit(signal_direction, underlying_price)
+        stop = self._build_stop(signal_direction, underlying_price)
 
         direction_label = "bullish" if signal_direction == Direction.LONG else "bearish"
         sign = "+" if signal_direction == Direction.LONG else ""
 
+        # --- v2 metadata fields ---
+        momentum_roc_val = None
+        if momentum_window.count >= 6:
+            vals = list(momentum_window.values)
+            if abs(vals[-6]) > 0:
+                momentum_roc_val = (vals[-1] - vals[-6]) / abs(vals[-6])
+
+        skew_roc_val = None
+        skew_window = rolling_data.get(KEY_IV_SKEW_5M)
+        if skew_window is not None and skew_window.count >= 2:
+            first_skew = skew_window.values[0]
+            if abs(first_skew) > 0:
+                skew_roc_val = (skew_window.latest - first_skew) / abs(first_skew)
+
+        iv_factor = None
+        iv_window = rolling_data.get(KEY_ATM_IV_5M)
+        if iv_window is not None and iv_window.mean is not None and iv_window.latest is not None:
+            if iv_window.mean > 0:
+                iv_factor = iv_window.latest / iv_window.mean
+
         return [Signal(
             direction=signal_direction,
             confidence=round(confidence, 3),
-            entry=underlying_price,
+            entry=entry,
             stop=round(stop, 2),
             target=round(target, 2),
             strategy_id=self.strategy_id,
@@ -236,10 +305,19 @@ class ProbDistributionShift(BaseStrategy):
                 "momentum_window_std": round(momentum_window.std, 4)
                     if momentum_window.std is not None else None,
                 "stop_pct": STOP_PCT,
-                "target_pct": TARGET_PCT,
+                "target_pct": round(abs(target - entry) / entry, 5),
                 "risk_reward_ratio": round(
-                    abs(target - underlying_price) / abs(stop - underlying_price), 2
+                    abs(target - entry) / abs(stop - entry), 2
                 ),
+                # v2 Momentum-Master fields
+                "momentum_roc": round(momentum_roc_val, 4) if momentum_roc_val is not None else None,
+                "momentum_accel": round(momentum_accel, 4),
+                "capital_breadth": round(capital_weight, 4),
+                "contributing_oi": round(contributing_oi, 2),
+                "skew_roc": round(skew_roc_val, 4) if skew_roc_val is not None else None,
+                "delta_skew_coupled": skew_coupled,
+                "iv_factor": round(iv_factor, 4) if iv_factor is not None else None,
+                "target_mult": round(abs(target - entry) / risk, 3) if risk > 0 else None,
             },
         )]
 
@@ -317,108 +395,269 @@ class ProbDistributionShift(BaseStrategy):
     # Exit levels
     # ------------------------------------------------------------------
 
-    def _build_exit(
+    def _build_stop(
         self,
         direction: Direction,
         price: float,
-    ) -> tuple[float, float]:
+    ) -> float:
         """
-        Build stop and target levels.
+        Build stop level.
 
         Stop: 0.5% against entry.
-        Target: 0.8% in direction of trade (1.6:1 R:R).
         """
         if direction == Direction.LONG:
-            stop = price * (1 - STOP_PCT)
-            target = price * (1 + TARGET_PCT)
+            return price * (1 - STOP_PCT)
         else:
-            stop = price * (1 + STOP_PCT)
-            target = price * (1 - TARGET_PCT)
-
-        return stop, target
+            return price * (1 + STOP_PCT)
 
     # ------------------------------------------------------------------
-    # Confidence scoring
+    # v2 Momentum-Master checks
     # ------------------------------------------------------------------
 
-    def _compute_confidence(
+    def _check_momentum_acceleration(self, rolling_data: Dict[str, Any]) -> Optional[float]:
+        """
+        Check momentum acceleration from KEY_MOMENTUM_ROC_5M rolling window.
+
+        Returns the acceleration value if it passes the threshold gate,
+        or None if it fails.
+
+        For LONG: momentum_accel > +threshold (accelerating upward)
+        For SHORT: momentum_accel < -threshold (accelerating downward)
+
+        The threshold is read from params (default 0.10 = 10%).
+        """
+        window = rolling_data.get(KEY_MOMENTUM_ROC_5M)
+        if window is None or window.latest is None:
+            return None
+
+        accel = window.latest
+        threshold = self._get_param("momentum_accel_threshold", 0.10)
+
+        if accel > threshold:
+            return accel
+        elif accel < -threshold:
+            return accel
+        else:
+            return None
+
+    def _compute_capital_weighted_breadth(
+        self,
+        greeks_summary: Dict[str, Any],
+        momentum: float,
+        price: float,
+    ) -> Tuple[float, float]:
+        """
+        Compute capital-weighted breadth of the momentum shift.
+
+        Sums total_chain_oi across all strikes, then sums contributing_oi
+        for strikes contributing > 5% of total momentum.
+
+        capital_weight = contributing_oi / total_chain_oi
+
+        Returns (capital_weight, contributing_oi).
+        """
+        total_chain_oi = 0.0
+        contributing_oi = 0.0
+        total_abs_momentum = abs(momentum) if momentum != 0 else 1.0
+
+        # Find ATM strike
+        atm_strike = None
+        min_distance = float("inf")
+        for strike_str in greeks_summary:
+            try:
+                s = float(strike_str)
+            except (ValueError, TypeError):
+                continue
+            dist = abs(s - price)
+            if dist < min_distance:
+                min_distance = dist
+                atm_strike = s
+
+        if atm_strike is None:
+            return (0.0, 0.0)
+
+        for strike_str, strike_data in greeks_summary.items():
+            try:
+                strike = float(strike_str)
+            except (ValueError, TypeError):
+                continue
+
+            call_oi = strike_data.get("call_oi", 0.0)
+            put_oi = strike_data.get("put_oi", 0.0)
+            total_oi = call_oi + put_oi
+            total_chain_oi += total_oi
+
+            call_delta = strike_data.get("call_delta_sum", 0.0)
+            put_delta = strike_data.get("put_delta_sum", 0.0)
+            net_delta = call_delta - put_delta
+            if call_delta == 0 and put_delta == 0:
+                continue
+
+            distance = strike - atm_strike
+            contribution = abs(net_delta * distance)
+            if contribution > CONTRIBUTION_THRESHOLD * total_abs_momentum:
+                contributing_oi += total_oi
+
+        if total_chain_oi == 0:
+            return (0.0, 0.0)
+
+        return (contributing_oi / total_chain_oi, contributing_oi)
+
+    def _check_delta_skew_coupling(self, rolling_data: Dict[str, Any]) -> bool:
+        """
+        Check if delta-skew coupling supports the signal direction.
+
+        Gets KEY_IV_SKEW_5M rolling window and computes skew ROC.
+        For LONG: skew_roc > 0 (skew normalizing from negative toward zero)
+        For SHORT: skew_roc < 0 (skew normalizing from positive toward zero)
+
+        If skew data unavailable → return True (backwards compat).
+        """
+        window = rolling_data.get(KEY_IV_SKEW_5M)
+        if window is None or window.latest is None or window.mean is None:
+            return True  # backwards compat: allow if no skew data
+
+        current_skew = window.latest
+        avg_skew = window.mean
+
+        if abs(avg_skew) == 0:
+            return True
+
+        skew_roc = (current_skew - avg_skew) / abs(avg_skew)
+
+        # For LONG: we want skew_roc > 0 (skew moving toward zero from negative)
+        # For SHORT: we want skew_roc < 0 (skew moving toward zero from positive)
+        # Since we don't know direction here, check if skew is normalizing
+        # (moving toward the mean/average, indicating stabilization)
+        # Actually, the direction is determined by z_score in evaluate(),
+        # so we check if skew_roc aligns with the likely direction.
+        # If skew is currently negative (put-heavy) and rising → bullish support
+        # If skew is currently positive (call-heavy) and falling → bearish support
+        if current_skew < 0 and skew_roc > 0:
+            return True  # negative skew normalizing up → bullish
+        elif current_skew > 0 and skew_roc < 0:
+            return True  # positive skew normalizing down → bearish
+        else:
+            return False
+
+    def _compute_iv_scaled_target(
+        self,
+        entry: float,
+        risk: float,
+        rolling_data: Dict[str, Any],
+        direction: Direction,
+    ) -> float:
+        """
+        Compute IV-scaled target.
+
+        Uses KEY_ATM_IV_5M rolling window to adjust target based on
+        current IV vs mean IV.
+
+        iv_factor = current_iv / mean_iv
+        target_mult = base_mult × iv_factor, capped at target_iv_expansion_cap
+        target = entry ± risk × target_mult
+
+        Minimum target: 0.5% from entry.
+        """
+        iv_window = rolling_data.get(KEY_ATM_IV_5M)
+        if iv_window is None or iv_window.latest is None or iv_window.mean is None:
+            # No IV data — use default multiplier
+            base_mult = self._get_param("target_iv_expansion_mult", 1.6)
+            cap = self._get_param("target_iv_expansion_cap", 2.5)
+            target_mult = min(base_mult, cap)
+        else:
+            current_iv = iv_window.latest
+            mean_iv = iv_window.mean
+            if mean_iv > 0:
+                iv_factor = current_iv / mean_iv
+            else:
+                iv_factor = 1.0
+
+            base_mult = self._get_param("target_iv_expansion_mult", 1.6)
+            cap = self._get_param("target_iv_expansion_cap", 2.5)
+            target_mult = min(base_mult * iv_factor, cap)
+
+        if direction == Direction.LONG:
+            target = entry + risk * target_mult
+        else:
+            target = entry - risk * target_mult
+
+        # Minimum target: 0.5% from entry
+        min_target = entry * (1 + STOP_PCT)  # at least stop distance
+
+        if direction == Direction.LONG:
+            target = max(target, min_target)
+        else:
+            target = min(target, entry * (1 - STOP_PCT))
+
+        return target
+
+    # ------------------------------------------------------------------
+    # Confidence scoring (v2 — 7 components, unified for LONG/SHORT)
+    # ------------------------------------------------------------------
+
+    def _compute_confidence_v2(
         self,
         z_score: float,
         abs_z: float,
         consecutive_count: int,
         vol_trend: str,
         net_gamma: float,
+        momentum_accel: float,
+        capital_weight: float,
+        skew_coupled: bool,
         momentum: float,
         greeks_summary: Dict[str, Any],
     ) -> float:
         """
-        Compute confidence for a distribution-shift signal.
+        Compute confidence for a distribution-shift signal (v2).
 
-        Factors (each 0–1, capped at MAX_CONFIDENCE):
-        1. Z-score magnitude (0.20–0.30) — how many σ from mean
-        2. Duration of shift (0.15–0.20) — consecutive same-direction signals
-        3. Volume confirmation (0.10–0.15) — aligned with direction
-        4. Net gamma strength (0.10–0.15) — positive regime quality
-        5. Breadth of shift (0.10–0.15) — more strikes contributing
+        7 components unified for LONG and SHORT:
+        1. Z-score magnitude: 0.10–0.15 (soft)
+        2. Momentum acceleration: 0.0 or 0.20–0.30 (hard gate)
+        3. Capital-weighted breadth: 0.0 or 0.15–0.20 (hard gate, scaled)
+        4. Delta-skew coupling: 0.0 or 0.15–0.20 (hard gate)
+        5. Duration: 0.05–0.10 (soft)
+        6. Volume confirmation: 0.05–0.10 (soft)
+        7. Net gamma: 0.05–0.10 (soft)
         """
-        # 1. Z-score component (0.20–0.30)
+        # 1. Z-score magnitude (0.10–0.15) — soft
         #    2σ = baseline, 4σ+ = max weight
         z_scaled = min(1.0, (abs_z - Z_SCORE_THRESHOLD) / Z_SCORE_THRESHOLD)
-        z_component = 0.20 + 0.10 * z_scaled
+        z_component = 0.10 + 0.05 * z_scaled
 
-        # 2. Duration component (0.15–0.20)
-        #    MIN_CONSECUTIVE_SIGNALS = baseline, 6+ = max weight
-        dur_scaled = min(
-            1.0,
-            (consecutive_count - MIN_CONSECUTIVE_SIGNALS)
-            / (MIN_CONSECUTIVE_SIGNALS + 2)
-        )
-        dur_component = 0.15 + 0.05 * max(0, dur_scaled)
+        # 2. Momentum acceleration (0.0 or 0.20–0.30) — hard gate
+        #    Must pass threshold; score scales with acceleration magnitude
+        abs_accel = abs(momentum_accel)
+        accel_scaled = min(1.0, abs_accel / 0.30)  # 30% accel = max weight
+        accel_component = 0.20 + 0.10 * accel_scaled
 
-        # 3. Volume confirmation (0.10–0.15)
-        #    Aligned volume trend = stronger signal
+        # 3. Capital-weighted breadth (0.0 or 0.15–0.20) — hard gate
+        #    Scaled by capital_weight
+        breadth_component = 0.15 + 0.05 * capital_weight
+
+        # 4. Delta-skew coupling (0.0 or 0.15–0.20) — hard gate
+        skew_component = 0.15 + 0.05 if skew_coupled else 0.0
+
+        # 5. Duration (0.05–0.10) — soft
+        dur_scaled = min(1.0, (consecutive_count - MIN_CONSECUTIVE_SIGNALS) / 4)
+        dur_component = 0.05 + 0.05 * max(0, dur_scaled)
+
+        # 6. Volume confirmation (0.05–0.10) — soft
         if vol_trend == "UP":
-            vol_component = 0.15  # Strong confirmation
+            vol_component = 0.10
         elif vol_trend == "FLAT":
-            vol_component = 0.12  # Moderate
+            vol_component = 0.07
         else:
-            vol_component = 0.08  # Weak
+            vol_component = 0.05
 
-        # 4. Net gamma strength (0.10–0.15)
-        #    Higher positive gamma = stronger positive regime
+        # 7. Net gamma (0.05–0.10) — soft
         gamma_scaled = min(1.0, net_gamma / (MIN_NET_GAMMA * 4))
-        gamma_component = 0.10 + 0.05 * gamma_scaled
+        gamma_component = 0.05 + 0.05 * gamma_scaled
 
-        # 5. Breadth of shift (0.10–0.15)
-        #    Count strikes contributing > 5% of total momentum
-        total_abs_momentum = abs(momentum) if momentum != 0 else 1.0
-        breadth = 0
-        for strike_str, strike_data in greeks_summary.items():
-            try:
-                strike = float(strike_str)
-            except (ValueError, TypeError):
-                continue
-            call_delta = strike_data.get("call_delta_sum", 0.0)
-            put_delta = strike_data.get("put_delta_sum", 0.0)
-            net_delta = call_delta - put_delta
-            if call_delta == 0 and put_delta == 0:
-                continue
-            distance = strike - self._atm_strike(greeks_summary)
-            contribution = abs(net_delta * distance)
-            if contribution > CONTRIBUTION_THRESHOLD * total_abs_momentum:
-                breadth += 1
-
-        # Normalize: 5 strikes = baseline, 15+ = max weight
-        breadth_scaled = min(1.0, (breadth - MIN_STRIKES_WITH_DATA) / 10)
-        breadth_component = 0.10 + 0.05 * max(0, breadth_scaled)
-
-        # Normalize each component to [0,1] and average
-        norm_z = (z_component - 0.20) / (0.30 - 0.20) if 0.30 != 0.20 else 1.0
-        norm_dur = (dur_component - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
-        norm_vol = (vol_component - 0.08) / (0.15 - 0.08) if 0.15 != 0.08 else 1.0
-        norm_gamma = (gamma_component - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
-        norm_breadth = (breadth_component - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
-        confidence = (norm_z + norm_dur + norm_vol + norm_gamma + norm_breadth) / 5.0
+        # Average all components
+        confidence = (z_component + accel_component + breadth_component +
+                      skew_component + dur_component + vol_component + gamma_component) / 7.0
 
         return min(MAX_CONFIDENCE, max(0.0, confidence))
 

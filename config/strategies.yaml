@@ -453,6 +453,12 @@ full_data:
       max_confidence: 0.80
       min_strikes_with_data: 5
       min_data_points: 10
+      # v2 Momentum-Master params
+      momentum_accel_threshold: 0.10
+      capital_breadth_threshold: 0.10
+      target_iv_expansion_mult: 1.6
+      target_iv_expansion_cap: 2.5
+      target_min_pct: 0.005
 
   extrinsic_intrinsic_flow:
     enabled: true
