@@ -187,11 +187,20 @@ def _parse_option_symbol(sym):
     root = parts[0]
     suffix = parts[-1]
     if len(suffix) < 8:
-        return (root, "", 0.0)
+        log.warning("Unexpected option symbol format: %s (suffix too short)", sym)
+        return ("unknown", "", 0.0)
+    # Validate C/P character
     side_char = suffix[6]
-    side = "call" if side_char.upper() == "C" else "put"
+    if side_char not in ("C", "P"):
+        log.warning("Unexpected option side char '%s' in: %s", side_char, sym)
+        return ("unknown", "", 0.0)
+    # Validate strike is numeric
     strike_str = suffix[7:]
-    strike = float(strike_str) if strike_str else 0.0
+    if not strike_str.isdigit():
+        log.warning("Non-numeric strike in option symbol: %s", sym)
+        return ("unknown", "", 0.0)
+    side = "call" if side_char == "C" else "put"
+    strike = float(strike_str)
     return (root, side, strike)
 
 
