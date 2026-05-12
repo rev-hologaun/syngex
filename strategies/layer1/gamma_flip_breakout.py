@@ -461,6 +461,7 @@ class GammaFlipBreakout(BaseStrategy):
         confirmation_score: float = 0.5,
     ) -> Optional[Signal]:
         """LONG breakout: price approaching flip from below, expect momentum."""
+        price_window = rolling_data.get(KEY_PRICE_5M)
         # Stop: below flip zone or 1.5× ATR below entry
         stop_mult = NEGATIVE_GAMMA_STOP_MULT  # 2.5 — wider in negative gamma
         stop = max(flip_mid * (1 - STOP_OTHER_SIDE_PCT), price * (1 - ATR_MULT * atr / price))
@@ -518,6 +519,7 @@ class GammaFlipBreakout(BaseStrategy):
         confirmation_score: float = 0.5,
     ) -> Optional[Signal]:
         """SHORT breakout: price moving away from flip downward."""
+        price_window = rolling_data.get(KEY_PRICE_5M)
         # Stop: above flip zone or 1.5× ATR above entry
         stop_mult = NEGATIVE_GAMMA_STOP_MULT  # 2.5 — wider in negative gamma
         stop = min(flip_mid * (1 + STOP_OTHER_SIDE_PCT), price * (1 + ATR_MULT * atr / price))
