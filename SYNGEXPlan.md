@@ -1,7 +1,7 @@
 # Syngex Strategy Build Plan
 
-> **Reference:** All 22 strategies are defined in [SYNGEXStrats.md](SYNGEXStrats.md).
 > This document is the build tracker — phases, tasks, status, and dependencies.
+> Original strategy definitions are in [old/SYNGEXStrats.md](old/SYNGEXStrats.md).
 
 ---
 
@@ -47,7 +47,7 @@
 
 | # | Task | Description | Depends On |
 |---|------|-------------|------------|
-| 1.1 | **Net Gamma Regime Filter** | Implements strategy #7 from SYNGEXStrats.md. Returns regime state: `POSITIVE` (fade extremes), `NEGATIVE` (trend-follow). Routes strategy evaluations accordingly | 0.5 |
+| 1.1 | **Net Gamma Regime Filter** | Implements strategy #7 from original strategy definitions. Returns regime state: `POSITIVE` (fade extremes), `NEGATIVE` (trend-follow). Routes strategy evaluations accordingly | 0.5 |
 | 1.2 | **Filter integration** | Register as first-pass evaluator in StrategyEngine. All other strategies check `filter.regime` before producing signals | 1.1 |
 
 **Deliverable:** The pipeline knows which regime we're in and filters signals accordingly.
@@ -143,7 +143,7 @@
 
 ---
 
-## Strategy Index (from SYNGEXStrats.md)
+## Strategy Index (definitions moved to [old/SYNGEXStrats.md](old/SYNGEXStrats.md))
 
 | # | Strategy | Layer | Signal Type | Hold Time | Phase |
 |---|----------|-------|-------------|-----------|-------|
@@ -231,7 +231,7 @@ syngex/
 │   └── signals.jsonl          # 7.2 — Signal persistence
 ├── config/
 │   └── strategies.yaml        # 7.4 — Per-strategy parameters
-├── SYNGEXStrats.md            # Strategy definitions (reference)
+├── old/SYNGEXStrats.md        # Original strategy definitions (moved from root)
 ├── plan.md                    # This file
 └── requirements.txt
 ```

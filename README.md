@@ -416,7 +416,7 @@ syngex/
 ├── app_dashboard.py             # Streamlit Command Center — gamma heatmap + micro-signal overlay
 ├── requirements.txt             # Python dependencies
 ├── SYNGEXPlan.md                # Build tracker (phases, tasks, status)
-├── SYNGEXStrats.md              # All 22 strategy definitions (reference)
+├── old/SYNGEXStrats.md          # Original strategy definitions (moved to old/)
 │
 ├── engine/
 │   ├── gex_calculator.py        # Gamma Ladder — walls, flip, IV skew, summaries
