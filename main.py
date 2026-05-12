@@ -97,6 +97,11 @@ from strategies.rolling_keys import (
     KEY_EXTRINSIC_PROXY_5M,
     KEY_EXTRINSIC_ROC_5M,
     KEY_PROB_MOMENTUM_5M,
+    KEY_PHI_CALL_5M,
+    KEY_PHI_PUT_5M,
+    KEY_PHI_RATIO_5M,
+    KEY_PHI_TOTAL_5M,
+    KEY_PHI_TOTAL_SIGMA_5M,
     KEY_IV_SKEW_GRADIENT_5M,
     KEY_GAMMA_DENSITY_5M,
     KEY_OTM_DELTA_5M,
@@ -105,6 +110,15 @@ from strategies.rolling_keys import (
     KEY_GAMMA_ACCEL_5M,
     KEY_CONSEC_LONG,
     KEY_CONSEC_SHORT,
+    KEY_WALL_DISTANCE_5M,
+    KEY_WALL_GEX_5M,
+    KEY_WALL_GEX_SIGMA_5M,
+    KEY_PRICE_VELOCITY_5M,
+    KEY_GAMMA_BREAK_INDEX_5M,
+    KEY_CONFLUENCE_PROX_5M,
+    KEY_CONFLUENCE_SIGNAL_5M,
+    KEY_LIQUIDITY_WALL_SIZE_5M,
+    KEY_LIQUIDITY_WALL_SIGMA_5M,
     KEY_DEPTH_BID_SIZE_5M,
     KEY_DEPTH_ASK_SIZE_5M,
     KEY_DEPTH_SPREAD_5M,
@@ -154,16 +168,38 @@ from strategies.rolling_keys import (
     KEY_ESI_MEMX_ROC_5M,
     KEY_ESI_BATS_5M,
     KEY_ESI_BATS_ROC_5M,
-    KEY_MEMX_VOL_RATIO_5M,
-    KEY_BATS_VOL_RATIO_5M,
     KEY_ESI_BASELINE_MEMX_1H,
     KEY_ESI_BASELINE_BATS_1H,
+    KEY_MEMX_VOL_RATIO_5M,
+    KEY_BATS_VOL_RATIO_5M,
     KEY_DEPTH_BID_LEVEL_AVG_5M,
     KEY_DEPTH_ASK_LEVEL_AVG_5M,
     KEY_SIS_BID_5M,
     KEY_SIS_ASK_5M,
     KEY_SIS_BID_ROC_5M,
     KEY_SIS_ASK_ROC_5M,
+    KEY_PDR_5M,
+    KEY_PDR_ROC_5M,
+    KEY_SKEW_PSI_5M,
+    KEY_SKEW_PSI_ROC_5M,
+    KEY_SKEW_PSI_SIGMA_5M,
+    KEY_PUT_SLOPE_5M,
+    KEY_CALL_SLOPE_5M,
+    KEY_CURVE_OMEGA_5M,
+    KEY_CURVE_OMEGA_ROC_5M,
+    KEY_CURVE_OMEGA_SIGMA_5M,
+    KEY_SYNC_CORR_5M,
+    KEY_SYNC_SIGMA_5M,
+    KEY_SKEW_CHANGE_5M,
+    KEY_VSI_MAGNITUDE_5M,
+    KEY_BIGGEST_SIZE_5M,
+    KEY_SMALLEST_SIZE_5M,
+    KEY_CONCENTRATION_RATIO_5M,
+    KEY_CONCENTRATION_SIGMA_5M,
+    KEY_NUM_PARTICIPANTS_5M,
+    KEY_IEX_INTENT_5M,
+    KEY_VSI_COMBINED_5M,
+    KEY_VSI_ROC_5M,
 )
 from strategies.layer1 import (
     GammaWallBounce,
@@ -204,6 +240,8 @@ from strategies.full_data import (
     ProbWeightedMagnet,
     ProbDistributionShift,
     ExtrinsicIntrinsicFlow,
+    SentimentSync,
+    WhaleTracker,
 )
 from strategies.signal_tracker import SignalTracker
 
@@ -211,6 +249,21 @@ from strategies.signal_tracker import SignalTracker
 # ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
+
+
+def _compute_linear_slope(x_vals, y_vals):
+    """Compute slope using least-squares linear regression."""
+    n = len(x_vals)
+    if n < 2:
+        return 0.0
+    x_mean = sum(x_vals) / n
+    y_mean = sum(y_vals) / n
+    numerator = sum((x_vals[i] - x_mean) * (y_vals[i] - y_mean) for i in range(n))
+    denominator = sum((x_vals[i] - x_mean) ** 2 for i in range(n))
+    if denominator == 0:
+        return 0.0
+    return numerator / denominator
+
 
 class SyngexOrchestrator:
     """
@@ -355,6 +408,34 @@ class SyngexOrchestrator:
             KEY_EXTRINSIC_PROXY_5M: RollingWindow(window_type="time", window_size=300),
             KEY_EXTRINSIC_ROC_5M: RollingWindow(window_type="time", window_size=300),
             KEY_PROB_MOMENTUM_5M: RollingWindow(window_type="time", window_size=300),
+            # Extrinsic Value Flow (EXTRINSIC-ALPHA) rolling windows
+            KEY_PHI_CALL_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_PHI_PUT_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_PHI_RATIO_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_PHI_TOTAL_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_PHI_TOTAL_SIGMA_5M: RollingWindow(window_type="time", window_size=300),
+            # Gamma-Weighted Momentum (GAMMA-ALPHA) rolling windows
+            KEY_WALL_DISTANCE_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_WALL_GEX_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_WALL_GEX_SIGMA_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_PRICE_VELOCITY_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_GAMMA_BREAK_INDEX_5M: RollingWindow(window_type="time", window_size=300),
+            # Iron Anchor (CONFLUENCE-ALPHA) rolling windows
+            KEY_CONFLUENCE_PROX_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_CONFLUENCE_SIGNAL_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_LIQUIDITY_WALL_SIZE_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_LIQUIDITY_WALL_SIGMA_5M: RollingWindow(window_type="time", window_size=300),
+            # Sentiment Sync (SYNCHRONY-ALPHA) rolling windows
+            KEY_SYNC_CORR_5M: RollingWindow(window_type="time", window_size=900),
+            KEY_SYNC_SIGMA_5M: RollingWindow(window_type="time", window_size=900),
+            KEY_SKEW_CHANGE_5M: RollingWindow(window_type="time", window_size=900),
+            KEY_VSI_MAGNITUDE_5M: RollingWindow(window_type="time", window_size=900),
+            # Whale Tracker (CONCENTRATION-ALPHA) rolling windows
+            KEY_BIGGEST_SIZE_5M: RollingWindow(window_type="time", window_size=900),
+            KEY_SMALLEST_SIZE_5M: RollingWindow(window_type="time", window_size=900),
+            KEY_CONCENTRATION_RATIO_5M: RollingWindow(window_type="time", window_size=900),
+            KEY_CONCENTRATION_SIGMA_5M: RollingWindow(window_type="time", window_size=900),
+            KEY_NUM_PARTICIPANTS_5M: RollingWindow(window_type="time", window_size=900),
             # iv_gex_divergence v2 — Volatility-Snap rolling windows
             KEY_IV_SKEW_GRADIENT_5M: RollingWindow(window_type="time", window_size=300),
             KEY_GAMMA_DENSITY_5M: RollingWindow(window_type="time", window_size=300),
@@ -409,11 +490,28 @@ class SyngexOrchestrator:
             KEY_SIS_ASK_5M: RollingWindow(window_type="time", window_size=300),
             KEY_SIS_BID_ROC_5M: RollingWindow(window_type="time", window_size=300),
             KEY_SIS_ASK_ROC_5M: RollingWindow(window_type="time", window_size=300),
+            # Ghost Premium (TVD-Alpha) rolling windows
+            KEY_PDR_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_PDR_ROC_5M: RollingWindow(window_type="time", window_size=300),
+            # IV Skew Dynamics (SKEW-ALPHA) rolling windows
+            KEY_SKEW_PSI_5M: RollingWindow(window_type="time", window_size=900),
+            KEY_SKEW_PSI_ROC_5M: RollingWindow(window_type="time", window_size=900),
+            KEY_SKEW_PSI_SIGMA_5M: RollingWindow(window_type="time", window_size=900),
+            # IV Smile Dynamics (CURVE-ALPHA) rolling windows
+            KEY_CURVE_OMEGA_5M: RollingWindow(window_type="time", window_size=900),
+            KEY_CURVE_OMEGA_ROC_5M: RollingWindow(window_type="time", window_size=900),
+            KEY_CURVE_OMEGA_SIGMA_5M: RollingWindow(window_type="time", window_size=900),
+            KEY_PUT_SLOPE_5M: RollingWindow(window_type="time", window_size=900),
+            KEY_CALL_SLOPE_5M: RollingWindow(window_type="time", window_size=900),
         }
 
         # Call/put update counters for volume_up/volume_down tracking
         self._call_update_count: int = 0
         self._put_update_count: int = 0
+
+        # Extrinsic Value Flow — Φ (Premium Conviction) per-tick accumulators
+        self._phi_call_tick: float = 0.0
+        self._phi_put_tick: float = 0.0
 
         # Per-strike IV windows (populated lazily)
         self._iv_windows: Dict[str, RollingWindow] = {}
@@ -698,6 +796,8 @@ class SyngexOrchestrator:
                 "prob_weighted_magnet": ProbWeightedMagnet,
                 "prob_distribution_shift": ProbDistributionShift,
                 "extrinsic_intrinsic_flow": ExtrinsicIntrinsicFlow,
+                "sentiment_sync": SentimentSync,
+                "whale_tracker": WhaleTracker,
             },
         }
         layer_map = strategy_map.get(layer, {})
@@ -839,6 +939,40 @@ class SyngexOrchestrator:
                 elif side == "put":
                     self._put_update_count += 1
 
+                # Premium Divergence Ratio (Ghost Premium / TVD-Alpha)
+                theoretical_value = data.get("theoretical_value", 0.0)
+                mid = data.get("mid", 0.0)
+                if theoretical_value and theoretical_value > 0.01:
+                    pdr = (mid - theoretical_value) / theoretical_value
+                    pdr_window = self._rolling_data.get(KEY_PDR_5M)
+                    if pdr_window:
+                        pdr_window.push(pdr, ts)
+                    # PDR ROC: rate of change over 5m window
+                    pdr_roc_window = self._rolling_data.get(KEY_PDR_ROC_5M)
+                    if pdr_window and pdr_roc_window and pdr_window.count >= 2:
+                        first_pdr = pdr_window.values[0]
+                        if abs(first_pdr) > 0.001:
+                            pdr_roc = (pdr - first_pdr) / abs(first_pdr)
+                            pdr_roc_window.push(pdr_roc, ts)
+
+                # Extrinsic Value Flow — Φ (Premium Conviction)
+                # Φ = Volume × ExtrinsicValue, tracked per side
+                # Delta purity filter: only 15-65 delta contracts
+                try:
+                    extrinsic = data.get("extrinsic_value", 0.0)
+                    volume = data.get("volume", 0)
+                    delta = data.get("delta", 0.0)
+                    if extrinsic and extrinsic > 0 and volume and volume > 0:
+                        abs_delta = abs(delta) if delta else 0.0
+                        if 0.15 <= abs_delta <= 0.65:
+                            phi = volume * extrinsic
+                            if side == "call":
+                                self._phi_call_tick += phi
+                            elif side == "put":
+                                self._phi_put_tick += phi
+                except Exception:
+                    pass
+
             # Update Layer 2 rolling windows
             gex_summary = self._calculator.get_greeks_summary()
             if gex_summary:
@@ -900,6 +1034,160 @@ class SyngexOrchestrator:
                 except Exception:
                     pass
 
+                # IV Skew Dynamics — Ψ (Skewness Coefficient)
+                # Ψ = (IV_Put_Wing - IV_Call_Wing) / IV_ATM
+                try:
+                    iv_by_strike = self._calculator.get_iv_by_strike_avg()
+                    if iv_by_strike:
+                        strikes = sorted(iv_by_strike.keys())
+                        if len(strikes) >= 3:
+                            atm_strike = min(
+                                strikes, key=lambda s: abs(s - underlying_price)
+                            )
+                            atm_iv = iv_by_strike[atm_strike]
+
+                            call_ivs = [
+                                iv_by_strike[s] for s in strikes if s > atm_strike
+                            ]
+                            put_ivs = [
+                                iv_by_strike[s] for s in strikes if s < atm_strike
+                            ]
+
+                            if call_ivs and put_ivs and atm_iv > 0:
+                                # Use outermost available as wing proxy
+                                n_calls = max(1, len(call_ivs) // 4)
+                                n_puts = max(1, len(put_ivs) // 4)
+                                call_wing_iv = (
+                                    sum(sorted(call_ivs, reverse=True)[:n_calls])
+                                    / n_calls
+                                )
+                                put_wing_iv = (
+                                    sum(sorted(put_ivs)[:n_puts]) / n_puts
+                                )
+
+                                psi = (put_wing_iv - call_wing_iv) / atm_iv
+
+                                psi_window = self._rolling_data.get(
+                                    KEY_SKEW_PSI_5M
+                                )
+                                if psi_window:
+                                    psi_window.push(psi, ts)
+
+                                # Ψ ROC
+                                psi_roc_window = self._rolling_data.get(
+                                    KEY_SKEW_PSI_ROC_5M
+                                )
+                                if (
+                                    psi_window
+                                    and psi_roc_window
+                                    and psi_window.count >= 2
+                                ):
+                                    first_psi = psi_window.values[0]
+                                    if abs(first_psi) > 0.0001:
+                                        psi_roc = (
+                                            (psi - first_psi) / abs(first_psi)
+                                        )
+                                        psi_roc_window.push(psi_roc, ts)
+
+                                # Ψ σ
+                                psi_sigma_window = self._rolling_data.get(
+                                    KEY_SKEW_PSI_SIGMA_5M
+                                )
+                                if (
+                                    psi_window
+                                    and psi_sigma_window
+                                    and psi_window.count >= 5
+                                ):
+                                    vals = list(psi_window.values)
+                                    mean_psi = sum(vals) / len(vals)
+                                    var = sum(
+                                        (x - mean_psi) ** 2 for x in vals
+                                    ) / len(vals)
+                                    std_psi = math.sqrt(var)
+                                    psi_sigma_window.push(std_psi, ts)
+                except Exception:
+                    pass
+
+                # IV Smile Dynamics — Ω (Curvature Asymmetry Index)
+                # Ω = |Slope_Put_Wing| / |Slope_Call_Wing|
+                # Slope = dIV/dK (derivative of IV vs moneyness via least-squares)
+                try:
+                    iv_by_strike = self._calculator.get_iv_by_strike_avg()
+                    if iv_by_strike:
+                        strikes = sorted(iv_by_strike.keys())
+                        if len(strikes) >= 6:
+                            atm_strike = min(
+                                strikes, key=lambda s: abs(s - underlying_price)
+                            )
+                            put_strikes = [
+                                (s, iv_by_strike[s])
+                                for s in strikes
+                                if s < atm_strike and iv_by_strike[s] > 0.01
+                            ]
+                            call_strikes = [
+                                (s, iv_by_strike[s])
+                                for s in strikes
+                                if s > atm_strike and iv_by_strike[s] > 0.01
+                            ]
+                            if len(put_strikes) >= 2 and len(call_strikes) >= 2:
+                                put_x = [s / atm_strike for s, iv in put_strikes]
+                                put_y = [iv for s, iv in put_strikes]
+                                put_slope = _compute_linear_slope(put_x, put_y)
+
+                                call_x = [s / atm_strike for s, iv in call_strikes]
+                                call_y = [iv for s, iv in call_strikes]
+                                call_slope = _compute_linear_slope(call_x, call_y)
+
+                                if abs(call_slope) > 0.0001:
+                                    omega = abs(put_slope) / abs(call_slope)
+
+                                    omega_window = self._rolling_data.get(
+                                        "curve_omega_5m"
+                                    )
+                                    if omega_window:
+                                        omega_window.push(omega, ts)
+
+                                    ps_window = self._rolling_data.get(
+                                        "put_slope_5m"
+                                    )
+                                    if ps_window:
+                                        ps_window.push(put_slope, ts)
+
+                                    cs_window = self._rolling_data.get(
+                                        "call_slope_5m"
+                                    )
+                                    if cs_window:
+                                        cs_window.push(call_slope, ts)
+
+                                    # Ω ROC
+                                    omega_roc_window = self._rolling_data.get(
+                                        "curve_omega_roc_5m"
+                                    )
+                                    if (omega_window and omega_roc_window
+                                            and omega_window.count >= 2):
+                                        first_omega = omega_window.values[0]
+                                        if abs(first_omega) > 0.0001:
+                                            omega_roc = (
+                                                (omega - first_omega) / abs(first_omega)
+                                            )
+                                            omega_roc_window.push(omega_roc, ts)
+
+                                    # Ω σ
+                                    omega_sigma_window = self._rolling_data.get(
+                                        "curve_omega_sigma_5m"
+                                    )
+                                    if (omega_window and omega_sigma_window
+                                            and omega_window.count >= 5):
+                                        vals = list(omega_window.values)
+                                        mean_omega = sum(vals) / len(vals)
+                                        var = sum(
+                                            (x - mean_omega) ** 2 for x in vals
+                                        ) / len(vals)
+                                        std_omega = math.sqrt(var)
+                                        omega_sigma_window.push(std_omega, ts)
+                except Exception:
+                    pass
+
                 # volume_up_5m / volume_down_5m — call/put update counts as proxy
                 self._rolling_data[KEY_VOLUME_UP_5M].push(self._call_update_count)
                 self._rolling_data[KEY_VOLUME_DOWN_5M].push(self._put_update_count)
@@ -928,6 +1216,204 @@ class SyngexOrchestrator:
                         else:
                             ext_accel = 0.0
                         self._rolling_data[KEY_EXTRINSIC_ROC_5M].push(ext_accel, time.time())
+                except Exception:
+                    pass
+
+                # Commit per-tick Φ accumulators to rolling windows
+                if self._phi_call_tick > 0 or self._phi_put_tick > 0:
+                    phi_call_w = self._rolling_data.get(KEY_PHI_CALL_5M)
+                    if phi_call_w:
+                        phi_call_w.push(self._phi_call_tick, ts)
+                    phi_put_w = self._rolling_data.get(KEY_PHI_PUT_5M)
+                    if phi_put_w:
+                        phi_put_w.push(self._phi_put_tick, ts)
+                    total = self._phi_call_tick + self._phi_put_tick
+                    if total > 0:
+                        phi_total_w = self._rolling_data.get(KEY_PHI_TOTAL_5M)
+                        if phi_total_w:
+                            phi_total_w.push(total, ts)
+                        phi_ratio_w = self._rolling_data.get(KEY_PHI_RATIO_5M)
+                        if phi_put_w and self._phi_put_tick > 0:
+                            ratio = self._phi_call_tick / self._phi_put_tick
+                            phi_ratio_w.push(ratio, ts)
+                        # Φ total σ
+                        phi_sig_w = self._rolling_data.get(KEY_PHI_TOTAL_SIGMA_5M)
+                        if phi_total_w and phi_sig_w and phi_total_w.count >= 5:
+                            vals = list(phi_total_w.values)
+                            mean_t = sum(vals) / len(vals)
+                            var = sum((x - mean_t) ** 2 for x in vals) / len(vals)
+                            phi_sig_w.push(math.sqrt(var), ts)
+                    # Reset per-tick accumulators
+                    self._phi_call_tick = 0.0
+                    self._phi_put_tick = 0.0
+
+                # Gamma Breaker — Γ_break (Gamma Breakout Index)
+                # Γ_break = Price_Velocity × Gamma_Concentration_at_Level
+                try:
+                    price = self._calculator.underlying_price
+                    if price > 0:
+                        # Get nearest gamma walls
+                        walls = self._calculator.get_gamma_walls(threshold=100000)
+
+                        if walls:
+                            nearest_wall = walls[0]  # Largest GEX wall
+                            wall_strike = nearest_wall["strike"]
+                            wall_gex = nearest_wall["gex"]
+                            wall_side = nearest_wall["side"]
+
+                            # Distance to wall as % of price
+                            wall_dist_pct = abs(wall_strike - price) / price
+
+                            # Gamma concentration: wall GEX / average GEX across all walls
+                            all_gex = [abs(w["gex"]) for w in walls]
+                            avg_gex = sum(all_gex) / len(all_gex) if all_gex else 1.0
+                            gamma_concentration = abs(wall_gex) / avg_gex if avg_gex > 0 else 1.0
+
+                            # Price velocity: |net_change_pct| over 5m
+                            price_window = self._rolling_data.get(KEY_PRICE_5M)
+                            if price_window and price_window.count >= 2:
+                                velocity = abs(price_window.values[-1] - price_window.values[0]) / abs(price_window.values[0]) if price_window.values[0] != 0 else 0.0
+                            else:
+                                velocity = 0.0
+
+                            # Γ_break = velocity × gamma_concentration
+                            gamma_break = velocity * gamma_concentration
+
+                            # Push to rolling windows
+                            dist_w = self._rolling_data.get(KEY_WALL_DISTANCE_5M)
+                            if dist_w: dist_w.push(wall_dist_pct, ts)
+
+                            gex_w = self._rolling_data.get(KEY_WALL_GEX_5M)
+                            if gex_w: gex_w.push(abs(wall_gex), ts)
+
+                            # Wall GEX σ
+                            gex_sig_w = self._rolling_data.get(KEY_WALL_GEX_SIGMA_5M)
+                            if gex_w and gex_sig_w and gex_w.count >= 5:
+                                vals = list(gex_w.values)
+                                mean_g = sum(vals) / len(vals)
+                                var = sum((x - mean_g)**2 for x in vals) / len(vals)
+                                gex_sig_w.push(math.sqrt(var), ts)
+
+                            vel_w = self._rolling_data.get(KEY_PRICE_VELOCITY_5M)
+                            if vel_w: vel_w.push(velocity, ts)
+
+                            gb_w = self._rolling_data.get(KEY_GAMMA_BREAK_INDEX_5M)
+                            if gb_w: gb_w.push(gamma_break, ts)
+                except Exception:
+                    pass
+
+                # Iron Anchor — Confluence Detection
+                # Ω_conf = |Price_GammaWall - Price_LiquidityWall|
+                # Match gamma walls with liquidity walls from depth aggregates
+                try:
+                    price = self._calculator.underlying_price
+                    if price > 0:
+                        # Get gamma walls (major walls only)
+                        gamma_walls = self._calculator.get_gamma_walls(threshold=500000)
+
+                        if gamma_walls:
+                            # Get liquidity levels from depth aggregates
+                            depth_agg = self._rolling_data.get("market_depth_agg", {})
+                            bid_levels = depth_agg.get("bid_levels", [])
+                            ask_levels = depth_agg.get("ask_levels", [])
+
+                            if bid_levels or ask_levels:
+                                best_prox = float('inf')
+                                best_signal = 0  # +1 bullish, -1 bearish
+                                best_liq_size = 0
+
+                                for wall in gamma_walls:
+                                    wall_strike = wall["strike"]
+                                    wall_side = wall["side"]  # "call" or "put"
+
+                                    # Bid liquidity near put walls (bullish), ask near call walls (bearish)
+                                    target_levels = bid_levels if wall_side == "put" else ask_levels
+
+                                    if not target_levels:
+                                        continue
+
+                                    for level in target_levels:
+                                        liq_price = level["price"]
+                                        liq_size = level["size"]
+                                        if liq_price <= 0:
+                                            continue
+
+                                        prox = abs(wall_strike - liq_price)
+                                        if prox < best_prox:
+                                            best_prox = prox
+                                            best_signal = +1 if wall_side == "put" else -1
+                                            best_liq_size = liq_size
+
+                                # Push confluence metrics to rolling windows
+                                prox_w = self._rolling_data.get(KEY_CONFLUENCE_PROX_5M)
+                                if prox_w: prox_w.push(best_prox, ts)
+
+                                sig_w = self._rolling_data.get(KEY_CONFLUENCE_SIGNAL_5M)
+                                if sig_w: sig_w.push(best_signal, ts)
+
+                                liq_w = self._rolling_data.get(KEY_LIQUIDITY_WALL_SIZE_5M)
+                                if liq_w: liq_w.push(best_liq_size, ts)
+
+                                # Liquidity wall σ
+                                liq_sig_w = self._rolling_data.get(KEY_LIQUIDITY_WALL_SIGMA_5M)
+                                if liq_w and liq_sig_w and liq_w.count >= 5:
+                                    vals = list(liq_w.values)
+                                    mean_l = sum(vals) / len(vals)
+                                    var = sum((x - mean_l) ** 2 for x in vals) / len(vals)
+                                    liq_sig_w.push(math.sqrt(var), ts)
+                except Exception:
+                    pass
+
+                # Sentiment Sync — Γ_sync (Synchronization Engine)
+                # Γ_sync = Sign(ΔSkew) × Sign(Aggressor_VSI)
+                try:
+                    # 1. Get skew change over rolling window
+                    skew_window = self._rolling_data.get(KEY_IV_SKEW_5M)
+                    if skew_window and skew_window.count >= 10:
+                        first_skew = skew_window.values[0]
+                        current_skew = skew_window.values[-1]
+                        if abs(first_skew) > 0.001:
+                            skew_change = (current_skew - first_skew) / abs(first_skew)
+                        else:
+                            skew_change = current_skew
+
+                        # 2. Get aggressor VSI from rolling window
+                        vsi_window = self._rolling_data.get(KEY_AGGRESSOR_VSI_5M)
+                        if vsi_window and vsi_window.count >= 10:
+                            current_vsi = vsi_window.values[-1]
+                        else:
+                            current_vsi = 0.0
+
+                        # 3. Compute synchronization: sign agreement
+                        skew_sign = 1.0 if skew_change > 0 else (-1.0 if skew_change < 0 else 0.0)
+                        vsi_sign = 1.0 if current_vsi > 0 else (-1.0 if current_vsi < 0 else 0.0)
+
+                        # Γ_sync: +1 = both positive (fear+selling), -1 = both negative (complacency+buying)
+                        gamma_sync = skew_sign * vsi_sign
+
+                        # 4. Compute σ for significance threshold
+                        skew_vals = list(skew_window.values)
+                        mean_skew = sum(skew_vals) / len(skew_vals)
+                        skew_var = sum((x - mean_skew)**2 for x in skew_vals) / len(skew_vals)
+                        skew_sigma = math.sqrt(skew_var) if skew_var > 0 else 0.001
+
+                        vsi_vals = list(vsi_window.values)
+                        mean_vsi = sum(vsi_vals) / len(vsi_vals)
+                        vsi_var = sum((x - mean_vsi)**2 for x in vsi_vals) / len(vsi_vals)
+                        vsi_sigma = math.sqrt(vsi_var) if vsi_var > 0 else 0.001
+
+                        # Push to rolling windows
+                        corr_w = self._rolling_data.get(KEY_SYNC_CORR_5M)
+                        if corr_w: corr_w.push(gamma_sync, ts)
+
+                        sig_w = self._rolling_data.get(KEY_SYNC_SIGMA_5M)
+                        if sig_w: sig_w.push(max(skew_sigma, vsi_sigma), ts)
+
+                        skew_chg_w = self._rolling_data.get(KEY_SKEW_CHANGE_5M)
+                        if skew_chg_w: skew_chg_w.push(skew_change, ts)
+
+                        vsi_mag_w = self._rolling_data.get(KEY_VSI_MAGNITUDE_5M)
+                        if vsi_mag_w: vsi_mag_w.push(abs(current_vsi), ts)
                 except Exception:
                     pass
 
@@ -1838,6 +2324,113 @@ class SyngexOrchestrator:
                     if KEY_SIS_ASK_ROC_5M in self._rolling_data:
                         self._rolling_data[KEY_SIS_ASK_ROC_5M].push(ask_max_roc, ts)
 
+                    # ── Whale Tracker — Concentration Ratio Engine ──
+                    # Ω_conc = biggest_size / smallest_size at best levels
+                    try:
+                        if msg_type == "market_depth_agg" and bids and asks:
+                            top_bids = bids[:5] if len(bids) >= 5 else bids
+                            top_asks = asks[:5] if len(asks) >= 5 else asks
+
+                            if top_bids and top_asks:
+                                bid_sizes = [
+                                    int(b.get("TotalSize", 0))
+                                    for b in top_bids
+                                    if int(b.get("TotalSize", 0)) > 0
+                                ]
+                                bid_participants = [
+                                    int(b.get("NumParticipants", 0))
+                                    for b in top_bids
+                                ]
+
+                                ask_sizes = [
+                                    int(a.get("TotalSize", 0))
+                                    for a in top_asks
+                                    if int(a.get("TotalSize", 0)) > 0
+                                ]
+                                ask_participants = [
+                                    int(a.get("NumParticipants", 0))
+                                    for a in top_asks
+                                ]
+
+                                if bid_sizes and ask_sizes:
+                                    bid_biggest = max(bid_sizes)
+                                    bid_smallest = min(bid_sizes)
+                                    bid_conc_ratio = (
+                                        bid_biggest / bid_smallest
+                                        if bid_smallest > 0
+                                        else 0.0
+                                    )
+
+                                    ask_biggest = max(ask_sizes)
+                                    ask_smallest = min(ask_sizes)
+                                    ask_conc_ratio = (
+                                        ask_biggest / ask_smallest
+                                        if ask_smallest > 0
+                                        else 0.0
+                                    )
+
+                                    best_conc_ratio = max(
+                                        bid_conc_ratio, ask_conc_ratio
+                                    )
+                                    best_side = (
+                                        "bid"
+                                        if bid_conc_ratio > ask_conc_ratio
+                                        else "ask"
+                                    )
+                                    best_participants = (
+                                        min(bid_participants)
+                                        if best_side == "bid"
+                                        else min(ask_participants)
+                                    )
+
+                                    big_w = self._rolling_data.get(
+                                        KEY_BIGGEST_SIZE_5M
+                                    )
+                                    if big_w:
+                                        big_w.push(
+                                            max(bid_biggest, ask_biggest), ts
+                                        )
+
+                                    small_w = self._rolling_data.get(
+                                        KEY_SMALLEST_SIZE_5M
+                                    )
+                                    if small_w:
+                                        small_w.push(
+                                            min(bid_smallest, ask_smallest), ts
+                                        )
+
+                                    conc_w = self._rolling_data.get(
+                                        KEY_CONCENTRATION_RATIO_5M
+                                    )
+                                    if conc_w:
+                                        conc_w.push(best_conc_ratio, ts)
+
+                                    conc_sig_w = self._rolling_data.get(
+                                        KEY_CONCENTRATION_SIGMA_5M
+                                    )
+                                    if (
+                                        conc_w
+                                        and conc_sig_w
+                                        and conc_w.count >= 5
+                                    ):
+                                        vals = list(conc_w.values)
+                                        mean_c = sum(vals) / len(vals)
+                                        var = sum(
+                                            (x - mean_c) ** 2
+                                            for x in vals
+                                        ) / len(vals)
+                                        conc_sig_w.push(
+                                            math.sqrt(var), ts
+                                        )
+
+                                    parts_w = self._rolling_data.get(
+                                        KEY_NUM_PARTICIPANTS_5M
+                                    )
+                                    if parts_w:
+                                        parts_w.push(best_participants, ts)
+                    except Exception:
+                        pass
+
             # Aggression Flow from quotes stream — detect aggressive trades
             if data.get("type") == "quote_update":
                 last = data.get("last", 0)
@@ -1900,6 +2493,12 @@ class SyngexOrchestrator:
         self._gamma_filter.update_regime(net_gamma, flip, price)
 
         # Build data snapshot for strategies
+        # Inject _gamma_sync from rolling window (Sentiment Sync)
+        _gamma_sync = 0.0
+        sync_corr = self._rolling_data.get(KEY_SYNC_CORR_5M)
+        if sync_corr and sync_corr.count > 0:
+            _gamma_sync = sync_corr.values[-1]
+
         data = {
             "underlying_price": price,
             "symbol": self.symbol,
@@ -1910,6 +2509,7 @@ class SyngexOrchestrator:
             "net_gamma": net_gamma,
             "gamma_flip": flip,
             "greeks_summary": self._calculator.get_greeks_summary(),
+            "_gamma_sync": _gamma_sync,
             "exchange_data": {
                 "bid_sizes": self._exchange_bid_sizes,
                 "ask_sizes": self._exchange_ask_sizes,

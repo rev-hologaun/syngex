@@ -690,6 +690,121 @@ full_data:
       target_iv_expansion_cap: 2.5
       target_min_pct: 0.005
 
+  ghost_premium:
+    enabled: true
+    tracker:
+      max_hold_seconds: 7200
+    params:
+      # === Core PDR params ===
+      min_pdr: 0.60
+      min_pdr_data_points: 10
+      # === Gate A: Ask Size Sigma ===
+      ask_size_sigma_mult: 2.0
+      min_ask_size_sigma: 1.0
+      # === Gate B: Stability ===
+      max_net_change_pct: 0.02
+      # === Execution ===
+      stop_pct: 0.005
+      target_risk_mult: 2.0
+      min_confidence: 0.35
+      max_confidence: 0.85
+
+  skew_dynamics:
+    enabled: true
+    tracker:
+      max_hold_seconds: 14400
+    params:
+      min_psi_sigma: 2.0
+      min_psi_data_points: 10
+      min_confidence: 0.35
+      max_confidence: 0.85
+      stop_pct: 0.005
+      target_risk_mult: 2.0
+      liquidity_oi_threshold: 100
+
+  smile_dynamics:
+    enabled: true
+    tracker:
+      max_hold_seconds: 14400
+    params:
+      min_omega_sigma: 2.0
+      min_omega_data_points: 10
+      min_confidence: 0.35
+      max_confidence: 0.85
+      stop_pct: 0.005
+      target_risk_mult: 2.0
+      liquidity_oi_threshold: 100
+
+  extrinsic_flow:
+    enabled: true
+    tracker:
+      max_hold_seconds: 14400
+    params:
+      phi_call_threshold: 3.0
+      phi_put_threshold: 0.3
+      min_phi_data_points: 10
+      phi_sigma_mult: 2.0
+      min_confidence: 0.35
+      max_confidence: 0.85
+      stop_pct: 0.005
+      target_risk_mult: 2.0
+
+  gamma_breaker:
+    enabled: true
+    tracker:
+      max_hold_seconds: 1800
+    params:
+      min_gamma_break: 0.0005
+      min_wall_gex_sigma: 2.0
+      min_wall_distance_pct: 0.005
+      volume_spike_mult: 1.5
+      min_confidence: 0.35
+      max_confidence: 0.85
+      stop_pct: 0.005
+      target_risk_mult: 2.0
+
+  iron_anchor:
+    enabled: true
+    tracker:
+      max_hold_seconds: 3600
+    params:
+      max_confluence_distance: 1.0
+      min_liq_wall_sigma: 3.0
+      min_gamma_wall_gex: 500000
+      exhaustion_velocity_mult: 0.8
+      min_data_points: 10
+      min_confidence: 0.35
+      max_confidence: 0.85
+      stop_pct: 0.008
+      target_risk_mult: 1.5
+
+  sentiment_sync:
+    enabled: true
+    tracker:
+      max_hold_seconds: 3600
+    params:
+      min_sig_sigma: 2.0
+      min_data_points: 10
+      volume_min_mult: 1.0
+      price_confirm_pct: 0.001
+      min_confidence: 0.35
+      max_confidence: 0.85
+      stop_pct: 0.005
+      target_risk_mult: 2.0
+
+  whale_tracker:
+    enabled: true
+    tracker:
+      max_hold_seconds: 3600
+    params:
+      min_conc_sigma: 5.0
+      max_participants: 2
+      min_biggest_size_sigma: 3.0
+      min_confidence: 0.35
+      max_confidence: 0.85
+      stop_pct: 0.005
+      target_risk_mult: 2.0
+
 # Layer 0: Master Filter
 filter:
   net_gamma:

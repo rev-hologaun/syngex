@@ -87,6 +87,10 @@ KEY_AGGRESSIVE_SELL_VOL_5M = "aggressive_sell_vol_5m"
 KEY_AF_5M = "aggression_flow_5m"
 KEY_TRADE_SIZE_5M = "trade_size_5m"
 
+# --- Ghost Premium (TVD-Alpha) ---
+KEY_PDR_5M = "pdr_5m"
+KEY_PDR_ROC_5M = "pdr_roc_5m"
+
 # --- Depth Decay Momentum ---
 KEY_DEPTH_DECAY_BID_5M = "depth_decay_bid_5m"
 KEY_DEPTH_DECAY_ASK_5M = "depth_decay_ask_5m"
@@ -144,6 +148,52 @@ KEY_SIS_BID_5M = "sis_bid_5m"
 KEY_SIS_ASK_5M = "sis_ask_5m"
 KEY_SIS_BID_ROC_5M = "sis_bid_roc_5m"
 KEY_SIS_ASK_ROC_5M = "sis_ask_roc_5m"
+
+# --- Gamma-Weighted Momentum (GAMMA-ALPHA) ---
+KEY_WALL_DISTANCE_5M = "wall_distance_5m"
+KEY_WALL_GEX_5M = "wall_gex_5m"
+KEY_WALL_GEX_SIGMA_5M = "wall_gex_sigma_5m"
+KEY_PRICE_VELOCITY_5M = "price_velocity_5m"
+KEY_GAMMA_BREAK_INDEX_5M = "gamma_break_5m"
+
+# --- Iron Anchor (CONFLUENCE-ALPHA) ---
+KEY_CONFLUENCE_PROX_5M = "confluence_prox_5m"
+KEY_CONFLUENCE_SIGNAL_5M = "confluence_signal_5m"
+KEY_LIQUIDITY_WALL_SIZE_5M = "liq_wall_size_5m"
+KEY_LIQUIDITY_WALL_SIGMA_5M = "liq_wall_sigma_5m"
+
+# --- Sentiment Sync (SYNCHRONY-ALPHA) ---
+KEY_SYNC_CORR_5M = "sync_corr_5m"
+KEY_SYNC_SIGMA_5M = "sync_sigma_5m"
+KEY_SKEW_CHANGE_5M = "skew_change_5m"
+KEY_VSI_MAGNITUDE_5M = "vsi_magnitude_5m"
+
+# --- Whale Tracker (CONCENTRATION-ALPHA) ---
+KEY_BIGGEST_SIZE_5M = "biggest_size_5m"
+KEY_SMALLEST_SIZE_5M = "smallest_size_5m"
+KEY_CONCENTRATION_RATIO_5M = "conc_ratio_5m"
+KEY_CONCENTRATION_SIGMA_5M = "conc_sigma_5m"
+KEY_NUM_PARTICIPANTS_5M = "num_participants_5m"
+
+
+# --- IV Skew Dynamics (SKEW-ALPHA) ---
+KEY_SKEW_PSI_5M = "skew_psi_5m"
+KEY_SKEW_PSI_ROC_5M = "skew_psi_roc_5m"
+KEY_SKEW_PSI_SIGMA_5M = "skew_psi_sigma_5m"
+
+# --- IV Smile Dynamics (CURVE-ALPHA) ---
+KEY_CURVE_OMEGA_5M = "curve_omega_5m"
+KEY_CURVE_OMEGA_ROC_5M = "curve_omega_roc_5m"
+KEY_CURVE_OMEGA_SIGMA_5M = "curve_omega_sigma_5m"
+KEY_PUT_SLOPE_5M = "put_slope_5m"
+KEY_CALL_SLOPE_5M = "call_slope_5m"
+
+# --- Extrinsic Value Flow (EXTRINSIC-ALPHA) ---
+KEY_PHI_CALL_5M = "phi_call_5m"
+KEY_PHI_PUT_5M = "phi_put_5m"
+KEY_PHI_RATIO_5M = "phi_ratio_5m"
+KEY_PHI_TOTAL_5M = "phi_total_5m"
+KEY_PHI_TOTAL_SIGMA_5M = "phi_total_sigma_5m"
 
 # --- Convenience: all core keys in one tuple ---
 CORE_KEYS = (
@@ -240,7 +290,22 @@ ALL_KEYS = (*CORE_KEYS, *DEPTH_KEYS, KEY_FLOW_RATIO_5M,
             KEY_ESI_BASELINE_MEMX_1H, KEY_ESI_BASELINE_BATS_1H,
             KEY_DEPTH_BID_LEVEL_AVG_5M, KEY_DEPTH_ASK_LEVEL_AVG_5M,
             KEY_SIS_BID_5M, KEY_SIS_ASK_5M,
-            KEY_SIS_BID_ROC_5M, KEY_SIS_ASK_ROC_5M,)
+            KEY_SIS_BID_ROC_5M, KEY_SIS_ASK_ROC_5M,
+            KEY_PDR_5M, KEY_PDR_ROC_5M,
+            KEY_SKEW_PSI_5M, KEY_SKEW_PSI_ROC_5M, KEY_SKEW_PSI_SIGMA_5M,
+            KEY_CURVE_OMEGA_5M, KEY_CURVE_OMEGA_ROC_5M, KEY_CURVE_OMEGA_SIGMA_5M,
+            KEY_PUT_SLOPE_5M, KEY_CALL_SLOPE_5M,
+            KEY_PHI_CALL_5M, KEY_PHI_PUT_5M, KEY_PHI_RATIO_5M,
+            KEY_PHI_TOTAL_5M, KEY_PHI_TOTAL_SIGMA_5M,
+            KEY_WALL_DISTANCE_5M, KEY_WALL_GEX_5M, KEY_WALL_GEX_SIGMA_5M,
+            KEY_PRICE_VELOCITY_5M, KEY_GAMMA_BREAK_INDEX_5M,
+            KEY_CONFLUENCE_PROX_5M, KEY_CONFLUENCE_SIGNAL_5M,
+            KEY_LIQUIDITY_WALL_SIZE_5M, KEY_LIQUIDITY_WALL_SIGMA_5M,
+            KEY_SYNC_CORR_5M, KEY_SYNC_SIGMA_5M, KEY_SKEW_CHANGE_5M,
+            KEY_VSI_MAGNITUDE_5M,
+            KEY_BIGGEST_SIZE_5M, KEY_SMALLEST_SIZE_5M,
+            KEY_CONCENTRATION_RATIO_5M, KEY_CONCENTRATION_SIGMA_5M,
+            KEY_NUM_PARTICIPANTS_5M,)
 
 __all__ = [
     "KEY_PRICE_5M", "KEY_PRICE_30M",
@@ -287,5 +352,20 @@ __all__ = [
     "KEY_DEPTH_BID_LEVEL_AVG_5M", "KEY_DEPTH_ASK_LEVEL_AVG_5M",
     "KEY_SIS_BID_5M", "KEY_SIS_ASK_5M",
     "KEY_SIS_BID_ROC_5M", "KEY_SIS_ASK_ROC_5M",
+    "KEY_PDR_5M", "KEY_PDR_ROC_5M",
+    "KEY_SKEW_PSI_5M", "KEY_SKEW_PSI_ROC_5M", "KEY_SKEW_PSI_SIGMA_5M",
+    "KEY_CURVE_OMEGA_5M", "KEY_CURVE_OMEGA_ROC_5M", "KEY_CURVE_OMEGA_SIGMA_5M",
+    "KEY_PUT_SLOPE_5M", "KEY_CALL_SLOPE_5M",
+    "KEY_PHI_CALL_5M", "KEY_PHI_PUT_5M", "KEY_PHI_RATIO_5M",
+    "KEY_PHI_TOTAL_5M", "KEY_PHI_TOTAL_SIGMA_5M",
+    "KEY_WALL_DISTANCE_5M", "KEY_WALL_GEX_5M", "KEY_WALL_GEX_SIGMA_5M",
+    "KEY_PRICE_VELOCITY_5M", "KEY_GAMMA_BREAK_INDEX_5M",
+    "KEY_CONFLUENCE_PROX_5M", "KEY_CONFLUENCE_SIGNAL_5M",
+    "KEY_LIQUIDITY_WALL_SIZE_5M", "KEY_LIQUIDITY_WALL_SIGMA_5M",
+    "KEY_SYNC_CORR_5M", "KEY_SYNC_SIGMA_5M", "KEY_SKEW_CHANGE_5M",
+    "KEY_VSI_MAGNITUDE_5M",
+    "KEY_BIGGEST_SIZE_5M", "KEY_SMALLEST_SIZE_5M",
+    "KEY_CONCENTRATION_RATIO_5M", "KEY_CONCENTRATION_SIGMA_5M",
+    "KEY_NUM_PARTICIPANTS_5M",
     "CORE_KEYS", "DEPTH_KEYS", "DEPTH_DECAY_KEYS", "ALL_KEYS", "OBI_KEYS",
 ]
