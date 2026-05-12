@@ -144,6 +144,12 @@ from strategies.rolling_keys import (
     KEY_DECAY_VELOCITY_ASK_5M,
     KEY_TOP_WALL_BID_SIZE_5M,
     KEY_TOP_WALL_ASK_SIZE_5M,
+    KEY_AGGRESSOR_VSI_5M,
+    KEY_AGGRESSOR_VSI_ROC_5M,
+    KEY_IEX_INTENT_SCORE_5M,
+    KEY_MEMX_VSI_5M,
+    KEY_BATS_VSI_5M,
+    KEY_VENUE_CONCENTRATION_5M,
 )
 from strategies.layer1 import (
     GammaWallBounce,
@@ -169,6 +175,7 @@ from strategies.layer2.exchange_flow_concentration import ExchangeFlowConcentrat
 from strategies.layer2.participant_diversity_conviction import ParticipantDiversityConviction
 from strategies.layer2.participant_divergence_scalper import ParticipantDivergenceScalper
 from strategies.layer2.delta_iv_divergence import DeltaIVDivergence
+from strategies.layer2.exchange_flow_imbalance import ExchangeFlowImbalance
 from strategies.layer3 import (
     GammaVolumeConvergence,
     IVBandBreakout,
@@ -649,6 +656,7 @@ class SyngexOrchestrator:
                 "exchange_flow_concentration": ExchangeFlowConcentration,
                 "participant_diversity_conviction": ParticipantDiversityConviction,
                 "participant_divergence_scalper": ParticipantDivergenceScalper,
+                "exchange_flow_imbalance": ExchangeFlowImbalance,
             },
             "layer3": {
                 "gamma_volume_convergence": GammaVolumeConvergence,
@@ -1282,6 +1290,70 @@ class SyngexOrchestrator:
                         self._rolling_data[KEY_VSI_ROC_5M].push(vsi_roc, ts)
                     if KEY_IEX_INTENT_5M in self._rolling_data:
                         self._rolling_data[KEY_IEX_INTENT_5M].push(iex_intent, ts)
+
+                    # ── Exchange Flow Imbalance: Venue-Specific Imbalance ──
+                    # Aggressor venues combined (MEMX + BATS)
+                    aggressor_bid = memx_bid + bats_bid
+                    aggressor_ask = memx_ask + bats_ask
+                    aggressor_total = aggressor_bid + aggressor_ask
+                    aggressor_vsi = (
+                        (aggressor_bid - aggressor_ask) / aggressor_total
+                        if aggressor_total > 0
+                        else 0.0
+                    )
+
+                    # Individual venue VSI
+                    memx_total = memx_bid + memx_ask
+                    memx_vsi_val = (
+                        (memx_bid - memx_ask) / memx_total if memx_total > 0 else 0.0
+                    )
+                    bats_total = bats_bid + bats_ask
+                    bats_vsi_val = (
+                        (bats_bid - bats_ask) / bats_total if bats_total > 0 else 0.0
+                    )
+
+                    # IEX intent score: fraction of total depth on IEX
+                    iex_intent_score = (
+                        iex_total / total_depth if total_depth > 0 else 0.0
+                    )
+
+                    # Venue concentration: what fraction of total book imbalance
+                    # comes from aggressor venues
+                    total_imbalance = total_bid_size - total_ask_size
+                    aggressor_imbalance = aggressor_bid - aggressor_ask
+                    venue_concentration = (
+                        abs(aggressor_imbalance) / abs(total_imbalance)
+                        if total_imbalance != 0
+                        else 0.0
+                    )
+
+                    # VSI ROC (aggression velocity): rate of change over lookback
+                    vsi_roc = 0.0
+                    aggressor_rw = self._rolling_data.get(KEY_AGGRESSOR_VSI_5M)
+                    if aggressor_rw and aggressor_rw.count >= 10:
+                        past_vsi = aggressor_rw.values[-10]
+                        if past_vsi != 0:
+                            vsi_roc = (
+                                (aggressor_vsi - past_vsi) / abs(past_vsi)
+                            )
+                        else:
+                            vsi_roc = (
+                                (aggressor_vsi - past_vsi) / 0.001
+                            )
+
+                    # Push to rolling windows
+                    if KEY_AGGRESSOR_VSI_5M in self._rolling_data:
+                        self._rolling_data[KEY_AGGRESSOR_VSI_5M].push(aggressor_vsi, ts)
+                    if KEY_AGGRESSOR_VSI_ROC_5M in self._rolling_data:
+                        self._rolling_data[KEY_AGGRESSOR_VSI_ROC_5M].push(vsi_roc, ts)
+                    if KEY_IEX_INTENT_SCORE_5M in self._rolling_data:
+                        self._rolling_data[KEY_IEX_INTENT_SCORE_5M].push(iex_intent_score, ts)
+                    if KEY_MEMX_VSI_5M in self._rolling_data:
+                        self._rolling_data[KEY_MEMX_VSI_5M].push(memx_vsi_val, ts)
+                    if KEY_BATS_VSI_5M in self._rolling_data:
+                        self._rolling_data[KEY_BATS_VSI_5M].push(bats_vsi_val, ts)
+                    if KEY_VENUE_CONCENTRATION_5M in self._rolling_data:
+                        self._rolling_data[KEY_VENUE_CONCENTRATION_5M].push(venue_concentration, ts)
 
                     # ── Participant Diversity Conviction: parse participants + exchanges ──
                     top_bid_participants = (
@@ -2099,6 +2171,12 @@ class SyngexOrchestrator:
             (KEY_DECAY_VELOCITY_ASK_5M, "decay_velocity_ask"),
             (KEY_TOP_WALL_BID_SIZE_5M, "top_wall_bid_size"),
             (KEY_TOP_WALL_ASK_SIZE_5M, "top_wall_ask_size"),
+            (KEY_AGGRESSOR_VSI_5M, "aggressor_vsi"),
+            (KEY_AGGRESSOR_VSI_ROC_5M, "aggressor_vsi_roc"),
+            (KEY_IEX_INTENT_SCORE_5M, "iex_intent_score"),
+            (KEY_MEMX_VSI_5M, "memx_vsi"),
+            (KEY_BATS_VSI_5M, "bats_vsi"),
+            (KEY_VENUE_CONCENTRATION_5M, "venue_concentration"),
         ]:
             rw = self._rolling_data.get(rw_key)
             if rw and rw.count > 0:

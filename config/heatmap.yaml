@@ -147,6 +147,11 @@ strategies:
     col: 3
     span_cols: 1
     span_rows: 1
+  exchange_flow_imbalance:
+    row: 5
+    col: 4
+    span_cols: 1
+    span_rows: 1
 
 # System widgets (non-strategy cells)
 widgets:

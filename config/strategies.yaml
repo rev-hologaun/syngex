@@ -411,6 +411,23 @@ layer2:
       min_confidence: 0.45
       max_confidence: 0.95
 
+  exchange_flow_imbalance:
+    enabled: true
+    tracker:
+      max_hold_seconds: 2700
+    params:
+      vsi_threshold: 0.3
+      vsi_roc_threshold: 0.0
+      min_vsi_data_points: 10
+      iex_intent_threshold: 0.15
+      venue_concentration_threshold: 0.3
+      max_spread_mult: 2.0
+      use_vamp_validation: true
+      stop_pct: 0.005
+      target_risk_mult: 2.0
+      min_confidence: 0.40
+      max_confidence: 0.95
+
 # Layer 3: Micro-Signal (1Hz) — 4 strategies
 layer3:
   gamma_volume_convergence:
