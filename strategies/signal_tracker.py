@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -119,7 +120,7 @@ class SignalTracker:
 
         Returns the signal_id.
         """
-        signal_id = f"{signal['strategy_id']}_{signal['timestamp']:.0f}"
+        signal_id = f"{signal['strategy_id']}_{int(signal['timestamp']*1000)}_{uuid.uuid4().hex[:8]}"
 
         # Look up per-strategy hold time; fall back to global default (0)
         strat_id = signal.get("strategy_id", "")
