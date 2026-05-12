@@ -260,6 +260,9 @@ class SyngexOrchestrator:
             KEY_OTM_DELTA_5M: RollingWindow(window_type="time", window_size=300),
             KEY_OTM_IV_5M: RollingWindow(window_type="time", window_size=300),
             KEY_DELTA_IV_CORR_5M: RollingWindow(window_type="time", window_size=300),
+            # iv_skew_squeeze v2 — Skew-Velocity rolling windows
+            KEY_SKEW_ROC_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_DELTA_ROC_5M: RollingWindow(window_type="time", window_size=300),
             # Depth / L2 rolling windows
             KEY_DEPTH_BID_SIZE_5M: RollingWindow(window_type="time", window_size=300),
             KEY_DEPTH_ASK_SIZE_5M: RollingWindow(window_type="time", window_size=300),
@@ -740,6 +743,18 @@ class SyngexOrchestrator:
                 except Exception:
                     pass
 
+                # iv_skew_squeeze v2 — Skew ROC (rate of change over 5m window)
+                try:
+                    skew_window = self._rolling_data.get(KEY_IV_SKEW_5M)
+                    if (skew_window is not None and skew_window.count >= 2
+                            and KEY_SKEW_ROC_5M in self._rolling_data):
+                        first_val = skew_window.values[0]
+                        if abs(first_val) > 0:
+                            skew_roc = (iv_skew - first_val) / abs(first_val)
+                            self._rolling_data[KEY_SKEW_ROC_5M].push(skew_roc)
+                except Exception:
+                    pass
+
                 # volume_up_5m / volume_down_5m — call/put update counts as proxy
                 self._rolling_data[KEY_VOLUME_UP_5M].push(self._call_update_count)
                 self._rolling_data[KEY_VOLUME_DOWN_5M].push(self._put_update_count)
@@ -782,6 +797,18 @@ class SyngexOrchestrator:
                     atm_delta = delta_data.get("net_delta", 0.0)
                     if KEY_ATM_DELTA_5M in self._rolling_data:
                         self._rolling_data[KEY_ATM_DELTA_5M].push(atm_delta)
+
+                    # iv_skew_squeeze v2 — Delta ROC (rate of change over 5m window)
+                    try:
+                        delta_window = self._rolling_data.get(KEY_ATM_DELTA_5M)
+                        if (delta_window is not None and delta_window.count >= 2
+                                and KEY_DELTA_ROC_5M in self._rolling_data):
+                            first_delta = delta_window.values[0]
+                            if abs(first_delta) > 0:
+                                delta_roc = (atm_delta - first_delta) / abs(first_delta)
+                                self._rolling_data[KEY_DELTA_ROC_5M].push(delta_roc)
+                    except Exception:
+                        pass
 
                     atm_iv = self._calculator.get_iv_by_strike(atm_strike)
                     if atm_iv is not None and KEY_ATM_IV_5M in self._rolling_data:

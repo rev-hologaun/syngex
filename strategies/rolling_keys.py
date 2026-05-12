@@ -46,6 +46,10 @@ KEY_SKEW_WIDTH_5M = "skew_width_5m"
 KEY_IV_SKEW_GRADIENT_5M = "iv_skew_gradient_5m"
 KEY_GAMMA_DENSITY_5M = "gamma_density_5m"
 
+# --- IV Skew Squeeze v2 (Skew-Velocity) ---
+KEY_SKEW_ROC_5M = "skew_roc_5m"
+KEY_DELTA_ROC_5M = "delta_roc_5m"
+
 # --- Delta-IV Divergence v2 (Tail-Risk Divergence) ---
 KEY_OTM_DELTA_5M = "otm_delta_5m"
 KEY_OTM_IV_5M = "otm_iv_5m"
@@ -79,6 +83,8 @@ CORE_KEYS = (
     KEY_OTM_DELTA_5M,
     KEY_OTM_IV_5M,
     KEY_DELTA_IV_CORR_5M,
+    KEY_SKEW_ROC_5M,
+    KEY_DELTA_ROC_5M,
 )
 
 # Depth keys tuple
@@ -101,7 +107,8 @@ ALL_KEYS = (*CORE_KEYS, *DEPTH_KEYS, KEY_FLOW_RATIO_5M,
             KEY_CONSEC_LONG, KEY_CONSEC_SHORT,
             KEY_DEPTH_BID_SIZE_ROLLING, KEY_DEPTH_ASK_SIZE_ROLLING,
             KEY_SKEW_WIDTH_5M,
-            KEY_STRIKE_DELTA_5M, KEY_ATR_5M)
+            KEY_STRIKE_DELTA_5M, KEY_ATR_5M,
+            KEY_SKEW_ROC_5M, KEY_DELTA_ROC_5M)
 
 __all__ = [
     "KEY_PRICE_5M", "KEY_PRICE_30M",
@@ -120,5 +127,6 @@ __all__ = [
     "KEY_CONSEC_LONG", "KEY_CONSEC_SHORT",
     "KEY_SKEW_WIDTH_5M",
     "KEY_STRIKE_DELTA_5M", "KEY_ATR_5M",
+    "KEY_SKEW_ROC_5M", "KEY_DELTA_ROC_5M",
     "CORE_KEYS", "DEPTH_KEYS", "ALL_KEYS",
 ]

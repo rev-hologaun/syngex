@@ -396,6 +396,7 @@ full_data:
     tracker:
       max_hold_seconds: 14400
     params:
+      # === v1 params (kept for backwards compat) ===
       skew_extreme_positive: 0.30
       skew_extreme_negative: -0.10
       price_stable_threshold: 0.005
@@ -406,6 +407,15 @@ full_data:
       max_confidence: 0.80
       min_data_points: 5
       min_skew_data_points: 10
+
+      # === v2 Skew-Velocity params ===
+      skew_roc_threshold: 0.05
+      vol_weighted_stability_min: 0.50
+      vol_fragile_threshold: 0.30
+      delta_roc_threshold: 0.05
+      target_iv_expansion_mult: 1.6
+      target_iv_expansion_cap: 2.0
+      target_min_pct: 0.005
 
   prob_weighted_magnet:
     enabled: true
