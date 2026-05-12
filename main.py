@@ -522,6 +522,12 @@ class SyngexOrchestrator:
         self._phi_call_tick: float = 0.0
         self._phi_put_tick: float = 0.0
 
+        # Crash-recovery state file for phi accumulators (symbol-specific)
+        self._phi_state_file = self._data_dir / f"phi_state_{self.symbol}.json"
+
+        # Load persisted phi accumulators (crash recovery)
+        self._load_phi_accumulators()
+
         # Per-strike IV windows (populated lazily)
         self._iv_windows: Dict[str, RollingWindow] = {}
 
@@ -1255,6 +1261,8 @@ class SyngexOrchestrator:
                     # Reset per-tick accumulators
                     self._phi_call_tick = 0.0
                     self._phi_put_tick = 0.0
+                    # Persist state (crash recovery)
+                    self._persist_phi_accumulators()
 
                 # Gamma Breaker — Γ_break (Gamma Breakout Index)
                 # Γ_break = Price_Velocity × Gamma_Concentration_at_Level
@@ -2945,6 +2953,48 @@ class SyngexOrchestrator:
                     pass
                 self._heatmap_stderr = None
             self._heatmap_process = None
+
+    # ------------------------------------------------------------------
+    # Phi Accumulator Crash Recovery
+    # ------------------------------------------------------------------
+
+    def _persist_phi_accumulators(self) -> None:
+        """Write current phi tick accumulators to a JSON file for crash recovery.
+
+        Called after each tick commit so a mid-tick crash restores
+        accumulated values on restart rather than losing them.
+        """
+        try:
+            self._data_dir.mkdir(parents=True, exist_ok=True)
+            state = {
+                "_phi_call_tick": self._phi_call_tick,
+                "_phi_put_tick": self._phi_put_tick,
+            }
+            with open(self._phi_state_file, "w") as f:
+                json.dump(state, f)
+        except Exception as exc:
+            logger.debug("Failed to persist phi accumulators: %s", exc)
+
+    def _load_phi_accumulators(self) -> None:
+        """Load persisted phi tick accumulators from disk on startup.
+
+        Restores in-progress accumulators so a crash doesn't lose
+        partial tick data.
+        """
+        try:
+            if not self._phi_state_file.exists():
+                return
+            with open(self._phi_state_file, "r") as f:
+                state = json.load(f)
+            self._phi_call_tick = float(state.get("_phi_call_tick", 0.0))
+            self._phi_put_tick = float(state.get("_phi_put_tick", 0.0))
+            if self._phi_call_tick > 0 or self._phi_put_tick > 0:
+                logger.info(
+                    "Restored phi accumulators: call=%.4f put=%.4f",
+                    self._phi_call_tick, self._phi_put_tick,
+                )
+        except Exception as exc:
+            logger.debug("Failed to load phi accumulators: %s", exc)
 
     # ------------------------------------------------------------------
     # GEX State Export (shared file for Streamlit)
