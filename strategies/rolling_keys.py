@@ -127,6 +127,16 @@ KEY_MEMX_VSI_5M = "memx_vsi_5m"
 KEY_BATS_VSI_5M = "bats_vsi_5m"
 KEY_VENUE_CONCENTRATION_5M = "venue_concentration_5m"
 
+# --- Exchange Flow Asymmetry: Venue Signature Tracking ---
+KEY_ESI_MEMX_5M = "esi_memx_5m"
+KEY_ESI_MEMX_ROC_5M = "esi_memx_roc_5m"
+KEY_ESI_BATS_5M = "esi_bats_5m"
+KEY_ESI_BATS_ROC_5M = "esi_bats_roc_5m"
+KEY_MEMX_VOL_RATIO_5M = "memx_vol_ratio_5m"
+KEY_BATS_VOL_RATIO_5M = "bats_vol_ratio_5m"
+KEY_ESI_BASELINE_MEMX_1H = "esi_baseline_memx_1h"
+KEY_ESI_BASELINE_BATS_1H = "esi_baseline_bats_1h"
+
 # --- Convenience: all core keys in one tuple ---
 CORE_KEYS = (
     KEY_PRICE_5M,
@@ -215,7 +225,11 @@ ALL_KEYS = (*CORE_KEYS, *DEPTH_KEYS, KEY_FLOW_RATIO_5M,
             KEY_TOP_WALL_BID_SIZE_5M, KEY_TOP_WALL_ASK_SIZE_5M,
             KEY_AGGRESSOR_VSI_5M, KEY_AGGRESSOR_VSI_ROC_5M,
             KEY_IEX_INTENT_SCORE_5M, KEY_MEMX_VSI_5M,
-            KEY_BATS_VSI_5M, KEY_VENUE_CONCENTRATION_5M,)
+            KEY_BATS_VSI_5M, KEY_VENUE_CONCENTRATION_5M,
+            KEY_ESI_MEMX_5M, KEY_ESI_MEMX_ROC_5M,
+            KEY_ESI_BATS_5M, KEY_ESI_BATS_ROC_5M,
+            KEY_MEMX_VOL_RATIO_5M, KEY_BATS_VOL_RATIO_5M,
+            KEY_ESI_BASELINE_MEMX_1H, KEY_ESI_BASELINE_BATS_1H,)
 
 __all__ = [
     "KEY_PRICE_5M", "KEY_PRICE_30M",
@@ -255,5 +269,9 @@ __all__ = [
     "KEY_AGGRESSOR_VSI_5M", "KEY_AGGRESSOR_VSI_ROC_5M",
     "KEY_IEX_INTENT_SCORE_5M", "KEY_MEMX_VSI_5M",
     "KEY_BATS_VSI_5M", "KEY_VENUE_CONCENTRATION_5M",
+    "KEY_ESI_MEMX_5M", "KEY_ESI_MEMX_ROC_5M",
+    "KEY_ESI_BATS_5M", "KEY_ESI_BATS_ROC_5M",
+    "KEY_MEMX_VOL_RATIO_5M", "KEY_BATS_VOL_RATIO_5M",
+    "KEY_ESI_BASELINE_MEMX_1H", "KEY_ESI_BASELINE_BATS_1H",
     "CORE_KEYS", "DEPTH_KEYS", "DEPTH_DECAY_KEYS", "ALL_KEYS", "OBI_KEYS",
 ]

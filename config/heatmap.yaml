@@ -152,6 +152,11 @@ strategies:
     col: 4
     span_cols: 1
     span_rows: 1
+  exchange_flow_asymmetry:
+    row: 5
+    col: 5
+    span_cols: 1
+    span_rows: 1
 
 # System widgets (non-strategy cells)
 widgets:

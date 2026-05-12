@@ -428,6 +428,22 @@ layer2:
       min_confidence: 0.40
       max_confidence: 0.95
 
+  exchange_flow_asymmetry:
+    enabled: true
+    tracker:
+      max_hold_seconds: 3600
+    params:
+      esi_threshold: 0.8
+      memx_deviation_threshold: 0.15
+      bats_deviation_threshold: -0.15
+      volume_ratio_threshold: 1.5
+      min_data_points: 10
+      min_confidence: 0.50
+      max_confidence: 0.95
+      stop_pct: 0.008
+      target_risk_mult: 2.5
+      max_spread_mult: 2.0
+
 # Layer 3: Micro-Signal (1Hz) — 4 strategies
 layer3:
   gamma_volume_convergence:

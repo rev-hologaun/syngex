@@ -150,6 +150,14 @@ from strategies.rolling_keys import (
     KEY_MEMX_VSI_5M,
     KEY_BATS_VSI_5M,
     KEY_VENUE_CONCENTRATION_5M,
+    KEY_ESI_MEMX_5M,
+    KEY_ESI_MEMX_ROC_5M,
+    KEY_ESI_BATS_5M,
+    KEY_ESI_BATS_ROC_5M,
+    KEY_MEMX_VOL_RATIO_5M,
+    KEY_BATS_VOL_RATIO_5M,
+    KEY_ESI_BASELINE_MEMX_1H,
+    KEY_ESI_BASELINE_BATS_1H,
 )
 from strategies.layer1 import (
     GammaWallBounce,
@@ -176,6 +184,7 @@ from strategies.layer2.participant_diversity_conviction import ParticipantDivers
 from strategies.layer2.participant_divergence_scalper import ParticipantDivergenceScalper
 from strategies.layer2.delta_iv_divergence import DeltaIVDivergence
 from strategies.layer2.exchange_flow_imbalance import ExchangeFlowImbalance
+from strategies.layer2.exchange_flow_asymmetry import ExchangeFlowAsymmetry
 from strategies.layer3 import (
     GammaVolumeConvergence,
     IVBandBreakout,
@@ -219,6 +228,8 @@ class SyngexOrchestrator:
         self._gamma_filter: NetGammaFilter | None = None
         self._rolling_data: Dict[str, RollingWindow] = {}
         self._running = False
+        self._exchange_bid_sizes: Dict[str, int] = {}
+        self._exchange_ask_sizes: Dict[str, int] = {}
         self._profile_timer: float = 0.0
         self._signal_timer: float = 0.0
         self._dashboard_process: subprocess.Popen | None = None
@@ -657,6 +668,7 @@ class SyngexOrchestrator:
                 "participant_diversity_conviction": ParticipantDiversityConviction,
                 "participant_divergence_scalper": ParticipantDivergenceScalper,
                 "exchange_flow_imbalance": ExchangeFlowImbalance,
+                "exchange_flow_asymmetry": ExchangeFlowAsymmetry,
             },
             "layer3": {
                 "gamma_volume_convergence": GammaVolumeConvergence,
@@ -1260,6 +1272,9 @@ class SyngexOrchestrator:
                     for a in asks:
                         for venue, size_str in a.get("ask_exchanges", {}).items():
                             exchange_ask_sizes[venue] = exchange_ask_sizes.get(venue, 0) + int(size_str)
+                    # Store for strategy access (Gate A: cross-venue confluence)
+                    self._exchange_bid_sizes = exchange_bid_sizes
+                    self._exchange_ask_sizes = exchange_ask_sizes
 
                     memx_bid = exchange_bid_sizes.get("MEMX", 0)
                     memx_ask = exchange_ask_sizes.get("MEMX", 0)
@@ -1354,6 +1369,116 @@ class SyngexOrchestrator:
                         self._rolling_data[KEY_BATS_VSI_5M].push(bats_vsi_val, ts)
                     if KEY_VENUE_CONCENTRATION_5M in self._rolling_data:
                         self._rolling_data[KEY_VENUE_CONCENTRATION_5M].push(venue_concentration, ts)
+
+                    # ── Exchange Flow Asymmetry: Venue Signature Tracking ──
+                    # MEMX ESI
+                    memx_total_size = memx_bid + memx_ask
+                    esi_memx = (
+                        (memx_bid - memx_ask) / memx_total_size
+                        if memx_total_size > 0
+                        else 0.0
+                    )
+                    # BATS ESI
+                    bats_total_size = bats_bid + bats_ask
+                    esi_bats = (
+                        (bats_bid - bats_ask) / bats_total_size
+                        if bats_total_size > 0
+                        else 0.0
+                    )
+                    # Venue volume (total size across both sides)
+                    memx_vol = memx_total_size
+                    bats_vol = bats_total_size
+                    # Venue volume ratio (current vs 5m average)
+                    memx_vol_ratio = 0.0
+                    memx_vol_rw = self._rolling_data.get(KEY_MEMX_VOL_RATIO_5M)
+                    if memx_vol_rw and memx_vol_rw.count >= 10:
+                        avg_vol = (
+                            sum(memx_vol_rw.values) / len(memx_vol_rw.values)
+                            if memx_vol_rw.values
+                            else 1.0
+                        )
+                        memx_vol_ratio = memx_vol / avg_vol if avg_vol > 0 else 1.0
+                    bats_vol_ratio = 0.0
+                    bats_vol_rw = self._rolling_data.get(KEY_BATS_VOL_RATIO_5M)
+                    if bats_vol_rw and bats_vol_rw.count >= 10:
+                        avg_vol = (
+                            sum(bats_vol_rw.values) / len(bats_vol_rw.values)
+                            if bats_vol_rw.values
+                            else 1.0
+                        )
+                        bats_vol_ratio = bats_vol / avg_vol if avg_vol > 0 else 1.0
+                    # ESI ROC (rate of change over lookback)
+                    esi_memx_roc = 0.0
+                    esi_memx_rw = self._rolling_data.get(KEY_ESI_MEMX_5M)
+                    if esi_memx_rw and esi_memx_rw.count >= 10:
+                        past_esi = (
+                            esi_memx_rw.values[-10]
+                            if esi_memx_rw.values[-10] != 0
+                            else 0.001
+                        )
+                        esi_memx_roc = (esi_memx - past_esi) / abs(past_esi)
+                    esi_bats_roc = 0.0
+                    esi_bats_rw = self._rolling_data.get(KEY_ESI_BATS_5M)
+                    if esi_bats_rw and esi_bats_rw.count >= 10:
+                        past_esi = (
+                            esi_bats_rw.values[-10]
+                            if esi_bats_rw.values[-10] != 0
+                            else -0.001
+                        )
+                        esi_bats_roc = (esi_bats - past_esi) / abs(past_esi)
+                    # Baseline deviation (ESI vs 1h rolling mean)
+                    esi_baseline_memx = 0.0
+                    esi_baseline_bats = 0.0
+                    baseline_rw_memx = self._rolling_data.get(
+                        KEY_ESI_BASELINE_MEMX_1H
+                    )
+                    baseline_rw_bats = self._rolling_data.get(
+                        KEY_ESI_BASELINE_BATS_1H
+                    )
+                    if baseline_rw_memx and baseline_rw_memx.count >= 60:
+                        esi_baseline_memx = (
+                            sum(baseline_rw_memx.values[-60:])
+                            / min(60, baseline_rw_memx.count)
+                        )
+                    if baseline_rw_bats and baseline_rw_bats.count >= 60:
+                        esi_baseline_bats = (
+                            sum(baseline_rw_bats.values[-60:])
+                            / min(60, baseline_rw_bats.count)
+                        )
+                    memx_deviation = esi_memx - esi_baseline_memx
+                    bats_deviation = esi_bats - esi_baseline_bats
+                    # OBI for Gate B (book alignment)
+                    total_depth = total_bid_size + total_ask_size
+                    obi = (
+                        (total_bid_size - total_ask_size) / total_depth
+                        if total_depth > 0
+                        else 0.0
+                    )
+                    # Push to rolling windows
+                    if KEY_ESI_MEMX_5M in self._rolling_data:
+                        self._rolling_data[KEY_ESI_MEMX_5M].push(esi_memx, ts)
+                    if KEY_ESI_MEMX_ROC_5M in self._rolling_data:
+                        self._rolling_data[KEY_ESI_MEMX_ROC_5M].push(esi_memx_roc, ts)
+                    if KEY_ESI_BATS_5M in self._rolling_data:
+                        self._rolling_data[KEY_ESI_BATS_5M].push(esi_bats, ts)
+                    if KEY_ESI_BATS_ROC_5M in self._rolling_data:
+                        self._rolling_data[KEY_ESI_BATS_ROC_5M].push(esi_bats_roc, ts)
+                    if KEY_MEMX_VOL_RATIO_5M in self._rolling_data:
+                        self._rolling_data[KEY_MEMX_VOL_RATIO_5M].push(
+                            memx_vol_ratio, ts
+                        )
+                    if KEY_BATS_VOL_RATIO_5M in self._rolling_data:
+                        self._rolling_data[KEY_BATS_VOL_RATIO_5M].push(
+                            bats_vol_ratio, ts
+                        )
+                    if KEY_ESI_BASELINE_MEMX_1H in self._rolling_data:
+                        self._rolling_data[KEY_ESI_BASELINE_MEMX_1H].push(
+                            esi_baseline_memx, ts
+                        )
+                    if KEY_ESI_BASELINE_BATS_1H in self._rolling_data:
+                        self._rolling_data[KEY_ESI_BASELINE_BATS_1H].push(
+                            esi_baseline_bats, ts
+                        )
 
                     # ── Participant Diversity Conviction: parse participants + exchanges ──
                     top_bid_participants = (
@@ -1707,6 +1832,10 @@ class SyngexOrchestrator:
             "net_gamma": net_gamma,
             "gamma_flip": flip,
             "greeks_summary": self._calculator.get_greeks_summary(),
+            "exchange_data": {
+                "bid_sizes": self._exchange_bid_sizes,
+                "ask_sizes": self._exchange_ask_sizes,
+            },
         }
 
         # Build depth snapshot for strategies
@@ -2177,6 +2306,14 @@ class SyngexOrchestrator:
             (KEY_MEMX_VSI_5M, "memx_vsi"),
             (KEY_BATS_VSI_5M, "bats_vsi"),
             (KEY_VENUE_CONCENTRATION_5M, "venue_concentration"),
+            (KEY_ESI_MEMX_5M, "esi_memx"),
+            (KEY_ESI_MEMX_ROC_5M, "esi_memx_roc"),
+            (KEY_ESI_BATS_5M, "esi_bats"),
+            (KEY_ESI_BATS_ROC_5M, "esi_bats_roc"),
+            (KEY_MEMX_VOL_RATIO_5M, "memx_vol_ratio"),
+            (KEY_BATS_VOL_RATIO_5M, "bats_vol_ratio"),
+            (KEY_ESI_BASELINE_MEMX_1H, "esi_baseline_memx"),
+            (KEY_ESI_BASELINE_BATS_1H, "esi_baseline_bats"),
         ]:
             rw = self._rolling_data.get(rw_key)
             if rw and rw.count > 0:
