@@ -74,7 +74,7 @@ class GEXImbalance(BaseStrategy):
     strategy_id = "gex_imbalance"
     layer = "layer1"
 
-    def __init__(self) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__()
         self._ratio_history: list = []  # List of (timestamp, ratio) tuples, capped at 20
 
