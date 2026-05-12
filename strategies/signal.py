@@ -21,6 +21,7 @@ Usage:
 from __future__ import annotations
 
 import time
+import types
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, Optional
@@ -63,7 +64,9 @@ class Signal:
     symbol: str = ""           # Underlying symbol (e.g. "TSLA")
     reason: str = ""
     expiry: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: types.MappingProxyType[str, Any] = field(
+        default_factory=lambda: types.MappingProxyType({})
+    )
 
     @property
     def risk_reward_ratio(self) -> float:
@@ -117,7 +120,7 @@ class Signal:
             timestamp=data.get("timestamp", time.time()),
             reason=data.get("reason", ""),
             expiry=data.get("expiry"),
-            metadata=data.get("metadata", {}),
+            metadata=types.MappingProxyType(data.get("metadata", {})),
         )
 
     def __repr__(self) -> str:
