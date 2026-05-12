@@ -156,6 +156,7 @@ from strategies.layer2 import (
 )
 from strategies.layer2.exchange_flow_concentration import ExchangeFlowConcentration
 from strategies.layer2.participant_diversity_conviction import ParticipantDiversityConviction
+from strategies.layer2.participant_divergence_scalper import ParticipantDivergenceScalper
 from strategies.layer2.delta_iv_divergence import DeltaIVDivergence
 from strategies.layer3 import (
     GammaVolumeConvergence,
@@ -636,6 +637,7 @@ class SyngexOrchestrator:
                 "depth_imbalance_momentum": DepthImbalanceMomentum,
                 "exchange_flow_concentration": ExchangeFlowConcentration,
                 "participant_diversity_conviction": ParticipantDiversityConviction,
+                "participant_divergence_scalper": ParticipantDivergenceScalper,
             },
             "layer3": {
                 "gamma_volume_convergence": GammaVolumeConvergence,
@@ -1321,6 +1323,53 @@ class SyngexOrchestrator:
 
                     if KEY_CONVICT_SCORE_5M in self._rolling_data:
                         self._rolling_data[KEY_CONVICT_SCORE_5M].push(avg_conviction_score, ts)
+
+                    # ── Participant Divergence Scalper: fragility + decay velocity ──
+                    def _compute_fragility(levels, side_key):
+                        """Fragility = 1 / (num_participants × exchange_count), averaged over top N."""
+                        if not levels:
+                            return 0.0
+                        fragilities = []
+                        for lvl in levels[:5]:
+                            n_part = max(1, int(lvl.get("num_participants", 0)))
+                            exchanges = lvl.get(side_key, {})
+                            n_exch = max(1, len(exchanges)) if exchanges else 1
+                            fragilities.append(1.0 / (n_part * n_exch))
+                        return sum(fragilities) / len(fragilities)
+
+                    frag_bid = _compute_fragility(bids, "bid_exchanges")
+                    frag_ask = _compute_fragility(asks, "ask_exchanges")
+
+                    # Track strongest wall per side (level with max size)
+                    top_bid_level = max(bids, key=lambda b: int(b.get("Size", 0)), default=None)
+                    top_ask_level = max(asks, key=lambda a: int(a.get("Size", 0)), default=None)
+                    top_bid_wall_size = int(top_bid_level.get("Size", 0)) if top_bid_level else 0
+                    top_ask_wall_size = int(top_ask_level.get("Size", 0)) if top_ask_level else 0
+
+                    bid_decay = 0.0
+                    ask_decay = 0.0
+                    bid_wall_rw = self._rolling_data.get(KEY_TOP_WALL_BID_SIZE_5M)
+                    ask_wall_rw = self._rolling_data.get(KEY_TOP_WALL_ASK_SIZE_5M)
+                    if bid_wall_rw and bid_wall_rw.count >= 5 and top_bid_wall_size > 0:
+                        past = bid_wall_rw.values[-5] if bid_wall_rw.values[-5] > 0 else 1
+                        bid_decay = (top_bid_wall_size - past) / past
+                    if ask_wall_rw and ask_wall_rw.count >= 5 and top_ask_wall_size > 0:
+                        past = ask_wall_rw.values[-5] if ask_wall_rw.values[-5] > 0 else 1
+                        ask_decay = (top_ask_wall_size - past) / past
+
+                    # Push to rolling windows
+                    if KEY_FRAGILITY_BID_5M in self._rolling_data:
+                        self._rolling_data[KEY_FRAGILITY_BID_5M].push(frag_bid, ts)
+                    if KEY_FRAGILITY_ASK_5M in self._rolling_data:
+                        self._rolling_data[KEY_FRAGILITY_ASK_5M].push(frag_ask, ts)
+                    if KEY_DECAY_VELOCITY_BID_5M in self._rolling_data:
+                        self._rolling_data[KEY_DECAY_VELOCITY_BID_5M].push(bid_decay, ts)
+                    if KEY_DECAY_VELOCITY_ASK_5M in self._rolling_data:
+                        self._rolling_data[KEY_DECAY_VELOCITY_ASK_5M].push(ask_decay, ts)
+                    if KEY_TOP_WALL_BID_SIZE_5M in self._rolling_data:
+                        self._rolling_data[KEY_TOP_WALL_BID_SIZE_5M].push(top_bid_wall_size, ts)
+                    if KEY_TOP_WALL_ASK_SIZE_5M in self._rolling_data:
+                        self._rolling_data[KEY_TOP_WALL_ASK_SIZE_5M].push(top_ask_wall_size, ts)
 
                     # Best bid/ask for spread
                 best_bid = float(bids[0].get("Price", 0)) if bids else 0.0
@@ -2033,6 +2082,12 @@ class SyngexOrchestrator:
             (KEY_BID_EXCHANGES_5M, "bid_exchanges"),
             (KEY_ASK_EXCHANGES_5M, "ask_exchanges"),
             (KEY_CONVICT_SCORE_5M, "conviction_score"),
+            (KEY_FRAGILITY_BID_5M, "fragility_bid"),
+            (KEY_FRAGILITY_ASK_5M, "fragility_ask"),
+            (KEY_DECAY_VELOCITY_BID_5M, "decay_velocity_bid"),
+            (KEY_DECAY_VELOCITY_ASK_5M, "decay_velocity_ask"),
+            (KEY_TOP_WALL_BID_SIZE_5M, "top_wall_bid_size"),
+            (KEY_TOP_WALL_ASK_SIZE_5M, "top_wall_ask_size"),
         ]:
             rw = self._rolling_data.get(rw_key)
             if rw and rw.count > 0:

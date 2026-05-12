@@ -394,6 +394,23 @@ layer2:
       min_confidence: 0.40
       max_confidence: 0.90
 
+  participant_divergence_scalper:
+    enabled: true
+    tracker:
+      max_hold_seconds: 180
+    params:
+      fragility_threshold: 0.5
+      robust_threshold: 0.3
+      decay_velocity_threshold: 0.0
+      wall_size_mult: 5.0
+      vol_ratio_spoof: 0.1
+      vol_ratio_robust: 0.5
+      max_spread_mult: 2.0
+      stop_pct: 0.003
+      target_risk_mult: 1.5
+      min_confidence: 0.45
+      max_confidence: 0.95
+
 # Layer 3: Micro-Signal (1Hz) — 4 strategies
 layer3:
   gamma_volume_convergence:

@@ -24,6 +24,7 @@ from .depth_decay_momentum import DepthDecayMomentum
 from .depth_imbalance_momentum import DepthImbalanceMomentum
 from .exchange_flow_concentration import ExchangeFlowConcentration
 from .participant_diversity_conviction import ParticipantDiversityConviction
+from .participant_divergence_scalper import ParticipantDivergenceScalper
 
 __all__ = [
     "DeltaGammaSqueeze",
@@ -37,4 +38,5 @@ __all__ = [
     "DepthImbalanceMomentum",
     "ExchangeFlowConcentration",
     "ParticipantDiversityConviction",
+    "ParticipantDivergenceScalper",
 ]
