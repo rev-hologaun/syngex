@@ -104,6 +104,13 @@ KEY_VSI_COMBINED_5M = "vsi_combined_5m"
 KEY_VSI_ROC_5M = "vsi_roc_5m"
 KEY_IEX_INTENT_5M = "iex_intent_5m"
 
+# --- Participant Diversity Conviction ---
+KEY_BID_PARTICIPANTS_5M = "bid_participants_5m"
+KEY_ASK_PARTICIPANTS_5M = "ask_participants_5m"
+KEY_BID_EXCHANGES_5M = "bid_exchanges_5m"
+KEY_ASK_EXCHANGES_5M = "ask_exchanges_5m"
+KEY_CONVICT_SCORE_5M = "conviction_score_5m"
+
 # --- Convenience: all core keys in one tuple ---
 CORE_KEYS = (
     KEY_PRICE_5M,
@@ -183,7 +190,10 @@ ALL_KEYS = (*CORE_KEYS, *DEPTH_KEYS, KEY_FLOW_RATIO_5M,
             KEY_AF_5M, KEY_TRADE_SIZE_5M,
             *DEPTH_DECAY_KEYS,
             KEY_IR_5M, KEY_IR_ROC_5M, KEY_IR_PARTICIPANTS_5M,
-            KEY_VSI_COMBINED_5M, KEY_VSI_ROC_5M, KEY_IEX_INTENT_5M,)
+            KEY_VSI_COMBINED_5M, KEY_VSI_ROC_5M, KEY_IEX_INTENT_5M,
+            KEY_BID_PARTICIPANTS_5M, KEY_ASK_PARTICIPANTS_5M,
+            KEY_BID_EXCHANGES_5M, KEY_ASK_EXCHANGES_5M,
+            KEY_CONVICT_SCORE_5M,)
 
 __all__ = [
     "KEY_PRICE_5M", "KEY_PRICE_30M",
@@ -214,5 +224,8 @@ __all__ = [
     "KEY_DEPTH_VOL_RATIO_5M",
     "KEY_IR_5M", "KEY_IR_ROC_5M", "KEY_IR_PARTICIPANTS_5M",
     "KEY_VSI_COMBINED_5M", "KEY_VSI_ROC_5M", "KEY_IEX_INTENT_5M",
+    "KEY_BID_PARTICIPANTS_5M", "KEY_ASK_PARTICIPANTS_5M",
+    "KEY_BID_EXCHANGES_5M", "KEY_ASK_EXCHANGES_5M",
+    "KEY_CONVICT_SCORE_5M",
     "CORE_KEYS", "DEPTH_KEYS", "DEPTH_DECAY_KEYS", "ALL_KEYS", "OBI_KEYS",
 ]

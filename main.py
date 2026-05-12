@@ -155,6 +155,7 @@ from strategies.layer2 import (
     DepthImbalanceMomentum,
 )
 from strategies.layer2.exchange_flow_concentration import ExchangeFlowConcentration
+from strategies.layer2.participant_diversity_conviction import ParticipantDiversityConviction
 from strategies.layer2.delta_iv_divergence import DeltaIVDivergence
 from strategies.layer3 import (
     GammaVolumeConvergence,
@@ -634,6 +635,7 @@ class SyngexOrchestrator:
                 "depth_decay_momentum": DepthDecayMomentum,
                 "depth_imbalance_momentum": DepthImbalanceMomentum,
                 "exchange_flow_concentration": ExchangeFlowConcentration,
+                "participant_diversity_conviction": ParticipantDiversityConviction,
             },
             "layer3": {
                 "gamma_volume_convergence": GammaVolumeConvergence,
@@ -1268,7 +1270,59 @@ class SyngexOrchestrator:
                     if KEY_IEX_INTENT_5M in self._rolling_data:
                         self._rolling_data[KEY_IEX_INTENT_5M].push(iex_intent, ts)
 
-                # Best bid/ask for spread
+                    # ── Participant Diversity Conviction: parse participants + exchanges ──
+                    top_bid_participants = (
+                        max(int(b.get("num_participants", 0)) for b in bids) if bids else 0
+                    )
+                    top_ask_participants = (
+                        max(int(a.get("num_participants", 0)) for a in asks) if asks else 0
+                    )
+
+                    # Unique exchanges across all levels
+                    top_bid_exchanges = len(
+                        set(b.get("bid_exchanges", {}).keys()) for b in bids if b.get("bid_exchanges")
+                    ) if bids else 0
+                    top_ask_exchanges = len(
+                        set(a.get("ask_exchanges", {}).keys()) for a in asks if a.get("ask_exchanges")
+                    ) if asks else 0
+
+                    # Avg participants across top N levels
+                    top_n = min(5, len(bids)) if bids else 0
+                    avg_bid_participants = (
+                        sum(int(b.get("num_participants", 0)) for b in bids[:top_n]) / top_n
+                        if top_n > 0 else 0
+                    )
+                    top_n_ask = min(5, len(asks)) if asks else 0
+                    avg_ask_participants = (
+                        sum(int(a.get("num_participants", 0)) for a in asks[:top_n_ask]) / top_n_ask
+                        if top_n_ask > 0 else 0
+                    )
+
+                    # Push to rolling windows
+                    if KEY_BID_PARTICIPANTS_5M in self._rolling_data:
+                        self._rolling_data[KEY_BID_PARTICIPANTS_5M].push(avg_bid_participants, ts)
+                    if KEY_ASK_PARTICIPANTS_5M in self._rolling_data:
+                        self._rolling_data[KEY_ASK_PARTICIPANTS_5M].push(avg_ask_participants, ts)
+                    if KEY_BID_EXCHANGES_5M in self._rolling_data:
+                        self._rolling_data[KEY_BID_EXCHANGES_5M].push(top_bid_exchanges, ts)
+                    if KEY_ASK_EXCHANGES_5M in self._rolling_data:
+                        self._rolling_data[KEY_ASK_EXCHANGES_5M].push(top_ask_exchanges, ts)
+
+                    # Compute conviction score (participant_score × exchange_score)
+                    max_participants_norm = 5.0
+                    max_exchanges_norm = 4.0
+                    bid_participant_score = min(1.0, avg_bid_participants / max_participants_norm)
+                    bid_exchange_score = min(1.0, top_bid_exchanges / max_exchanges_norm)
+                    bid_conviction_score = bid_participant_score * bid_exchange_score
+                    ask_participant_score = min(1.0, avg_ask_participants / max_participants_norm)
+                    ask_exchange_score = min(1.0, top_ask_exchanges / max_exchanges_norm)
+                    ask_conviction_score = ask_participant_score * ask_exchange_score
+                    avg_conviction_score = (bid_conviction_score + ask_conviction_score) / 2.0
+
+                    if KEY_CONVICT_SCORE_5M in self._rolling_data:
+                        self._rolling_data[KEY_CONVICT_SCORE_5M].push(avg_conviction_score, ts)
+
+                    # Best bid/ask for spread
                 best_bid = float(bids[0].get("Price", 0)) if bids else 0.0
                 best_ask = float(asks[0].get("Price", 0)) if asks else 0.0
                 spread = best_ask - best_bid if best_bid > 0 and best_ask > 0 else 0.0
@@ -1974,6 +2028,11 @@ class SyngexOrchestrator:
             (KEY_DEPTH_SPREAD_5M, "spread"),
             (KEY_DEPTH_BID_LEVELS_5M, "bid_levels"),
             (KEY_DEPTH_ASK_LEVELS_5M, "ask_levels"),
+            (KEY_BID_PARTICIPANTS_5M, "bid_participants"),
+            (KEY_ASK_PARTICIPANTS_5M, "ask_participants"),
+            (KEY_BID_EXCHANGES_5M, "bid_exchanges"),
+            (KEY_ASK_EXCHANGES_5M, "ask_exchanges"),
+            (KEY_CONVICT_SCORE_5M, "conviction_score"),
         ]:
             rw = self._rolling_data.get(rw_key)
             if rw and rw.count > 0:

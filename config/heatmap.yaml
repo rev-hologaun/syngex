@@ -137,6 +137,11 @@ strategies:
     col: 1
     span_cols: 1
     span_rows: 1
+  participant_diversity_conviction:
+    row: 5
+    col: 2
+    span_cols: 1
+    span_rows: 1
 
 # System widgets (non-strategy cells)
 widgets:

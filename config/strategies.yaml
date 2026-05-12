@@ -377,6 +377,23 @@ layer2:
       min_confidence: 0.40
       max_confidence: 0.90
 
+  participant_diversity_conviction:
+    enabled: true
+    tracker:
+      max_hold_seconds: 3600
+    params:
+      min_participants: 3.0
+      min_exchanges: 2
+      conviction_threshold: 0.7
+      conviction_exit: 0.4
+      max_participants_norm: 5.0
+      max_exchanges_norm: 4.0
+      min_size_ratio: 0.5
+      stop_pct: 0.008
+      target_risk_mult: 2.0
+      min_confidence: 0.40
+      max_confidence: 0.90
+
 # Layer 3: Micro-Signal (1Hz) — 4 strategies
 layer3:
   gamma_volume_convergence:

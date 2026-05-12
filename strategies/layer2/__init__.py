@@ -23,6 +23,7 @@ from .obi_aggression_flow import ObiAggressionFlow
 from .depth_decay_momentum import DepthDecayMomentum
 from .depth_imbalance_momentum import DepthImbalanceMomentum
 from .exchange_flow_concentration import ExchangeFlowConcentration
+from .participant_diversity_conviction import ParticipantDiversityConviction
 
 __all__ = [
     "DeltaGammaSqueeze",
@@ -35,4 +36,5 @@ __all__ = [
     "DepthDecayMomentum",
     "DepthImbalanceMomentum",
     "ExchangeFlowConcentration",
+    "ParticipantDiversityConviction",
 ]
