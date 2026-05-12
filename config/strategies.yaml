@@ -277,6 +277,7 @@ layer3:
     tracker:
       max_hold_seconds: 900
     params:
+      # === v1 params (kept for backwards compat) ===
       delta_accel_ratio: 1.15
       gamma_spike_ratio: 1.20
       volume_spike_ratio: 1.20
@@ -285,6 +286,24 @@ layer3:
       min_confidence: 0.35
       max_confidence: 0.90
       min_data_points: 3
+
+      # === v2 Ignition-Master params ===
+      # Aggressor-weighted volume
+      aggressor_ratio_threshold_long: 0.60
+      aggressor_ratio_threshold_short: 0.40
+      volume_spike_ratio: 1.20
+
+      # Gamma acceleration
+      gamma_accel_window: 5
+      gamma_accel_threshold: 0.10
+
+      # Delta-gamma coupling
+      coupling_min_ratio: 0.5
+
+      # ATR-normalized targets
+      atr_mult: 1.5
+      atr_min_target_pct: 0.003
+      atr_max_target_pct: 0.020
 
   iv_band_breakout:
     enabled: true

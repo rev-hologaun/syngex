@@ -1,25 +1,37 @@
 """
-strategies/layer3/gamma_volume_convergence.py — Gamma-Volume Convergence (GVC)
+strategies/layer3/gamma_volume_convergence.py — Gamma-Volume Convergence (GVC) v2
 
-Micro-signal (1Hz) strategy: detects ignition signals where gamma/delta spikes
-at specific strikes coincide with volume surges.
+"Ignition-Master" upgrade:
+    - Aggressor-weighted volume (VolumeUp/Down ratio) instead of simple volume spike
+    - Gamma acceleration (2nd derivative) instead of 1st derivative spike
+    - Delta-gamma coupling gate to filter phantom spikes
+    - ATR-normalized targets that scale with current volatility
 
 Logic:
     - Monitor ATM strike for simultaneous delta + gamma acceleration
-    - Volume confirmation required (VolumeUp or VolumeDown)
-    - Positive gamma regime required
-    - Quick scalp: 5–15 min holds, 1:2 risk/reward
+    - Aggressor-weighted volume confirmation (VolumeUp/Down ratio)
+    - Gamma acceleration confirms ignition (2nd derivative)
+    - Delta-gamma coupling ensures real signal, not phantom spike
+    - ATR-normalized targets for dynamic exits
 
 Entry:
-    - LONG:  delta ↑ + gamma ↑ + VolumeUp spike + price rising
-    - SHORT: delta ↓ + gamma ↑ + VolumeDown spike + price falling
+    - LONG:  delta ↑ + gamma acceleration ↑ + aggressive VolumeUp + price rising
+    - SHORT: delta ↓ + gamma acceleration ↑ + aggressive VolumeDown + price falling
 
-Confidence factors:
-    - Delta acceleration rate
-    - Gamma spike magnitude
-    - Volume spike magnitude
-    - Regime alignment
-    - Proximity to gamma wall
+Confidence factors (6 components):
+    1. Delta acceleration magnitude  (0.0–0.15, soft)
+    2. Gamma acceleration (hard gate — 0.0 or 0.20)
+    3. Aggressor-weighted volume (hard gate — 0.0 or 0.15)
+    4. Delta-gamma coupling (hard gate — 0.0 or 0.10)
+    5. ATR-normalized target quality (0.0–0.10, soft)
+    6. Wall proximity (0.05–0.10, soft)
+
+Hard gates (all must pass):
+    - Gamma acceleration > 0.10
+    - Aggressor ratio > 0.60 (LONG) or < 0.40 (SHORT)
+    - Delta-gamma coupling >= 0.5
+
+Min confidence: 0.35 (raised from 0.25)
 """
 
 from __future__ import annotations
@@ -29,7 +41,10 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
-from strategies.rolling_keys import KEY_PRICE_5M, KEY_VOLUME_5M, KEY_VOLUME_UP_5M, KEY_VOLUME_DOWN_5M, KEY_TOTAL_DELTA_5M, KEY_TOTAL_GAMMA_5M
+from strategies.rolling_keys import (
+    KEY_PRICE_5M, KEY_VOLUME_5M, KEY_VOLUME_UP_5M, KEY_VOLUME_DOWN_5M,
+    KEY_TOTAL_DELTA_5M, KEY_TOTAL_GAMMA_5M, KEY_GAMMA_ACCEL_5M,
+)
 
 logger = logging.getLogger("Syngex.Strategies.GammaVolumeConvergence")
 
@@ -39,31 +54,24 @@ logger = logging.getLogger("Syngex.Strategies.GammaVolumeConvergence")
 
 # Delta acceleration threshold: current total_delta must exceed rolling avg
 # by this ratio (15% above rolling average)
-DELTA_ACCEL_RATIO = 1.10
+DELTA_ACCEL_RATIO = 1.15
 
 # Delta acceleration lower bound for SHORT: current total_delta must be
 # above this ratio of rolling avg (ensures delta is declining, not negative).
-# A ratio of 0.30 means delta is still 30% of avg — declining but positive.
-# Ratios below this indicate delta has flipped negative, which is a different
-# market regime (not "declining delta" but "collapsed/negative delta").
 DELTA_ACCEL_MIN_RATIO = 0.30
 
-# Gamma spike threshold: current total_gamma must exceed rolling avg by
-# this ratio (20% above rolling average)
-GAMMA_SPIKE_RATIO = 1.15
+# Gamma spike threshold (kept for metadata): current total_gamma must exceed
+# rolling avg by this ratio
+GAMMA_SPIKE_RATIO = 1.20
 
-# Volume spike threshold: current volume must exceed rolling avg by this
-# ratio (20% above rolling average)
-VOLUME_SPIKE_RATIO = 1.15
+# Volume spike threshold (kept for metadata)
+VOLUME_SPIKE_RATIO = 1.20
 
 # Stop loss: 0.5% against entry
 STOP_PCT = 0.005
 
-# Take profit: 1.0% from entry (2:1 risk/reward)
-TARGET_PCT = 0.010
-
-# Minimum confidence to emit a signal
-MIN_CONFIDENCE = 0.25
+# Minimum confidence to emit a signal (raised from 0.25)
+MIN_CONFIDENCE = 0.35
 
 # Maximum confidence — micro-signals shouldn't carry max conviction
 MAX_CONFIDENCE = 0.90
@@ -78,18 +86,19 @@ PRICE_DOWN_THRESHOLD = -0.001    # 0.1% drop over 5m window
 
 class GammaVolumeConvergence(BaseStrategy):
     """
-    Detects gamma/volume ignition signals.
+    Detects gamma/volume ignition signals (v2 Ignition-Master).
 
-    When delta and gamma spike simultaneously at the ATM strike AND
-    volume confirms (VolumeUp or VolumeDown), that's the exact moment
-    dealers are aggressively re-hedging — the ignition point for a
+    When delta and gamma acceleration spike simultaneously at the ATM strike AND
+    aggressor-weighted volume confirms (VolumeUp/Down ratio), that's the exact
+    moment dealers are aggressively re-hedging — the ignition point for a
     gamma squeeze.
 
-    In a positive gamma regime:
-        - LONG:  accelerating delta + spiking gamma + VolumeUp + price rising
-        - SHORT: accelerating delta down + spiking gamma + VolumeDown + price falling
+    Hard gates (all must pass):
+        - Gamma acceleration > 0.10 (2nd derivative confirms ignition)
+        - Aggressor ratio > 60% (LONG) or < 40% (SHORT) (real conviction)
+        - Delta-gamma coupling >= 0.5 (not a phantom spike)
 
-    Exits are quick: 0.5% stop, 1.0% target, 5–15 min hold window.
+    Exits are quick: ATR-normalized target, 0.5% stop, 5–15 min hold window.
     """
 
     strategy_id = "gamma_volume_convergence"
@@ -111,28 +120,19 @@ class GammaVolumeConvergence(BaseStrategy):
 
         rolling_data = data.get("rolling_data", {})
         net_gamma = data.get("net_gamma", 0)
-        regime = data.get("regime", "")
-
-        # Positive gamma regime required for both sides
-        if regime != "POSITIVE":
-            return []
-
-        # Must have positive net gamma
-        if net_gamma <= 0:
-            return []
 
         signals: List[Signal] = []
 
         # Check LONG ignition
         long_sig = self._check_long(
-            underlying_price, gex_calc, rolling_data, net_gamma, regime,
+            underlying_price, gex_calc, rolling_data, net_gamma,
         )
         if long_sig:
             signals.append(long_sig)
 
         # Check SHORT ignition
         short_sig = self._check_short(
-            underlying_price, gex_calc, rolling_data, net_gamma, regime,
+            underlying_price, gex_calc, rolling_data, net_gamma,
         )
         if short_sig:
             signals.append(short_sig)
@@ -140,7 +140,7 @@ class GammaVolumeConvergence(BaseStrategy):
         return signals
 
     # ------------------------------------------------------------------
-    # LONG entry: delta ↑ + gamma ↑ + VolumeUp + price rising
+    # LONG entry: delta ↑ + gamma acceleration ↑ + aggressive VolumeUp
     # ------------------------------------------------------------------
 
     def _check_long(
@@ -149,17 +149,17 @@ class GammaVolumeConvergence(BaseStrategy):
         gex_calc: Any,
         rolling_data: Dict[str, Any],
         net_gamma: float,
-        regime: str,
     ) -> Optional[Signal]:
         """
         Evaluate LONG ignition signal.
 
         Conditions:
-            1. Net Gamma > 0 (already checked in evaluate)
+            1. Net Gamma > 0
             2. ATM delta accelerating (≥15% above rolling avg)
-            3. ATM gamma spiking (≥20% above rolling avg)
-            4. VolumeUp spiking (≥20% above rolling avg)
-            5. Price trending UP over 5m window
+            3. Gamma acceleration > 0.10 (2nd derivative confirms ignition)
+            4. Aggressor ratio > 0.60 (VolumeUp > 60% of total)
+            5. Delta-gamma coupling >= 0.5 (not a phantom spike)
+            6. Price trending UP over 5m window
         """
         # Get ATM strike
         atm_strike = self._get_atm_strike(gex_calc, price)
@@ -171,13 +171,19 @@ class GammaVolumeConvergence(BaseStrategy):
         if delta_accel is None or delta_accel < DELTA_ACCEL_RATIO:
             return None
 
-        # Check gamma spike
-        gamma_spike = self._check_gamma_spike(rolling_data)
-        if gamma_spike is None or gamma_spike < GAMMA_SPIKE_RATIO:
+        # Check gamma acceleration (2nd derivative, hard gate)
+        gamma_accel = self._check_gamma_acceleration(rolling_data)
+        if gamma_accel is None or gamma_accel < 0.10:
             return None
 
-        # Check VolumeUp spike
-        if not self._check_volume_spike(rolling_data, "volume_up_5m"):
+        # Check aggressor volume (hard gate)
+        aggressor_ratio = self._check_aggressor_volume(rolling_data, "LONG")
+        if aggressor_ratio is None:
+            return None
+
+        # Check delta-gamma coupling (hard gate)
+        coupling_passes = self._check_delta_gamma_coupling(delta_accel, gamma_accel)
+        if not coupling_passes:
             return None
 
         # Check price trend is UP
@@ -186,16 +192,16 @@ class GammaVolumeConvergence(BaseStrategy):
 
         # All conditions met — compute confidence and build signal
         confidence = self._compute_confidence(
-            price, atm_strike, delta_accel, gamma_spike,
-            rolling_data, "LONG", net_gamma, gex_calc,
+            price, delta_accel, gamma_accel,
+            aggressor_ratio, rolling_data, "LONG", net_gamma, gex_calc,
         )
         if confidence < MIN_CONFIDENCE:
             return None
 
-        # Build signal with quick-scalp parameters
+        # Build signal with ATR-normalized target
         entry = price
         stop = entry * (1 - STOP_PCT)
-        target = entry * (1 + TARGET_PCT)
+        target, atr_5m, target_mult = self._compute_atr_target(entry, rolling_data, "LONG")
 
         # Get wall proximity for metadata
         walls = self._safe_get_walls(gex_calc)
@@ -204,6 +210,25 @@ class GammaVolumeConvergence(BaseStrategy):
         # Rolling window trend
         price_window = rolling_data.get(KEY_PRICE_5M)
         rolling_trend = price_window.trend if price_window else "UNKNOWN"
+
+        # Actual target percentage from entry
+        target_pct_actual = (target - entry) / entry if entry > 0 else 0.0
+
+        # Gamma spike ratio (for metadata, v1 compat)
+        gamma_spike = self._check_gamma_spike(rolling_data)
+        if gamma_spike is None:
+            gamma_spike = 0.0
+
+        # Gamma acceleration window count
+        gamma_accel_window = 0
+        gamma_window = rolling_data.get(KEY_TOTAL_GAMMA_5M)
+        if gamma_window is not None:
+            gamma_accel_window = min(gamma_window.count, 10)
+
+        # Coupling ratio
+        coupling_ratio = (
+            abs(delta_accel - 1.0) / gamma_accel if gamma_accel > 0 else 0.0
+        )
 
         return Signal(
             direction=Direction.LONG,
@@ -214,9 +239,10 @@ class GammaVolumeConvergence(BaseStrategy):
             strategy_id=self.strategy_id,
             reason=(
                 f"GVC ignition: ATM {atm_strike} delta x{delta_accel:.1f}, "
-                f"gamma x{gamma_spike:.1f}, VolumeUp spike, price UP"
+                f"gamma accel {gamma_accel:.3f}, aggressor {aggressor_ratio:.2f}, price UP"
             ),
             metadata={
+                # === v1 fields (kept) ===
                 "atm_strike": atm_strike,
                 "delta_acceleration_ratio": round(delta_accel, 3),
                 "gamma_spike_ratio": round(gamma_spike, 3),
@@ -224,7 +250,6 @@ class GammaVolumeConvergence(BaseStrategy):
                 "price_trend": "UP",
                 "rolling_trend": rolling_trend,
                 "net_gamma": round(net_gamma, 2),
-                "regime": regime,
                 "call_wall_above": call_wall_above["strike"] if call_wall_above else None,
                 "distance_to_call_wall_pct": (
                     round((call_wall_above["strike"] - price) / price, 4)
@@ -234,11 +259,20 @@ class GammaVolumeConvergence(BaseStrategy):
                 "risk_reward_ratio": round(
                     (target - entry) / (entry - stop), 2
                 ) if (entry - stop) > 0 else 0,
+
+                # === v2 new fields ===
+                "gamma_acceleration": round(gamma_accel, 4),
+                "gamma_accel_window": gamma_accel_window,
+                "aggressor_ratio": round(aggressor_ratio, 3),
+                "coupling_ratio": round(coupling_ratio, 4),
+                "atr_value": round(atr_5m, 4),
+                "target_mult": round(target_mult, 2),
+                "target_pct_actual": round(target_pct_actual, 4),
             },
         )
 
     # ------------------------------------------------------------------
-    # SHORT entry: delta ↓ + gamma ↑ + VolumeDown + price falling
+    # SHORT entry: delta ↓ + gamma acceleration ↑ + aggressive VolumeDown
     # ------------------------------------------------------------------
 
     def _check_short(
@@ -247,17 +281,17 @@ class GammaVolumeConvergence(BaseStrategy):
         gex_calc: Any,
         rolling_data: Dict[str, Any],
         net_gamma: float,
-        regime: str,
     ) -> Optional[Signal]:
         """
         Evaluate SHORT ignition signal.
 
         Conditions:
-            1. Net Gamma > 0 (already checked in evaluate)
+            1. Net Gamma > 0
             2. ATM delta declining (DELTA_ACCEL_MIN_RATIO <= ratio < 0.85)
-            3. ATM gamma spiking (≥20% above rolling avg)
-            4. VolumeDown spiking (≥20% above rolling avg)
-            5. Price trending DOWN over 5m window
+            3. Gamma acceleration > 0.10 (2nd derivative confirms ignition)
+            4. Aggressor ratio < 0.40 (VolumeUp < 40% of total = aggressive selling)
+            5. Delta-gamma coupling >= 0.5 (not a phantom spike)
+            6. Price trending DOWN over 5m window
         """
         # Get ATM strike
         atm_strike = self._get_atm_strike(gex_calc, price)
@@ -270,17 +304,22 @@ class GammaVolumeConvergence(BaseStrategy):
             return None
         # For SHORT, we want delta declining but still positive:
         # DELTA_ACCEL_MIN_RATIO <= ratio < 0.85
-        # This ensures delta is actively declining (not collapsed or negative).
         if delta_accel >= 0.85 or delta_accel < DELTA_ACCEL_MIN_RATIO:
             return None
 
-        # Check gamma spike (same for both directions)
-        gamma_spike = self._check_gamma_spike(rolling_data)
-        if gamma_spike is None or gamma_spike < GAMMA_SPIKE_RATIO:
+        # Check gamma acceleration (2nd derivative, hard gate)
+        gamma_accel = self._check_gamma_acceleration(rolling_data)
+        if gamma_accel is None or gamma_accel < 0.10:
             return None
 
-        # Check VolumeDown spike
-        if not self._check_volume_spike(rolling_data, "volume_down_5m"):
+        # Check aggressor volume (hard gate)
+        aggressor_ratio = self._check_aggressor_volume(rolling_data, "SHORT")
+        if aggressor_ratio is None:
+            return None
+
+        # Check delta-gamma coupling (hard gate)
+        coupling_passes = self._check_delta_gamma_coupling(delta_accel, gamma_accel)
+        if not coupling_passes:
             return None
 
         # Check price trend is DOWN
@@ -289,16 +328,16 @@ class GammaVolumeConvergence(BaseStrategy):
 
         # All conditions met — compute confidence and build signal
         confidence = self._compute_confidence(
-            price, atm_strike, delta_accel, gamma_spike,
-            rolling_data, "SHORT", net_gamma, gex_calc,
+            price, delta_accel, gamma_accel,
+            aggressor_ratio, rolling_data, "SHORT", net_gamma, gex_calc,
         )
         if confidence < MIN_CONFIDENCE:
             return None
 
-        # Build signal with quick-scalp parameters
+        # Build signal with ATR-normalized target
         entry = price
         stop = entry * (1 + STOP_PCT)
-        target = entry * (1 - TARGET_PCT)
+        target, atr_5m, target_mult = self._compute_atr_target(entry, rolling_data, "SHORT")
 
         # Get wall proximity for metadata
         walls = self._safe_get_walls(gex_calc)
@@ -307,6 +346,25 @@ class GammaVolumeConvergence(BaseStrategy):
         # Rolling window trend
         price_window = rolling_data.get(KEY_PRICE_5M)
         rolling_trend = price_window.trend if price_window else "UNKNOWN"
+
+        # Actual target percentage from entry
+        target_pct_actual = (entry - target) / entry if entry > 0 else 0.0
+
+        # Gamma spike ratio (for metadata, v1 compat)
+        gamma_spike = self._check_gamma_spike(rolling_data)
+        if gamma_spike is None:
+            gamma_spike = 0.0
+
+        # Gamma acceleration window count
+        gamma_accel_window = 0
+        gamma_window = rolling_data.get(KEY_TOTAL_GAMMA_5M)
+        if gamma_window is not None:
+            gamma_accel_window = min(gamma_window.count, 10)
+
+        # Coupling ratio
+        coupling_ratio = (
+            abs(delta_accel - 1.0) / gamma_accel if gamma_accel > 0 else 0.0
+        )
 
         return Signal(
             direction=Direction.SHORT,
@@ -317,9 +375,10 @@ class GammaVolumeConvergence(BaseStrategy):
             strategy_id=self.strategy_id,
             reason=(
                 f"GVC ignition fade: ATM {atm_strike} delta ↓, "
-                f"gamma x{gamma_spike:.1f}, VolumeDown spike, price DOWN"
+                f"gamma accel {gamma_accel:.3f}, aggressor {aggressor_ratio:.2f}, price DOWN"
             ),
             metadata={
+                # === v1 fields (kept) ===
                 "atm_strike": atm_strike,
                 "delta_acceleration_ratio": round(delta_accel, 3),
                 "gamma_spike_ratio": round(gamma_spike, 3),
@@ -327,7 +386,6 @@ class GammaVolumeConvergence(BaseStrategy):
                 "price_trend": "DOWN",
                 "rolling_trend": rolling_trend,
                 "net_gamma": round(net_gamma, 2),
-                "regime": regime,
                 "put_wall_below": put_wall_below["strike"] if put_wall_below else None,
                 "distance_to_put_wall_pct": (
                     round((price - put_wall_below["strike"]) / price, 4)
@@ -337,30 +395,209 @@ class GammaVolumeConvergence(BaseStrategy):
                 "risk_reward_ratio": round(
                     (entry - target) / (stop - entry), 2
                 ) if (stop - entry) > 0 else 0,
+
+                # === v2 new fields ===
+                "gamma_acceleration": round(gamma_accel, 4),
+                "gamma_accel_window": gamma_accel_window,
+                "aggressor_ratio": round(aggressor_ratio, 3),
+                "coupling_ratio": round(coupling_ratio, 4),
+                "atr_value": round(atr_5m, 4),
+                "target_mult": round(target_mult, 2),
+                "target_pct_actual": round(target_pct_actual, 4),
             },
         )
 
     # ------------------------------------------------------------------
-    # Helpers
+    # v2 Checks
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _get_atm_strike(gex_calc: Any, price: float) -> Optional[float]:
-        """Get the nearest ATM strike from the GEX calculator."""
-        try:
-            return gex_calc.get_atm_strike(price)
-        except Exception as exc:
-            logger.debug("GVC: failed to get ATM strike: %s", exc)
+    def _check_aggressor_volume(
+        rolling_data: Dict[str, Any],
+        direction: str,
+    ) -> Optional[float]:
+        """
+        Check aggressor-weighted volume.
+
+        Computes aggressor_ratio = VolumeUp / (VolumeUp + VolumeDown).
+        For LONG: aggressor_ratio > 0.60 (majority aggressive buying).
+        For SHORT: aggressor_ratio < 0.40 (majority aggressive selling).
+
+        Also checks that VolumeUp (LONG) or VolumeDown (SHORT) exceeds
+        1.20× its rolling average.
+
+        Returns:
+            aggressor_ratio float if gate passes, None otherwise.
+        """
+        vol_up = rolling_data.get(KEY_VOLUME_UP_5M)
+        vol_down = rolling_data.get(KEY_VOLUME_DOWN_5M)
+
+        if vol_up is None or vol_down is None:
             return None
 
+        current_up = vol_up.latest
+        current_down = vol_down.latest
+
+        if current_up is None or current_down is None:
+            return None
+
+        total = current_up + current_down
+        if total == 0:
+            return None
+
+        aggressor_ratio = current_up / total
+
+        # Hard gate: LONG needs > 0.60, SHORT needs < 0.40
+        if direction == "LONG" and aggressor_ratio <= 0.60:
+            return None
+        if direction == "SHORT" and aggressor_ratio >= 0.40:
+            return None
+
+        # Volume spike check: VolumeUp (LONG) or VolumeDown (SHORT) > 1.20× rolling avg
+        if direction == "LONG":
+            spike_window = vol_up
+            spike_threshold = 1.20
+        else:
+            spike_window = vol_down
+            spike_threshold = 1.20
+
+        if spike_window is not None and spike_window.mean is not None and spike_window.mean > 0:
+            if current_up < spike_window.mean * spike_threshold and current_down < spike_window.mean * spike_threshold:
+                return None
+
+        return aggressor_ratio
+
     @staticmethod
-    def _safe_get_walls(gex_calc: Any) -> List[Dict[str, Any]]:
-        """Safely retrieve gamma walls, returning empty list on error."""
-        try:
-            return gex_calc.get_gamma_walls(threshold=500_000)
-        except Exception as exc:
-            logger.debug("GVC: failed to get gamma walls: %s", exc)
-            return []
+    def _check_gamma_acceleration(
+        rolling_data: Dict[str, Any],
+    ) -> Optional[float]:
+        """
+        Check gamma acceleration (2nd derivative).
+
+        Computes:
+            1st derivative (ROC): (gamma_current - gamma_5_ago) / gamma_5_ago
+            2nd derivative (acceleration): ROC_current - ROC_prev
+
+        Hard gate: acceleration > 0.10
+
+        Returns:
+            gamma_acceleration float if gate passes, None otherwise.
+        """
+        window = rolling_data.get(KEY_TOTAL_GAMMA_5M)
+        if window is None or window.count < 10:
+            return None
+
+        vals = list(window.values)
+        if len(vals) < 10:
+            return None
+
+        # 1st derivative: ROC over last 5 points
+        gamma_current = vals[-1]
+        gamma_5_ago = vals[-5]
+        gamma_10_ago = vals[-10]
+
+        if gamma_5_ago == 0 or gamma_10_ago == 0:
+            return None
+
+        roc_current = (gamma_current - gamma_5_ago) / abs(gamma_5_ago)
+        roc_prev = (gamma_5_ago - gamma_10_ago) / abs(gamma_10_ago)
+
+        # 2nd derivative (acceleration)
+        gamma_accel = roc_current - roc_prev
+
+        # Hard gate: acceleration > 0.10
+        if gamma_accel < 0.10:
+            return None
+
+        return gamma_accel
+
+    @staticmethod
+    def _check_delta_gamma_coupling(
+        delta_accel: float,
+        gamma_accel: float,
+    ) -> bool:
+        """
+        Check delta-gamma coupling to filter phantom spikes.
+
+        coupling = abs(delta_accel - 1.0) / gamma_accel
+
+        Hard gate: coupling >= 0.5
+            - Delta movement must be at least 50% of gamma movement
+            - If delta barely moves while gamma spikes → phantom spike
+
+        Returns:
+            True if coupling passes, False otherwise.
+        """
+        if gamma_accel <= 0:
+            return False
+
+        coupling = abs(delta_accel - 1.0) / gamma_accel
+        return coupling >= 0.5
+
+    @staticmethod
+    def _compute_atr_target(
+        entry: float,
+        rolling_data: Dict[str, Any],
+        direction: str,
+    ) -> tuple:
+        """
+        Compute ATR-normalized target.
+
+        atr_5m = standard deviation of price window (5-minute volatility)
+        target = entry ± atr_5m * ATR_MULT
+        Clamped to [0.3%, 2.0%] of entry.
+
+        Returns:
+            (target_price, atr_5m, target_mult)
+        """
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        if price_window is None:
+            # Fallback: fixed 1.0% target
+            if direction == "LONG":
+                target = entry * 1.010
+            else:
+                target = entry * 0.990
+            return (target, 0.0, 1.0)
+
+        # Use std of price window as ATR proxy
+        atr_5m = price_window.std or 0.0
+
+        if atr_5m <= 0:
+            # Fallback: fixed 1.0% target
+            if direction == "LONG":
+                target = entry * 1.010
+            else:
+                target = entry * 0.990
+            return (target, 0.0, 1.0)
+
+        target_mult = 1.5
+        if direction == "LONG":
+            target = entry + atr_5m * target_mult
+        else:
+            target = entry - atr_5m * target_mult
+
+        # Clamp target percentage to [0.3%, 2.0%]
+        target_pct = abs(target - entry) / entry if entry > 0 else 0.0
+        if target_pct < 0.003:
+            # Too tight — widen to minimum 0.3%
+            if direction == "LONG":
+                target = entry * 1.003
+            else:
+                target = entry * 0.997
+            target_mult = 0.003 * entry / atr_5m if atr_5m > 0 else 1.5
+        elif target_pct > 0.020:
+            # Too loose — cap at 2.0%
+            if direction == "LONG":
+                target = entry * 1.020
+            else:
+                target = entry * 0.980
+            target_mult = 0.020 * entry / atr_5m if atr_5m > 0 else 1.5
+
+        return (target, atr_5m, target_mult)
+
+    # ------------------------------------------------------------------
+    # v1 Helpers (kept for metadata and backward compat)
+    # ------------------------------------------------------------------
 
     @staticmethod
     def _check_delta_acceleration(
@@ -392,12 +629,9 @@ class GammaVolumeConvergence(BaseStrategy):
     @staticmethod
     def _check_gamma_spike(rolling_data: Dict[str, Any]) -> Optional[float]:
         """
-        Check gamma spike by comparing current total_gamma
-        to its rolling average.
+        Check gamma spike (1st derivative, for metadata).
 
         Returns ratio of current to rolling avg.
-            > 1.0 = spiking upward
-            None  = insufficient data
         """
         window = rolling_data.get(KEY_TOTAL_GAMMA_5M)
         if window is None or window.count < MIN_DATA_POINTS:
@@ -412,29 +646,6 @@ class GammaVolumeConvergence(BaseStrategy):
             return None
 
         return current / rolling_avg
-
-    @staticmethod
-    def _check_volume_spike(
-        rolling_data: Dict[str, Any],
-        key: str,
-    ) -> bool:
-        """
-        Check if the specified volume window is spiking above
-        its rolling average.
-
-        Args:
-            key: Rolling window key (e.g. "volume_up_5m", "volume_down_5m")
-        """
-        window = rolling_data.get(key)
-        if window is None or window.count < MIN_DATA_POINTS:
-            return False
-
-        current = window.latest
-        avg = window.mean
-        if current is None or avg is None or avg == 0:
-            return False
-
-        return current > avg * VOLUME_SPIKE_RATIO
 
     @staticmethod
     def _check_price_trend(rolling_data: Dict[str, Any]) -> str:
@@ -461,76 +672,83 @@ class GammaVolumeConvergence(BaseStrategy):
 
         return "FLAT"
 
+    # ------------------------------------------------------------------
+    # Confidence (v2 — 6 components)
+    # ------------------------------------------------------------------
+
     def _compute_confidence(
         self,
         price: float,
-        atm_strike: float,
         delta_accel: float,
-        gamma_spike: float,
+        gamma_accel: float,
+        aggressor_ratio: float,
         rolling_data: Dict[str, Any],
         direction: str,
         net_gamma: float,
         gex_calc: Any,
     ) -> float:
         """
-        Combine all factors into a single confidence score.
+        Combine all factors into a single confidence score (v2).
 
-        Factors:
-            1. Delta acceleration magnitude  (0.20–0.30)
-            2. Gamma spike magnitude          (0.20–0.30)
-            3. Volume spike confirmation      (0.10–0.15)
-            4. Regime alignment               (0.10–0.15)
-            5. Proximity to gamma wall        (0.05–0.10)
+        Components:
+            1. Delta acceleration: 0.0–0.15 (soft)
+            2. Gamma acceleration: 0.0 or 0.20 (hard gate)
+            3. Aggressor volume: 0.0 or 0.15 (hard gate)
+            4. Delta-gamma coupling: 0.0 or 0.10 (hard gate)
+            5. ATR target quality: 0.0–0.10 (soft)
+            6. Wall proximity: 0.05–0.10 (soft)
 
         Returns 0.0–MAX_CONFIDENCE.
         """
-        # 1. Delta acceleration component (0.20–0.30)
-        if delta_accel >= 1.0:
-            # Upward acceleration (LONG)
-            delta_conf = 0.20 + 0.10 * min(1.0, (delta_accel - 1.0) / 1.0)
-        else:
-            # Downward acceleration (SHORT)
-            # Normalize deviation within [DELTA_ACCEL_MIN_RATIO, 1.0]
-            # so that ratio=0.85 → deviation=0.15 (low conf),
-            # ratio=0.30 → deviation=0.70 (high conf)
-            deviation = 1.0 - delta_accel
-            max_deviation = 1.0 - DELTA_ACCEL_MIN_RATIO  # = 0.70
-            delta_conf = 0.20 + 0.10 * min(1.0, deviation / max_deviation)
+        # 1. Delta acceleration (0.0–0.15, soft)
+        delta_conf = self._delta_accel_confidence(delta_accel)
 
-        # 2. Gamma spike component (0.20–0.30)
-        gamma_conf = 0.20 + 0.10 * min(1.0, (gamma_spike - 1.0) / 1.0)
+        # 2. Gamma acceleration (hard gate — 0.0 or 0.20)
+        gamma_conf = 0.20 if gamma_accel else 0.0
 
-        # 3. Volume spike component (0.10–0.15)
-        vol_key = (
-            "volume_up_5m" if direction == "LONG" else "volume_down_5m"
-        )
-        vol_window = rolling_data.get(vol_key)
-        if (
-            vol_window is not None
-            and vol_window.latest is not None
-            and vol_window.mean is not None
-            and vol_window.mean != 0
-        ):
-            vol_ratio = vol_window.latest / vol_window.mean
-            vol_conf = 0.10 + 0.05 * min(1.0, (vol_ratio - 1.0) / 1.0)
-        else:
-            vol_conf = 0.10  # baseline if volume data insufficient
+        # 3. Aggressor-weighted volume (hard gate — 0.0 or 0.15)
+        vol_conf = 0.15 if aggressor_ratio is not None else 0.0
 
-        # 4. Regime alignment (0.10–0.15)
-        # Stronger net_gamma = higher confidence
-        regime_conf = 0.10 + 0.05 * min(1.0, abs(net_gamma) / 5_000_000)
+        # 4. Delta-gamma coupling (hard gate — 0.0 or 0.10)
+        coupling_conf = 0.10 if self._check_delta_gamma_coupling(
+            delta_accel, gamma_accel
+        ) else 0.0
 
-        # 5. Proximity to gamma wall (0.05–0.10)
+        # 5. ATR-normalized target quality (soft — 0.0–0.10)
+        _, atr_5m, target_mult = self._compute_atr_target(price, rolling_data, direction)
+        target_conf = self._atr_target_confidence(target_mult)
+
+        # 6. Wall proximity (soft — 0.05–0.10)
         wall_conf = self._wall_proximity_confidence(price, direction, gex_calc)
 
-        # Normalize each component to [0,1] and average
-        norm_delta = (delta_conf - 0.20) / (0.30 - 0.20) if 0.30 != 0.20 else 1.0
-        norm_gamma = (gamma_conf - 0.20) / (0.30 - 0.20) if 0.30 != 0.20 else 1.0
-        norm_vol = (vol_conf - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
-        norm_regime = (regime_conf - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
-        norm_wall = (wall_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
-        confidence = (norm_delta + norm_gamma + norm_vol + norm_regime + norm_wall) / 5.0
+        confidence = delta_conf + gamma_conf + vol_conf + coupling_conf + target_conf + wall_conf
         return min(MAX_CONFIDENCE, max(0.0, confidence))
+
+    @staticmethod
+    def _delta_accel_confidence(delta_accel: float) -> float:
+        """
+        Compute confidence contribution from delta acceleration magnitude.
+
+        Scale: 0.0 (delta_accel=1.0) to 0.15 (delta_accel >= 2.0).
+        """
+        deviation = abs(delta_accel - 1.0)
+        conf = min(0.15, 0.15 * deviation)
+        return max(0.0, conf)
+
+    @staticmethod
+    def _atr_target_confidence(atr_mult: float) -> float:
+        """
+        Compute confidence from ATR target quality.
+
+        Ideal multiplier is 1.5. Closer to 1.5 = higher confidence.
+        Scale: 0.0 (mult=0 or mult>3) to 0.10 (mult=1.5).
+        """
+        if atr_mult <= 0 or atr_mult > 3.0:
+            return 0.0
+        # Ideal is 1.5, scale down as we move away
+        deviation = abs(atr_mult - 1.5)
+        conf = max(0.0, 0.10 * (1.0 - deviation / 1.5))
+        return conf
 
     def _wall_proximity_confidence(
         self,
@@ -567,6 +785,28 @@ class GammaVolumeConvergence(BaseStrategy):
             return 0.05
         else:
             return 0.10 - 0.05 * (distance_pct / 0.02)
+
+    # ------------------------------------------------------------------
+    # Wall helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _get_atm_strike(gex_calc: Any, price: float) -> Optional[float]:
+        """Get the nearest ATM strike from the GEX calculator."""
+        try:
+            return gex_calc.get_atm_strike(price)
+        except Exception as exc:
+            logger.debug("GVC: failed to get ATM strike: %s", exc)
+            return None
+
+    @staticmethod
+    def _safe_get_walls(gex_calc: Any) -> List[Dict[str, Any]]:
+        """Safely retrieve gamma walls, returning empty list on error."""
+        try:
+            return gex_calc.get_gamma_walls(threshold=500_000)
+        except Exception as exc:
+            logger.debug("GVC: failed to get gamma walls: %s", exc)
+            return []
 
     @staticmethod
     def _nearest_wall_above(

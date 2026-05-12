@@ -246,6 +246,7 @@ class SyngexOrchestrator:
             KEY_VOLUME_UP_5M: RollingWindow(window_type="time", window_size=300),
             KEY_VOLUME_DOWN_5M: RollingWindow(window_type="time", window_size=300),
             KEY_TOTAL_GAMMA_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_GAMMA_ACCEL_5M: RollingWindow(window_type="time", window_size=300),
             KEY_IV_SKEW_5M: RollingWindow(window_type="time", window_size=300),
             KEY_FLOW_RATIO_5M: RollingWindow(window_type="time", window_size=300),
             KEY_EXTRINSIC_PROXY_5M: RollingWindow(window_type="time", window_size=300),
@@ -704,6 +705,18 @@ class SyngexOrchestrator:
                 self._rolling_data[KEY_TOTAL_GAMMA_5M].push(
                     self._calculator.get_net_gamma()
                 )
+
+                # gamma_accel_5m — 2nd derivative of gamma (v2 Ignition-Master)
+                gamma_window = self._rolling_data.get(KEY_TOTAL_GAMMA_5M)
+                if gamma_window is not None and gamma_window.count >= 10:
+                    vals = list(gamma_window.values)
+                    if len(vals) >= 10:
+                        # 1st derivative: ROC over last 5 points
+                        roc_current = (vals[-1] - vals[-5]) / abs(vals[-5]) if vals[-5] != 0 else 0.0
+                        roc_prev = (vals[-5] - vals[-10]) / abs(vals[-10]) if vals[-10] != 0 else 0.0
+                        # 2nd derivative (acceleration)
+                        gamma_accel = roc_current - roc_prev
+                        self._rolling_data[KEY_GAMMA_ACCEL_5M].push(gamma_accel)
 
                 # iv_skew_5m — avg call IV minus avg put IV
                 try:
