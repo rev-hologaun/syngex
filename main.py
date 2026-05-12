@@ -30,7 +30,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional, Type
+from typing import Any, Dict, List, Optional, Type
 
 import yaml
 
@@ -275,6 +275,8 @@ class SyngexOrchestrator:
             # Strike Concentration v2 (Liquidity-Momentum)
             KEY_ATR_5M: RollingWindow(window_type="time", window_size=300),
             KEY_STRIKE_DELTA_5M: RollingWindow(window_type="time", window_size=300),
+            # Prob Weighted Magnet v2 (Velocity-Magnet)
+            KEY_MAGNET_DELTA_5M: RollingWindow(window_type="time", window_size=300),
         }
 
         # Call/put update counters for volume_up/volume_down tracking
@@ -813,6 +815,54 @@ class SyngexOrchestrator:
                     atm_iv = self._calculator.get_iv_by_strike(atm_strike)
                     if atm_iv is not None and KEY_ATM_IV_5M in self._rolling_data:
                         self._rolling_data[KEY_ATM_IV_5M].push(atm_iv)
+
+                # ── prob_weighted_magnet v2: Magnet delta ROC tracking ──
+                try:
+                    if KEY_MAGNET_DELTA_5M in self._rolling_data and gex_summary:
+                        price = self._calculator.underlying_price
+                        if price and price > 0:
+                            # Identify magnet strikes: highest OI strikes below/above price
+                            magnet_strikes: List[float] = []
+                            for strike_str, strike_data in gex_summary.items():
+                                try:
+                                    s = float(strike_str)
+                                except (ValueError, TypeError):
+                                    continue
+                                call_oi = strike_data.get("call_oi", 0)
+                                put_oi = strike_data.get("put_oi", 0)
+                                total_oi = call_oi + put_oi
+                                if total_oi < 1.0:
+                                    continue
+                                if s < price:
+                                    magnet_strikes.append(s)
+                                elif s > price:
+                                    magnet_strikes.append(s)
+
+                            if magnet_strikes:
+                                # Pick the strike with highest OI as the magnet
+                                best_strike = None
+                                best_oi = 0.0
+                                for ms in magnet_strikes:
+                                    sd = gex_summary.get(str(ms), {})
+                                    oi = sd.get("call_oi", 0) + sd.get("put_oi", 0)
+                                    if oi > best_oi:
+                                        best_oi = oi
+                                        best_strike = ms
+
+                                if best_strike is not None:
+                                    delta_data = self._calculator.get_delta_by_strike(best_strike)
+                                    current_delta = delta_data.get("net_delta", 0.0)
+                                    # Compute ROC against 5 ticks ago
+                                    mag_window = self._rolling_data[KEY_MAGNET_DELTA_5M]
+                                    if mag_window.count >= 5:
+                                        delta_5_ago = mag_window.values[-5]
+                                        if abs(delta_5_ago) > 0:
+                                            delta_roc = (current_delta - delta_5_ago) / abs(delta_5_ago)
+                                            self._rolling_data[KEY_MAGNET_DELTA_5M].push(delta_roc, time.time())
+                                    else:
+                                        self._rolling_data[KEY_MAGNET_DELTA_5M].push(current_delta, time.time())
+                except Exception:
+                    pass
 
                 # ── theta_burn v2: Wall delta tracking ──
                 try:

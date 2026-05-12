@@ -66,6 +66,9 @@ KEY_CONSEC_SHORT = "consec_short"
 KEY_STRIKE_DELTA_5M = "strike_delta_5m"
 KEY_ATR_5M = "atr_5m"
 
+# --- Prob Weighted Magnet v2 (Velocity-Magnet) ---
+KEY_MAGNET_DELTA_5M = "magnet_delta_5m"
+
 # --- Convenience: all core keys in one tuple ---
 CORE_KEYS = (
     KEY_PRICE_5M,
@@ -108,7 +111,8 @@ ALL_KEYS = (*CORE_KEYS, *DEPTH_KEYS, KEY_FLOW_RATIO_5M,
             KEY_DEPTH_BID_SIZE_ROLLING, KEY_DEPTH_ASK_SIZE_ROLLING,
             KEY_SKEW_WIDTH_5M,
             KEY_STRIKE_DELTA_5M, KEY_ATR_5M,
-            KEY_SKEW_ROC_5M, KEY_DELTA_ROC_5M)
+            KEY_SKEW_ROC_5M, KEY_DELTA_ROC_5M,
+            KEY_MAGNET_DELTA_5M)
 
 __all__ = [
     "KEY_PRICE_5M", "KEY_PRICE_30M",
@@ -128,5 +132,6 @@ __all__ = [
     "KEY_SKEW_WIDTH_5M",
     "KEY_STRIKE_DELTA_5M", "KEY_ATR_5M",
     "KEY_SKEW_ROC_5M", "KEY_DELTA_ROC_5M",
+    "KEY_MAGNET_DELTA_5M",
     "CORE_KEYS", "DEPTH_KEYS", "ALL_KEYS",
 ]

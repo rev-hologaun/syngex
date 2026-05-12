@@ -432,6 +432,13 @@ full_data:
       max_confidence: 0.80
       min_data_points: 3
 
+      # === v2 Velocity-Magnet params ===
+      delta_roc_threshold: 0.05
+      liquidity_vacuum_ratio: 0.30
+      gamma_scale_base: 2.0
+      target_mult_cap: 3.0
+      target_min_pct: 0.005
+
   prob_distribution_shift:
     enabled: true
     tracker:
