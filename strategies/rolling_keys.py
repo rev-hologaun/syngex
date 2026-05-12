@@ -200,6 +200,31 @@ KEY_PHI_RATIO_5M = "phi_ratio_5m"
 KEY_PHI_TOTAL_5M = "phi_total_5m"
 KEY_PHI_TOTAL_SIGMA_5M = "phi_total_sigma_5m"
 
+# --- Non-default window sizes for RollingWindow initialization ---
+# Keys not listed here default to 300 seconds.
+ROLLING_WINDOW_SIZES: dict[str, int] = {
+    KEY_PRICE_30M: 1800,
+    KEY_SYNC_CORR_5M: 900,
+    KEY_SYNC_SIGMA_5M: 900,
+    KEY_SKEW_CHANGE_5M: 900,
+    KEY_VSI_MAGNITUDE_5M: 900,
+    KEY_BIGGEST_SIZE_5M: 900,
+    KEY_SMALLEST_SIZE_5M: 900,
+    KEY_CONCENTRATION_RATIO_5M: 900,
+    KEY_CONCENTRATION_SIGMA_5M: 900,
+    KEY_NUM_PARTICIPANTS_5M: 900,
+    KEY_SKEW_PSI_5M: 900,
+    KEY_SKEW_PSI_ROC_5M: 900,
+    KEY_SKEW_PSI_SIGMA_5M: 900,
+    KEY_CURVE_OMEGA_5M: 900,
+    KEY_CURVE_OMEGA_ROC_5M: 900,
+    KEY_CURVE_OMEGA_SIGMA_5M: 900,
+    KEY_PUT_SLOPE_5M: 900,
+    KEY_CALL_SLOPE_5M: 900,
+    KEY_DEPTH_BID_SIZE_ROLLING: 60,
+    KEY_DEPTH_ASK_SIZE_ROLLING: 60,
+}
+
 # --- Convenience: all core keys in one tuple ---
 CORE_KEYS = (
     KEY_PRICE_5M,
