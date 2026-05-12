@@ -655,7 +655,6 @@ async def collect_market_depth_agg(session, symbol, headers, raw_path, parsed_pa
                     else:
                         write_line(parsed_path, raw_data)
                     count += 1
-                    duration_seconds = max(0, duration_seconds - 1)
         except aiohttp.ClientResponseError as e:
             if e.status == 429:
                 backoff = min(retry_delay * 2, 120)
