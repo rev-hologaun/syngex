@@ -332,6 +332,28 @@ layer2:
       min_confidence: 0.40
       max_confidence: 0.90
 
+  depth_imbalance_momentum:
+    enabled: true
+    tracker:
+      max_hold_seconds: 1800
+    params:
+      # === Core IR params ===
+      ir_threshold_long: 3.0
+      ir_threshold_short: 0.6
+      ir_exit_threshold: 1.5
+      min_ir_data_points: 10
+      ir_roc_window: 5
+      ir_roc_threshold_long: 0.0
+      ir_roc_threshold_short: 0.0
+      min_avg_participants: 2.0
+      max_total_depth_decay: 0.05
+      volume_min_mult: 1.0
+      use_vamp_validation: true
+      stop_pct: 0.008
+      target_risk_mult: 2.0
+      min_confidence: 0.40
+      max_confidence: 0.90
+
 # Layer 3: Micro-Signal (1Hz) — 4 strategies
 layer3:
   gamma_volume_convergence:

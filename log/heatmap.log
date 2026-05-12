@@ -650,3 +650,11 @@ Werkzeug appears to be used in a production deployment. Consider switching to a 
 192.168.50.30 - - [11/May/2026 20:29:29] "GET /socket.io/?EIO=4&transport=polling&t=PuQEuUP HTTP/1.1" 200 -
 192.168.50.30 - - [11/May/2026 20:29:29] "POST /socket.io/?EIO=4&transport=polling&t=PuQEuUm&sid=Pn5BgvMMn0qIWlYSAAAA HTTP/1.1" 200 -
 192.168.50.30 - - [11/May/2026 20:29:29] "GET /socket.io/?EIO=4&transport=polling&t=PuQEuUn&sid=Pn5BgvMMn0qIWlYSAAAA HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8201
+ * Running on http://192.168.50.97:8201
+[33mPress CTRL+C to quit[0m
+192.168.50.30 - - [11/May/2026 22:19:35] "GET /socket.io/?EIO=4&transport=polling&t=PuQe5H5 HTTP/1.1" 200 -
+192.168.50.30 - - [11/May/2026 22:19:35] "POST /socket.io/?EIO=4&transport=polling&t=PuQe5HR&sid=itoe_gcIor-wOFEMAAAA HTTP/1.1" 200 -
+192.168.50.30 - - [11/May/2026 22:19:35] "GET /socket.io/?EIO=4&transport=polling&t=PuQe5HU&sid=itoe_gcIor-wOFEMAAAA HTTP/1.1" 200 -

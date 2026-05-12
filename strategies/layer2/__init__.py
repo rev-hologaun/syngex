@@ -21,6 +21,7 @@ from .delta_iv_divergence import DeltaIVDivergence
 from .vamp_momentum import VampMomentum
 from .obi_aggression_flow import ObiAggressionFlow
 from .depth_decay_momentum import DepthDecayMomentum
+from .depth_imbalance_momentum import DepthImbalanceMomentum
 
 __all__ = [
     "DeltaGammaSqueeze",
@@ -31,4 +32,5 @@ __all__ = [
     "VampMomentum",
     "ObiAggressionFlow",
     "DepthDecayMomentum",
+    "DepthImbalanceMomentum",
 ]

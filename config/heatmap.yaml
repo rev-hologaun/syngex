@@ -88,8 +88,8 @@ strategies:
     span_cols: 1
     span_rows: 1
   theta_burn:
-    row: 3
-    col: 4
+    row: 4
+    col: 5
     span_cols: 1
     span_rows: 1
   depth_decay_momentum:
@@ -99,6 +99,11 @@ strategies:
     span_rows: 1
   vamp_momentum:
     row: 3
+    col: 6
+    span_cols: 1
+    span_rows: 1
+  depth_imbalance_momentum:
+    row: 4
     col: 6
     span_cols: 1
     span_rows: 1

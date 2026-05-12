@@ -130,6 +130,9 @@ from strategies.rolling_keys import (
     KEY_DEPTH_TOP5_BID_5M,
     KEY_DEPTH_TOP5_ASK_5M,
     KEY_DEPTH_VOL_RATIO_5M,
+    KEY_IR_5M,
+    KEY_IR_ROC_5M,
+    KEY_IR_PARTICIPANTS_5M,
 )
 from strategies.layer1 import (
     GammaWallBounce,
@@ -148,6 +151,8 @@ from strategies.layer2 import (
     IVGEXDivergence,
     VampMomentum,
     ObiAggressionFlow,
+    DepthDecayMomentum,
+    DepthImbalanceMomentum,
 )
 from strategies.layer2.delta_iv_divergence import DeltaIVDivergence
 from strategies.layer3 import (
@@ -353,6 +358,10 @@ class SyngexOrchestrator:
             KEY_DEPTH_TOP5_BID_5M: RollingWindow(window_type="time", window_size=300),
             KEY_DEPTH_TOP5_ASK_5M: RollingWindow(window_type="time", window_size=300),
             KEY_DEPTH_VOL_RATIO_5M: RollingWindow(window_type="time", window_size=300),
+            # Depth Imbalance Momentum rolling windows
+            KEY_IR_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_IR_ROC_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_IR_PARTICIPANTS_5M: RollingWindow(window_type="time", window_size=300),
         }
 
         # Call/put update counters for volume_up/volume_down tracking
@@ -621,6 +630,8 @@ class SyngexOrchestrator:
                 "delta_iv_divergence": DeltaIVDivergence,
                 "vamp_momentum": VampMomentum,
                 "obi_aggression_flow": ObiAggressionFlow,
+                "depth_decay_momentum": DepthDecayMomentum,
+                "depth_imbalance_momentum": DepthImbalanceMomentum,
             },
             "layer3": {
                 "gamma_volume_convergence": GammaVolumeConvergence,
@@ -1356,6 +1367,34 @@ class SyngexOrchestrator:
                         self._rolling_data[KEY_VAMP_PARTICIPANTS_5M].push(avg_participants, ts)
                     if KEY_VAMP_DEPTH_DENSITY_5M in self._rolling_data:
                         self._rolling_data[KEY_VAMP_DEPTH_DENSITY_5M].push(total_size, ts)
+
+                    # ── Depth Imbalance Momentum: compute IR and ROC ──
+                    bid_size_window = self._rolling_data.get(KEY_DEPTH_BID_SIZE_5M)
+                    ask_size_window = self._rolling_data.get(KEY_DEPTH_ASK_SIZE_5M)
+
+                    ir = 0.0
+                    ir_roc = 0.0
+
+                    if bid_size_window and ask_size_window and bid_size_window.count > 0 and ask_size_window.count > 0:
+                        current_bid = bid_size_window.values[-1]
+                        current_ask = ask_size_window.values[-1]
+                        if current_ask > 0:
+                            ir = current_bid / current_ask
+                        else:
+                            ir = 999.0
+
+                        if bid_size_window.count >= 5 and ask_size_window.count >= 5:
+                            old_bid = bid_size_window.values[-5]
+                            old_ask = ask_size_window.values[-5]
+                            if old_ask > 0:
+                                old_ir = old_bid / old_ask
+                                if old_ir > 0:
+                                    ir_roc = (ir - old_ir) / old_ir
+
+                    if KEY_IR_5M in self._rolling_data:
+                        self._rolling_data[KEY_IR_5M].push(ir, ts)
+                    if KEY_IR_ROC_5M in self._rolling_data:
+                        self._rolling_data[KEY_IR_ROC_5M].push(ir_roc, ts)
 
                     # OBI computation from depth agg
                     total_depth = total_bid_size + total_ask_size

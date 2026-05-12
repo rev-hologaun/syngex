@@ -94,6 +94,11 @@ KEY_DEPTH_TOP5_BID_5M = "depth_top5_bid_5m"
 KEY_DEPTH_TOP5_ASK_5M = "depth_top5_ask_5m"
 KEY_DEPTH_VOL_RATIO_5M = "depth_vol_ratio_5m"
 
+# --- Depth Imbalance Momentum ---
+KEY_IR_5M = "imbalance_ratio_5m"
+KEY_IR_ROC_5M = "imbalance_ratio_roc_5m"
+KEY_IR_PARTICIPANTS_5M = "ir_participants_5m"
+
 # --- Convenience: all core keys in one tuple ---
 CORE_KEYS = (
     KEY_PRICE_5M,
@@ -171,7 +176,8 @@ ALL_KEYS = (*CORE_KEYS, *DEPTH_KEYS, KEY_FLOW_RATIO_5M,
             KEY_VAMP_PARTICIPANTS_5M, KEY_VAMP_DEPTH_DENSITY_5M,
             KEY_OBI_5M, KEY_AGGRESSIVE_BUY_VOL_5M, KEY_AGGRESSIVE_SELL_VOL_5M,
             KEY_AF_5M, KEY_TRADE_SIZE_5M,
-            *DEPTH_DECAY_KEYS)
+            *DEPTH_DECAY_KEYS,
+            KEY_IR_5M, KEY_IR_ROC_5M, KEY_IR_PARTICIPANTS_5M,)
 
 __all__ = [
     "KEY_PRICE_5M", "KEY_PRICE_30M",
@@ -200,5 +206,6 @@ __all__ = [
     "KEY_DEPTH_DECAY_BID_5M", "KEY_DEPTH_DECAY_ASK_5M",
     "KEY_DEPTH_TOP5_BID_5M", "KEY_DEPTH_TOP5_ASK_5M",
     "KEY_DEPTH_VOL_RATIO_5M",
+    "KEY_IR_5M", "KEY_IR_ROC_5M", "KEY_IR_PARTICIPANTS_5M",
     "CORE_KEYS", "DEPTH_KEYS", "DEPTH_DECAY_KEYS", "ALL_KEYS", "OBI_KEYS",
 ]
