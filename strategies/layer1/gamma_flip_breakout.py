@@ -300,6 +300,8 @@ class GammaFlipBreakout(BaseStrategy):
         confirmation_score: float = 0.5,
     ) -> Optional[Signal]:
         """SHORT fade: price rallied toward flip, expect rejection."""
+        price_window = rolling_data.get(KEY_PRICE_5M)
+
         # Stop: above price or other side of flip zone, whichever is closer
         stop_mult = POSITIVE_GAMMA_STOP_MULT  # 0.75 — tighter in positive gamma
         stop = max(price * (1 + stop_mult * STOP_OTHER_SIDE_PCT), flip_mid * (1 + STOP_OTHER_SIDE_PCT))
@@ -357,6 +359,8 @@ class GammaFlipBreakout(BaseStrategy):
         confirmation_score: float = 0.5,
     ) -> Optional[Signal]:
         """LONG fade: price dipped away from flip, expect bounce back."""
+        price_window = rolling_data.get(KEY_PRICE_5M)
+
         # Stop: below price or other side of flip zone
         stop_mult = POSITIVE_GAMMA_STOP_MULT  # 0.75 — tighter in positive gamma
         stop = min(price * (1 - stop_mult * STOP_OTHER_SIDE_PCT), flip_mid * (1 - STOP_OTHER_SIDE_PCT))
