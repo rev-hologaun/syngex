@@ -22,9 +22,56 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict
 
 from flask import Flask, render_template
+
+# ---------------------------------------------------------------------------
+# Running stats for O(1) strategy P&L and win-rate lookups
+# ---------------------------------------------------------------------------
+
+
+class RunningStats:
+    """Per-strategy running stats for P&L and win rate."""
+
+    def __init__(self) -> None:
+        self.total: float = 0.0  # cumulative P&L
+        self.wins: int = 0  # count of WIN outcomes
+        self.count: int = 0  # total signals resolved
+
+    def update(self, pnl: float, outcome: str) -> None:
+        self.total += pnl
+        self.count += 1
+        if outcome == "WIN":
+            self.wins += 1
+
+    @property
+    def win_rate(self) -> float:
+        return self.wins / self.count if self.count > 0 else 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"win_rate": round(self.win_rate, 4), "pnl": round(self.total, 2)}
+
+
+def _load_stats_from_disk(symbol: str) -> Dict[str, RunningStats]:
+    log_path = LOG_DIR / f"signal_outcomes_{symbol}.jsonl"
+    stats: Dict[str, RunningStats] = {}
+    if not log_path.exists():
+        return stats
+    for line in log_path.read_text().strip().splitlines():
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+            sid = entry.get("strategy_id", "")
+            if not sid:
+                continue
+            if sid not in stats:
+                stats[sid] = RunningStats()
+            stats[sid].update(entry.get("pnl", 0.0), entry.get("outcome", ""))
+        except json.JSONDecodeError:
+            pass
+    return stats
 from flask_socketio import SocketIO, emit, join_room
 
 # ---------------------------------------------------------------------------
@@ -32,6 +79,7 @@ from flask_socketio import SocketIO, emit, join_room
 # ---------------------------------------------------------------------------
 
 DATA_DIR = Path(__file__).parent / "data"
+LOG_DIR = Path(__file__).parent / "log"
 SYMBOL = os.environ.get("SYNGEX_SYMBOL", "UNKNOWN").upper()
 DATA_FILE = DATA_DIR / f"gex_state_{SYMBOL}.json"
 PORT = int(os.environ.get("HEATMAP_PORT", 8502))
@@ -58,6 +106,9 @@ logger.addHandler(_handler)
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "syngex-heatmap-secret-key"
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+
+# Pre-load strategy stats from disk (avoids O(n) JSONL parse every 1s)
+_strategy_stats: Dict[str, RunningStats] = _load_stats_from_disk(SYMBOL)
 
 # In-memory cache of latest data
 _latest_data: dict = {}
@@ -89,41 +140,13 @@ def _transform_for_socket(data: dict) -> dict:
     strategy_health = data.get("strategy_health", {})
     strategy_stats = {}
 
-    # Try to load signal tracker stats for win_rate/pnl
-    try:
-        log_dir = Path(__file__).parent / "log"
-        log_path = log_dir / f"signal_outcomes_{SYMBOL}.jsonl"
-        if log_path.exists():
-            # Parse the last entries per strategy for stats
-            strat_pnl = {}
-            strat_wins = {}
-            strat_total = {}
-            for line in log_path.read_text().strip().splitlines():
-                if not line.strip():
-                    continue
-                try:
-                    entry = json.loads(line)
-                    sid = entry.get("strategy_id", "")
-                    if sid:
-                        strat_pnl[sid] = strat_pnl.get(sid, 0.0) + entry.get("pnl", 0.0)
-                        strat_total[sid] = strat_total.get(sid, 0) + 1
-                        if entry.get("outcome") == "WIN":
-                            strat_wins[sid] = strat_wins.get(sid, 0) + 1
-                except json.JSONDecodeError:
-                    pass
-            for sid in strat_pnl:
-                total = strat_total.get(sid, 0)
-                wins = strat_wins.get(sid, 0)
-                strategy_stats[sid] = {
-                    "win_rate": wins / total if total > 0 else 0.0,
-                    "pnl": round(strat_pnl[sid], 2),
-                }
-    except Exception:
-        pass
+    # Use pre-loaded running stats (O(1) per strategy)
+    for sid, rs in _strategy_stats.items():
+        strategy_stats[sid] = rs.to_dict()
 
     # Load signal counts from per-symbol signal log (authoritative, survives restarts)
     try:
-        sig_log_path = log_dir / f"signals_{SYMBOL}.jsonl"
+        sig_log_path = LOG_DIR / f"signals_{SYMBOL}.jsonl"
         if sig_log_path.exists():
             strat_signal_counts: Dict[str, int] = {}
             for line in sig_log_path.read_text().strip().splitlines():
