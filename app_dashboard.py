@@ -527,16 +527,15 @@ state = load_gex_state()
 signals = load_signals(20)
 
 if state is None:
-    st.info(
-        "⏳ **Waiting for data…**  "
-        "Start the Syngex orchestrator (`python3 main.py TSLA dashboard`) and the "
-        "Command Center will update automatically."
-    )
-    # Poll until data arrives
-    while state is None:
-        time.sleep(1)
-        state = load_gex_state()
-        signals = load_signals(20)
+    # Use Streamlit-native spinner instead of blocking while loop
+    spinner = st.empty()
+    with spinner:
+        while state is None:
+            time.sleep(1)
+            state = load_gex_state()
+            signals = load_signals(20)
+            spinner.info("⏳ Waiting for data… Start the Syngex orchestrator.")
+    st.empty()  # Clear spinner after data arrives
 
 # All data loaded — render single-page Command Center layout
 render_header(state)
@@ -564,7 +563,7 @@ render_top_strikes(state)
 # Status footer
 render_status(state, signals)
 
-# Auto-refresh loop
-while True:
-    time.sleep(POLL_INTERVAL)
-    st.rerun()
+# Auto-refresh: st.rerun() triggers a full script rerun (Streamlit-native pattern).
+# Replaced blocking 'while True' loop — Streamlit scripts must complete normally.
+time.sleep(POLL_INTERVAL)
+st.rerun()
