@@ -225,10 +225,12 @@ def _push_latest() -> None:
             "micro_signals": {},
             "data_valid": False,
         }
-        socketio.emit("strategy_update", _latest_data)
+        with _latest_data_lock:
+            _latest_data = payload
+        socketio.emit("strategy_update", _latest_data, room=SYMBOL)
         return
     _latest_data = _transform_for_socket(data)
-    socketio.emit("strategy_update", _latest_data)
+    socketio.emit("strategy_update", _latest_data, room=SYMBOL)
 
 
 # ---------------------------------------------------------------------------
@@ -254,8 +256,11 @@ def _background_updater():
 def handle_connect():
     """Push latest data immediately on connect."""
     logger.info("Client connected")
-    if _latest_data:
-        emit("strategy_update", _latest_data)
+    join_room(SYMBOL)
+    with _latest_data_lock:
+        snapshot = dict(_latest_data)
+    if snapshot:
+        emit("strategy_update", snapshot, room=SYMBOL)
 
 
 @socketio.on("disconnect")
