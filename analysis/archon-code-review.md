@@ -25,12 +25,30 @@ Syngex is a well-architected options-trading signal pipeline with 41 strategies 
 
 | Issue | Status | Date | Details |
 |-------|--------|------|---------|
-| **C1** | ✅ **FIXED** | 2026-05-12 | `depth_snapshot` now properly populated by orchestrator (lines 2569-2570 in `main.py`) + strategy guard simplified (`gamma_wall_bounce.py` lines 168, 292) |
-| **C2** | ✅ **FIXED** | 2026-05-12 | `duration_seconds` countdown replaced with `time.monotonic()` deadline in all 4 `collect_*` functions (`orb_probe.py`) |
-| **C3** | ✅ **FIXED** | 2026-05-12 | Removed duplicate global signal logging from `SignalTracker._log_signal_to_disk()` — `StrategyEngine` is sole writer to `signals.jsonl` |
-| S1-S6 | ⏳ PENDING | — | Significant issues |
-| M1-M12 | ⏳ PENDING | — | Moderate issues |
-| D1-D12 | ⏳ PENDING | — | Minor issues |
+| **C1** | ✅ **FIXED** | 2026-05-12 | `depth_snapshot` properly populated by orchestrator + strategy guard simplified |
+| **C2** | ✅ **FIXED** | 2026-05-12 | `duration_seconds` countdown replaced with `time.monotonic()` deadline in all 4 `collect_*` functions |
+| **C3** | ✅ **FIXED** | 2026-05-12 | Removed duplicate global signal logging from `SignalTracker` |
+| **S1** | ✅ **FIXED** | 2026-05-12 | Added missing `from typing import Dict` to `app_heatmap.py` |
+| **S2** | ✅ **FIXED** | 2026-05-12 | Replaced blocking `while True` loops in `app_dashboard.py` with Streamlit-native `st.rerun()` |
+| **S4** | ✅ **FIXED** | 2026-05-12 | Implemented `@enforce_read_only` decorator + `ReadOnlyError` in `trade_guard.py` |
+| **S3** | 🔄 FORGE | 2026-05-12 | Auto-initialize rolling data from `rolling_keys.ALL_KEYS` (Forge session) |
+| **S5** | 🔄 FORGE | 2026-05-12 | Make `Signal.metadata` immutable via `MappingProxyType` (Forge session) |
+| **S6** | 🔄 FORGE | 2026-05-12 | Replace O(n) JSONL parse with running stats in `app_heatmap.py` (Forge session) |
+| **M1** | ✅ **FIXED** | 2026-05-12 | Removed dead `push_pair()` from `RollingWindow` (Forge — no callers existed) |
+| **M2** | ✅ **FIXED** | 2026-05-12 | Added `net_gamma_normalized` to `GEXCalculator.get_summary()` (Forge) |
+| **M3** | ✅ **FIXED** | 2026-05-12 | Added crash recovery for phi tick accumulators via `data/phi_state_{SYMBOL}.json` (Forge) |
+| **D9** | ✅ **FIXED** | 2026-05-12 | Added `threading.Lock` for `_latest_data` in `app_heatmap.py` (Forge) |
+| **D10** | ✅ **FIXED** | 2026-05-12 | UUID-based `signal_id` to prevent timestamp collisions in `SignalTracker` (Forge) |
+| **D11** | ✅ **FIXED** | 2026-05-12 | Format validation in `_parse_option_symbol` with warnings (Forge) |
+| **D12** | ✅ **FIXED** | 2026-05-12 | Room-targeted `strategy_update` emits + `join_room` on connect (Forge) |
+| **D1** | ✅ **FIXED** | 2026-05-12 | `socketio.run()` already present in `app_heatmap.py` |
+| **D2** | ✅ **FIXED** | 2026-05-12 | `load_gex_state()` and `load_signals()` already have try/except error handling |
+| **D3** | ✅ **FIXED** | 2026-05-12 | Removed unused `engine.dashboard` import from `main.py` |
+| **D4** | ✅ **FIXED** | 2026-05-12 | `strategies/__init__.py` and `layer1/__init__.py` `__all__` match actual exports |
+| **D5** | ✅ **FIXED** | 2026-05-12 | Added 30s timeout to TradeStationClient aiohttp session |
+| **D6** | ✅ **FIXED** | 2026-05-12 | Added `__all__` export to `config/trade_guard.py` |
+| **D7** | ✅ **FIXED** | 2026-05-12 | `risk_reward_ratio` already handles `risk == 0` returning `0.0` |
+| **D8** | ✅ **FIXED** | 2026-05-12 | `strategies/__init__.py` `__all__` already matches actual exports (same as D4) |
 
 ---
 
