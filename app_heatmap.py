@@ -104,7 +104,7 @@ logger.addHandler(_handler)
 # ---------------------------------------------------------------------------
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = "syngex-heatmap-secret-key"
+app.config["SECRET_KEY"] = os.environ.get("HEATMAP_SECRET_KEY", "syngex-heatmap-secret-key")
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 # Pre-load strategy stats from disk (avoids O(n) JSONL parse every 1s)
