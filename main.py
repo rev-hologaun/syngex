@@ -253,6 +253,10 @@ class SyngexOrchestrator:
             # iv_gex_divergence v2 — Volatility-Snap rolling windows
             KEY_IV_SKEW_GRADIENT_5M: RollingWindow(window_type="time", window_size=300),
             KEY_GAMMA_DENSITY_5M: RollingWindow(window_type="time", window_size=300),
+            # delta_iv_divergence v2 — Tail-Risk Divergence rolling windows
+            KEY_OTM_DELTA_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_OTM_IV_5M: RollingWindow(window_type="time", window_size=300),
+            KEY_DELTA_IV_CORR_5M: RollingWindow(window_type="time", window_size=300),
             # Depth / L2 rolling windows
             KEY_DEPTH_BID_SIZE_5M: RollingWindow(window_type="time", window_size=300),
             KEY_DEPTH_ASK_SIZE_5M: RollingWindow(window_type="time", window_size=300),
@@ -755,6 +759,82 @@ class SyngexOrchestrator:
                     atm_iv = self._calculator.get_iv_by_strike(atm_strike)
                     if atm_iv is not None and KEY_ATM_IV_5M in self._rolling_data:
                         self._rolling_data[KEY_ATM_IV_5M].push(atm_iv)
+
+                # ── delta_iv_divergence v2: OTM Delta/IV and Delta-IV correlation ──
+                try:
+                    price = self._calculator.underlying_price
+                    if price and price > 0 and gex_summary:
+                        # OTM Put strike: ATM - 5%
+                        otm_put_strike = atm_strike * 0.95 if atm_strike else None
+                        # OTM Call strike: ATM + 5%
+                        otm_call_strike = atm_strike * 1.05 if atm_strike else None
+
+                        # OTM Delta: use the closer of OTM put/call
+                        otm_delta = 0.0
+                        if otm_put_strike and otm_call_strike:
+                            put_data = self._calculator.get_delta_by_strike(otm_put_strike)
+                            call_data = self._calculator.get_delta_by_strike(otm_call_strike)
+                            put_delta = put_data.get("net_delta", 0.0)
+                            call_delta = call_data.get("net_delta", 0.0)
+                            # Use the one with larger absolute delta
+                            if abs(put_delta) >= abs(call_delta):
+                                otm_delta = put_delta
+                            else:
+                                otm_delta = call_delta
+                        elif otm_put_strike:
+                            put_data = self._calculator.get_delta_by_strike(otm_put_strike)
+                            otm_delta = put_data.get("net_delta", 0.0)
+                        elif otm_call_strike:
+                            call_data = self._calculator.get_delta_by_strike(otm_call_strike)
+                            otm_delta = call_data.get("net_delta", 0.0)
+
+                        if KEY_OTM_DELTA_5M in self._rolling_data:
+                            self._rolling_data[KEY_OTM_DELTA_5M].push(otm_delta)
+
+                        # OTM IV: use the closer of OTM put/call IV
+                        otm_iv = 0.0
+                        if otm_put_strike and otm_call_strike:
+                            put_iv = self._calculator.get_iv_by_strike(otm_put_strike)
+                            call_iv = self._calculator.get_iv_by_strike(otm_call_strike)
+                            if put_iv is not None and call_iv is not None:
+                                otm_iv = max(put_iv, call_iv) if put_iv > 0 and call_iv > 0 else (put_iv or call_iv or 0.0)
+                            elif put_iv is not None:
+                                otm_iv = put_iv
+                            elif call_iv is not None:
+                                otm_iv = call_iv
+                        elif otm_put_strike:
+                            otm_iv = self._calculator.get_iv_by_strike(otm_put_strike) or 0.0
+                        elif otm_call_strike:
+                            otm_iv = self._calculator.get_iv_by_strike(otm_call_strike) or 0.0
+
+                        if otm_iv > 0 and KEY_OTM_IV_5M in self._rolling_data:
+                            self._rolling_data[KEY_OTM_IV_5M].push(otm_iv)
+
+                        # Delta-IV correlation: rolling correlation between
+                        # KEY_ATM_DELTA_5M and KEY_ATM_IV_5M over last 10 points
+                        if (KEY_ATM_DELTA_5M in self._rolling_data
+                                and KEY_ATM_IV_5M in self._rolling_data):
+                            delta_vals = self._rolling_data[KEY_ATM_DELTA_5M].values
+                            iv_vals = self._rolling_data[KEY_ATM_IV_5M].values
+                            n = min(len(delta_vals), len(iv_vals))
+                            if n >= 10:
+                                # Use last 10 points
+                                d = delta_vals[-10:]
+                                v = iv_vals[-10:]
+                                # Pearson correlation
+                                mean_d = sum(d) / 10.0
+                                mean_v = sum(v) / 10.0
+                                num = sum((di - mean_d) * (vi - mean_v) for di, vi in zip(d, v))
+                                den_d = (sum((di - mean_d) ** 2 for di in d)) ** 0.5
+                                den_v = (sum((vi - mean_v) ** 2 for vi in v)) ** 0.5
+                                if den_d > 0 and den_v > 0:
+                                    corr = num / (den_d * den_v)
+                                else:
+                                    corr = 0.0
+                                if KEY_DELTA_IV_CORR_5M in self._rolling_data:
+                                    self._rolling_data[KEY_DELTA_IV_CORR_5M].push(corr)
+                except Exception:
+                    pass
 
                 # Push flow_ratio to rolling window for call_put_flow_asymmetry v2
                 try:

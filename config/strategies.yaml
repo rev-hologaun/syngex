@@ -243,7 +243,32 @@ layer2:
     tracker:
       max_hold_seconds: 2700
     params:
-      min_confidence: 0.35
+      # === v1 params (kept for backwards compat) ===
+      min_confidence: 0.40
+      stop_pct: 0.008
+      target_risk_mult: 2.0
+
+      # === v2 Tail-Risk Divergence params ===
+      # Skew gradient
+      skew_otm_pct: 0.05
+      skew_divergence_threshold: 0.10
+
+      # Decoupling coefficient
+      decoupling_corr_window: 10
+      decoupling_history_window: 30
+      decoupling_threshold: 0.50
+
+      # Gamma regime
+      gamma_density_window_pct: 0.01
+      gamma_density_decline_threshold: 0.70
+
+      # Volatility-scaled targets
+      target_iv_expansion_mult: 2.0
+      target_iv_expansion_cap: 4.0
+
+      # Wall proximity
+      wall_proximity_pct: 0.01
+      wall_proximity_bonus: 0.10
 
 # Layer 3: Micro-Signal (1Hz) — 4 strategies
 layer3:

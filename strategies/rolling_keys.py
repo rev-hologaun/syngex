@@ -43,6 +43,11 @@ KEY_PROB_MOMENTUM_5M = "prob_momentum_5m"
 KEY_IV_SKEW_GRADIENT_5M = "iv_skew_gradient_5m"
 KEY_GAMMA_DENSITY_5M = "gamma_density_5m"
 
+# --- Delta-IV Divergence v2 (Tail-Risk Divergence) ---
+KEY_OTM_DELTA_5M = "otm_delta_5m"
+KEY_OTM_IV_5M = "otm_iv_5m"
+KEY_DELTA_IV_CORR_5M = "delta_iv_corr_5m"
+
 # --- Signal tracking keys (used in rolling_data for signal state) ---
 KEY_CONSEC_LONG = "consec_long"
 KEY_CONSEC_SHORT = "consec_short"
@@ -61,6 +66,9 @@ CORE_KEYS = (
     KEY_IV_SKEW_5M,
     KEY_ATM_DELTA_5M,
     KEY_ATM_IV_5M,
+    KEY_OTM_DELTA_5M,
+    KEY_OTM_IV_5M,
+    KEY_DELTA_IV_CORR_5M,
 )
 
 # Depth keys tuple
@@ -78,6 +86,7 @@ DEPTH_KEYS = (
 ALL_KEYS = (*CORE_KEYS, *DEPTH_KEYS, KEY_FLOW_RATIO_5M,
             KEY_EXTRINSIC_PROXY_5M, KEY_PROB_MOMENTUM_5M,
             KEY_IV_SKEW_GRADIENT_5M, KEY_GAMMA_DENSITY_5M,
+            KEY_OTM_DELTA_5M, KEY_OTM_IV_5M, KEY_DELTA_IV_CORR_5M,
             KEY_CONSEC_LONG, KEY_CONSEC_SHORT,
             KEY_DEPTH_BID_SIZE_ROLLING, KEY_DEPTH_ASK_SIZE_ROLLING)
 
@@ -87,6 +96,7 @@ __all__ = [
     "KEY_VOLUME_5M", "KEY_VOLUME_DOWN_5M", "KEY_VOLUME_UP_5M",
     "KEY_TOTAL_DELTA_5M", "KEY_WALL_DELTA_5M", "KEY_TOTAL_GAMMA_5M", "KEY_IV_SKEW_5M",
     "KEY_ATM_DELTA_5M", "KEY_ATM_IV_5M",
+    "KEY_OTM_DELTA_5M", "KEY_OTM_IV_5M", "KEY_DELTA_IV_CORR_5M",
     "KEY_FLOW_RATIO_5M",
     "KEY_IV_SKEW_GRADIENT_5M", "KEY_GAMMA_DENSITY_5M",
     "KEY_DEPTH_BID_SIZE_5M", "KEY_DEPTH_ASK_SIZE_5M", "KEY_DEPTH_SPREAD_5M",
