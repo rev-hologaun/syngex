@@ -42,6 +42,7 @@ from strategies.rolling_keys import (
     KEY_VOLUME_SPIKE_5M,
     KEY_DEPTH_SPREAD_5M,
     KEY_VOLUME_5M,
+    KEY_VAMP_LEVELS,
 )
 
 logger = logging.getLogger("Syngex.Strategies.VortexCompressionBreakout")
@@ -226,7 +227,7 @@ class VortexCompressionBreakout(BaseStrategy):
         """
         VAMP validation: VAMP direction should align with signal direction.
         """
-        vamp_levels = rolling_data.get("vamp_levels")
+        vamp_levels = rolling_data.get(KEY_VAMP_LEVELS)
         if not vamp_levels:
             return True
         vamp_mid_dev = vamp_levels.get("vamp_mid_dev", 0)

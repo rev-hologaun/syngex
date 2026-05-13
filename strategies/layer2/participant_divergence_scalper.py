@@ -52,6 +52,7 @@ from strategies.rolling_keys import (
     KEY_DEPTH_ASK_LEVELS_5M,
     KEY_DEPTH_SPREAD_5M,
     KEY_VOLUME_5M,
+    KEY_VAMP_LEVELS,
 )
 
 logger = logging.getLogger("Syngex.Strategies.ParticipantDivergenceScalper")
@@ -385,7 +386,7 @@ class ParticipantDivergenceScalper(BaseStrategy):
         """
         VAMP validation: VAMP direction should align with signal direction.
         """
-        vamp_levels = rolling_data.get("vamp_levels")
+        vamp_levels = rolling_data.get(KEY_VAMP_LEVELS)
         if not vamp_levels:
             return True  # No VAMP data — pass
 

@@ -42,6 +42,7 @@ from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_window import RollingWindow
 from strategies.rolling_keys import (
+    KEY_MARKET_DEPTH_AGG,
     KEY_PRICE_5M,
     KEY_PRICE_30M,
     KEY_VOLUME_5M,
@@ -246,7 +247,7 @@ class ProbWeightedMagnet(BaseStrategy):
 
         Returns True if vacuum confirmed (thin side), False otherwise.
         """
-        depth = data.get("market_depth_agg", {})
+        depth = data.get(KEY_MARKET_DEPTH_AGG, {})
         if not depth:
             return True  # No depth data = pass (backwards compat)
 
@@ -508,7 +509,7 @@ class ProbWeightedMagnet(BaseStrategy):
                 skew_roc = (skew_window.latest - first_skew) / abs(first_skew)
 
         # Compute liquidity vacuum ratio for metadata
-        depth = data.get("market_depth_agg", {})
+        depth = data.get(KEY_MARKET_DEPTH_AGG, {})
         vacuum_ratio = 0.0
         if depth:
             bids = depth.get("bids", [])
@@ -681,7 +682,7 @@ class ProbWeightedMagnet(BaseStrategy):
                 skew_roc = (skew_window.latest - first_skew) / abs(first_skew)
 
         # Compute liquidity vacuum ratio for metadata
-        depth = data.get("market_depth_agg", {})
+        depth = data.get(KEY_MARKET_DEPTH_AGG, {})
         vacuum_ratio = 0.0
         if depth:
             bids = depth.get("bids", [])

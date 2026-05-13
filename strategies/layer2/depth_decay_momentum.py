@@ -37,6 +37,8 @@ from strategies.rolling_keys import (
     KEY_DEPTH_TOP5_BID_5M,
     KEY_DEPTH_TOP5_ASK_5M,
     KEY_DEPTH_VOL_RATIO_5M,
+    KEY_VAMP_LEVELS,
+    KEY_MARKET_DEPTH_AGG,
 )
 
 logger = logging.getLogger("Syngex.Strategies.DepthDecayMomentum")
@@ -173,7 +175,7 @@ class DepthDecayMomentum(BaseStrategy):
         use_vamp_bias = params.get("use_vamp_bias", True)
         vamp_bias_aligned = True
         if use_vamp_bias:
-            vamp_levels = rolling_data.get("vamp_levels")
+            vamp_levels = rolling_data.get(KEY_VAMP_LEVELS)
             if vamp_levels:
                 vamp_mid_dev = vamp_levels.get("mid_price", 0)
                 # VAMP > mid → book is bid-weighted → supports ask-side evaporation (bullish)
@@ -299,7 +301,7 @@ class DepthDecayMomentum(BaseStrategy):
         c2 = 1.0 - normalize(current_vol_ratio, 0.0, max_vol_ratio)
 
         # 3. Concentration: concentration from 0→1, higher = higher
-        market_depth = rolling_data.get("market_depth_agg", {})
+        market_depth = rolling_data.get(KEY_MARKET_DEPTH_AGG, {})
         bid_levels = market_depth.get("bid_levels", [])
         ask_levels = market_depth.get("ask_levels", [])
         if direction == "LONG":
@@ -315,7 +317,7 @@ class DepthDecayMomentum(BaseStrategy):
         use_vamp_bias = params.get("use_vamp_bias", True)
         vamp_mid_dev = 0.0
         if use_vamp_bias:
-            vamp_levels = rolling_data.get("vamp_levels")
+            vamp_levels = rolling_data.get(KEY_VAMP_LEVELS)
             if vamp_levels:
                 vamp_mid_dev = vamp_levels.get("mid_price", 0)
         vamp_alignment = 1.0 if ((direction == "LONG" and vamp_mid_dev >= 0) or (direction == "SHORT" and vamp_mid_dev <= 0)) else 0.0

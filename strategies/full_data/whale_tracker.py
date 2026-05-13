@@ -32,6 +32,7 @@ from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_keys import (
     KEY_BIGGEST_SIZE_5M,
+    KEY_MARKET_DEPTH_AGG,
     KEY_SMALLEST_SIZE_5M,
     KEY_CONCENTRATION_RATIO_5M,
     KEY_CONCENTRATION_SIGMA_5M,
@@ -115,7 +116,7 @@ class WhaleTracker(BaseStrategy):
 
         # 2. Determine signal direction based on which side is more concentrated
         # Extract side info from the last depth aggregate if available
-        depth_data = rolling_data.get("market_depth_agg", {})
+        depth_data = rolling_data.get(KEY_MARKET_DEPTH_AGG, {})
         bid_levels = depth_data.get("bid_levels", [])
         ask_levels = depth_data.get("ask_levels", [])
 

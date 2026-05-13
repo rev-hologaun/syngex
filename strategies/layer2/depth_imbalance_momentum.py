@@ -35,6 +35,7 @@ from strategies.rolling_keys import (
     KEY_IR_5M,
     KEY_IR_ROC_5M,
     KEY_IR_PARTICIPANTS_5M,
+    KEY_VAMP_LEVELS,
     KEY_VOLUME_5M,
 )
 
@@ -306,7 +307,7 @@ class DepthImbalanceMomentum(BaseStrategy):
         If VAMP is far from mid, the book weight doesn't reflect
         actual price movement potential.
         """
-        vamp_levels = rolling_data.get("vamp_levels")
+        vamp_levels = rolling_data.get(KEY_VAMP_LEVELS)
         if not vamp_levels:
             return True  # No VAMP data — pass
 
@@ -366,7 +367,7 @@ class DepthImbalanceMomentum(BaseStrategy):
 
         # 5. VAMP alignment: vamp_mid_dev from -0.001→0.001
         vamp_alignment = 1.0
-        vamp_levels = rolling_data.get("vamp_levels")
+        vamp_levels = rolling_data.get(KEY_VAMP_LEVELS)
         if vamp_levels:
             vamp_mid_dev = vamp_levels.get("vamp_mid_dev", 0)
             if direction == "LONG" and vamp_mid_dev < 0:

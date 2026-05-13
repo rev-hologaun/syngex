@@ -61,6 +61,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_keys import (
+    KEY_MARKET_DEPTH_AGG,
     KEY_PRICE_5M,
     KEY_PRICE_30M,
     KEY_VOLUME_5M,
@@ -261,7 +262,7 @@ class ThetaBurn(BaseStrategy):
 
         # HARD GATE 2: Wall liquidity — wall must have depth to hold
         liquidity_ok, bid_depth, ask_depth, liquidity_status = self._check_wall_liquidity(
-            data={"market_depth_agg": None},  # placeholder; will be set below
+            data={KEY_MARKET_DEPTH_AGG: None},  # placeholder; will be set below
             wall_strike=wall_strike,
             direction="LONG",
             mode="bounce",
@@ -768,7 +769,7 @@ class ThetaBurn(BaseStrategy):
         """
         # market_depth_agg is stored in rolling_data under a special key
         # or passed via data dict. Check rolling_data first.
-        depth_data = rolling_data.get("market_depth_agg", {})
+        depth_data = rolling_data.get(KEY_MARKET_DEPTH_AGG, {})
         if not depth_data:
             return 0.0, 0.0, "unknown"
 
@@ -812,7 +813,7 @@ class ThetaBurn(BaseStrategy):
 
         Returns (ok, bid_depth, ask_depth, status).
         """
-        depth = data.get("market_depth_agg", {})
+        depth = data.get(KEY_MARKET_DEPTH_AGG, {})
         if not depth:
             return True, 0.0, 0.0, "unknown"  # No depth data = pass (backwards compat)
 

@@ -178,6 +178,12 @@ KEY_LIQUIDITY_DENSITY_5M = "liquidity_density_5m"
 KEY_PARTICIPANT_EQUILIBRIUM_5M = "participant_equilibrium_5m"
 KEY_VOLUME_SPIKE_5M = "volume_spike_5m"
 
+# --- Market Depth Aggregation ---
+KEY_MARKET_DEPTH_AGG = "market_depth_agg"
+
+# --- VAMP Levels ---
+KEY_VAMP_LEVELS = "vamp_levels"
+
 # --- IV Skew Dynamics (SKEW-ALPHA) ---
 KEY_SKEW_PSI_5M = "skew_psi_5m"
 KEY_SKEW_PSI_ROC_5M = "skew_psi_roc_5m"
@@ -393,5 +399,6 @@ __all__ = [
     "KEY_NUM_PARTICIPANTS_5M",
     "KEY_SPREAD_ZSCORE_5M", "KEY_LIQUIDITY_DENSITY_5M",
     "KEY_PARTICIPANT_EQUILIBRIUM_5M", "KEY_VOLUME_SPIKE_5M",
+    "KEY_MARKET_DEPTH_AGG", "KEY_VAMP_LEVELS",
     "CORE_KEYS", "DEPTH_KEYS", "DEPTH_DECAY_KEYS", "ALL_KEYS", "OBI_KEYS",
 ]

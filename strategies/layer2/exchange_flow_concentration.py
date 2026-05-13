@@ -41,6 +41,7 @@ from strategies.rolling_keys import (
     KEY_VSI_ROC_5M,
     KEY_IEX_INTENT_5M,
     KEY_VOLUME_5M,
+    KEY_VAMP_LEVELS,
 )
 
 logger = logging.getLogger("Syngex.Strategies.ExchangeFlowConcentration")
@@ -306,7 +307,7 @@ class ExchangeFlowConcentration(BaseStrategy):
         If VAMP is bid-weighted, LONG signals are more credible.
         If VAMP is ask-weighted, SHORT signals are more credible.
         """
-        vamp_levels = rolling_data.get("vamp_levels")
+        vamp_levels = rolling_data.get(KEY_VAMP_LEVELS)
         if not vamp_levels:
             return True  # No VAMP data — pass
 

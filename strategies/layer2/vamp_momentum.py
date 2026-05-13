@@ -34,6 +34,7 @@ from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_keys import (
     KEY_VAMP_5M,
+    KEY_VAMP_LEVELS,
     KEY_VAMP_MID_DEV_5M,
     KEY_VAMP_ROC_5M,
     KEY_VAMP_PARTICIPANTS_5M,
@@ -78,7 +79,7 @@ class VampMomentum(BaseStrategy):
         regime = data.get("regime", "")
 
         # 1. Get VAMP levels from rolling_data
-        vamp_levels = rolling_data.get("vamp_levels")
+        vamp_levels = rolling_data.get(KEY_VAMP_LEVELS)
         if vamp_levels is None:
             return []
 

@@ -45,7 +45,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
-from strategies.rolling_keys import KEY_PRICE_5M, KEY_VOLUME_5M, KEY_ATR_5M, KEY_STRIKE_DELTA_5M
+from strategies.rolling_keys import KEY_PRICE_5M, KEY_VOLUME_5M, KEY_ATR_5M, KEY_STRIKE_DELTA_5M, KEY_MARKET_DEPTH_AGG
 
 logger = logging.getLogger("Syngex.Strategies.StrikeConcentration")
 
@@ -865,7 +865,7 @@ class StrikeConcentration(BaseStrategy):
         If depth data unavailable, return True (backwards compat —
             fall back to volume-only checks).
         """
-        depth_data = rolling_data.get("market_depth_agg")
+        depth_data = rolling_data.get(KEY_MARKET_DEPTH_AGG)
         if depth_data is None:
             # No depth data available — fall back to volume-only (backwards compat)
             return True
@@ -1290,7 +1290,7 @@ class StrikeConcentration(BaseStrategy):
         # 5. Liquidity vacuum component (0.10–0.15) — NEW
         # This is a hard gate, so if we got here, the vacuum passed
         # Score based on how extreme the vacuum is
-        depth_data = rolling_data.get("market_depth_agg")
+        depth_data = rolling_data.get(KEY_MARKET_DEPTH_AGG)
         if depth_data is not None:
             bid_levels = depth_data.get("bid_levels", [])
             ask_levels = depth_data.get("ask_levels", [])

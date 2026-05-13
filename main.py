@@ -202,6 +202,8 @@ from strategies.rolling_keys import (
     KEY_LIQUIDITY_DENSITY_5M,
     KEY_PARTICIPANT_EQUILIBRIUM_5M,
     KEY_VOLUME_SPIKE_5M,
+    KEY_MARKET_DEPTH_AGG,
+    KEY_VAMP_LEVELS,
 )
 from strategies.layer1 import (
     GammaWallBounce,
@@ -1216,7 +1218,7 @@ class SyngexOrchestrator:
 
                         if gamma_walls:
                             # Get liquidity levels from depth aggregates
-                            depth_agg = self._rolling_data.get("market_depth_agg", {})
+                            depth_agg = self._rolling_data.get(KEY_MARKET_DEPTH_AGG, {})
                             bid_levels = depth_agg.get("bid_levels", [])
                             ask_levels = depth_agg.get("ask_levels", [])
 
@@ -1637,7 +1639,7 @@ class SyngexOrchestrator:
 
             # ── Depth data capture (L2/TotalView) ──
             msg_type = data.get("type", "")
-            if msg_type in ("market_depth_quotes", "market_depth_agg"):
+            if msg_type in ("market_depth_quotes", KEY_MARKET_DEPTH_AGG):
                 bids = data.get("Bids", [])
                 asks = data.get("Asks", [])
 
@@ -2029,10 +2031,10 @@ class SyngexOrchestrator:
                     self._rolling_data[KEY_DEPTH_ASK_SIZE_ROLLING].push(total_ask_size, ts)
 
                 # Store raw depth levels for StrikeConcentration v2 liquidity vacuum
-                if msg_type == "market_depth_agg":
+                if msg_type == KEY_MARKET_DEPTH_AGG:
                     bid_levels = [{"price": float(b.get("Price", 0)), "size": int(b.get("TotalSize", 0))} for b in bids]
                     ask_levels = [{"price": float(a.get("Price", 0)), "size": int(a.get("TotalSize", 0))} for a in asks]
-                    self._rolling_data["market_depth_agg"] = {
+                    self._rolling_data[KEY_MARKET_DEPTH_AGG] = {
                         "bid_levels": bid_levels,
                         "ask_levels": ask_levels,
                     }
@@ -2049,7 +2051,7 @@ class SyngexOrchestrator:
                          "participants": int(a.get("NumParticipants", 1))}
                         for a in asks[:N_TOP_LEVELS]
                     ]
-                    self._rolling_data["vamp_levels"] = {
+                    self._rolling_data[KEY_VAMP_LEVELS] = {
                         "bid_levels": bid_levels_full,
                         "ask_levels": ask_levels_full,
                         "mid_price": data.get("mid_price", 0),
@@ -2115,8 +2117,8 @@ class SyngexOrchestrator:
                         self._rolling_data[KEY_DEPTH_DECAY_ASK_5M].push(ask_depth_roc, ts)
 
                     # Top-5 level depth (for magnitude gate)
-                    bid_levels = self._rolling_data.get("market_depth_agg", {}).get("bid_levels", [])
-                    ask_levels = self._rolling_data.get("market_depth_agg", {}).get("ask_levels", [])
+                    bid_levels = self._rolling_data.get(KEY_MARKET_DEPTH_AGG, {}).get("bid_levels", [])
+                    ask_levels = self._rolling_data.get(KEY_MARKET_DEPTH_AGG, {}).get("ask_levels", [])
 
                     top5_bid_depth = sum(l["size"] for l in bid_levels[:5])
                     top5_ask_depth = sum(l["size"] for l in ask_levels[:5])
@@ -2248,7 +2250,7 @@ class SyngexOrchestrator:
                     # ── Whale Tracker — Concentration Ratio Engine ──
                     # Ω_conc = biggest_size / smallest_size at best levels
                     try:
-                        if msg_type == "market_depth_agg" and bids and asks:
+                        if msg_type == KEY_MARKET_DEPTH_AGG and bids and asks:
                             top_bids = bids[:5] if len(bids) >= 5 else bids
                             top_asks = asks[:5] if len(asks) >= 5 else asks
 

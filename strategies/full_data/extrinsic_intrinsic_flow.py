@@ -58,6 +58,7 @@ from strategies.rolling_keys import (
     KEY_ATM_IV_5M,
     KEY_VOLUME_UP_5M,
     KEY_VOLUME_DOWN_5M,
+    KEY_MARKET_DEPTH_AGG,
 )
 
 logger = logging.getLogger("Syngex.Strategies.ExtrinsicIntrinsicFlow")
@@ -263,7 +264,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         Returns True if gate passes, False otherwise.
         Returns True if depth data unavailable (backwards compat).
         """
-        depth = data.get("market_depth_agg", {})
+        depth = data.get(KEY_MARKET_DEPTH_AGG, {})
         bids = depth.get("bids", [])
         asks = depth.get("asks", [])
 
@@ -473,7 +474,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
             return None
 
         # Compute aggressor ratio for confidence scaling
-        depth = data.get("market_depth_agg", {})
+        depth = data.get(KEY_MARKET_DEPTH_AGG, {})
         bids = depth.get("bids", [])
         asks = depth.get("asks", [])
         aggressor_ratio = None
@@ -605,7 +606,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
             return None
 
         # Compute aggressor ratio for confidence scaling
-        depth = data.get("market_depth_agg", {})
+        depth = data.get(KEY_MARKET_DEPTH_AGG, {})
         bids = depth.get("bids", [])
         asks = depth.get("asks", [])
         aggressor_ratio = None
@@ -751,7 +752,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         # 3. Delta-skew coupling gate — not required for fade
 
         # Compute aggressor ratio for confidence scaling (use available depth)
-        depth = data.get("market_depth_agg", {})
+        depth = data.get(KEY_MARKET_DEPTH_AGG, {})
         bids = depth.get("bids", [])
         asks = depth.get("asks", [])
         aggressor_ratio = None
