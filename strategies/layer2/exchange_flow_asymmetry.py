@@ -49,7 +49,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.ExchangeFlowAsymmetry")
 
-MIN_CONFIDENCE = 0.30
+MIN_CONFIDENCE = 0.15
 
 
 class ExchangeFlowAsymmetry(BaseStrategy):

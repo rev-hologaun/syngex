@@ -88,7 +88,7 @@ VOLUME_SPIKE_RATIO = 1.30               # 130% of avg (1.3×)
 STOP_PCT = 0.005                        # 0.5% stop
 
 # Min confidence — raised from 0.25 to 0.35 (v2 Conviction-Master)
-MIN_CONFIDENCE = 0.30
+MIN_CONFIDENCE = 0.15
 
 # Min data points — need more data for extrinsic tracking
 MIN_DATA_POINTS = 5

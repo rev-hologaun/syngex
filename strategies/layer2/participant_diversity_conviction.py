@@ -35,7 +35,14 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.ParticipantDiversityConviction")
 
-MIN_CONFIDENCE = 0.30
+MIN_CONFIDENCE = 0.15
+
+
+def normalize(val: float, vmin: float, vmax: float) -> float:
+    """Normalize a value to [0, 1] given a min/max range."""
+    if vmax == vmin:
+        return 0.5
+    return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
 
 
 class ParticipantDiversityConviction(BaseStrategy):
@@ -198,10 +205,7 @@ class ParticipantDiversityConviction(BaseStrategy):
             conviction=current_conviction,
             direction=direction,
             rolling_data=rolling_data,
-            data=data,
-            params=params,
-            regime=regime,
-            gex_calc=gex_calc,
+            data=data, params=params, regime=regime, gex_calc=gex_calc,
         )
 
         min_confidence = MIN_CONFIDENCE
@@ -313,23 +317,11 @@ class ParticipantDiversityConviction(BaseStrategy):
             return vamp_mid_dev <= 0.001  # Allow small tolerance
 
     def _compute_confidence(
-        self,
-        bid_participants: float,
-        ask_participants: float,
-        bid_exchanges: float,
-        ask_exchanges: float,
-        bid_conviction: float,
-        ask_conviction: float,
-        conviction: float,
-        direction: str,
-        rolling_data: Dict[str, Any],
-        data: Dict[str, Any],
-        params: Dict[str, Any],
-        regime: str,
-        gex_calc: Any,
-    ) -> float:
-        """
-        Compute 7-component confidence score.
+        self, bid_participants, ask_participants, bid_exchanges, ask_exchanges,
+        bid_conviction, ask_conviction, conviction, direction, rolling_data,
+        data, params, regime, gex_calc, depth_score=None,
+    ):
+        """Combine all factors into a single confidence score — 5 components.
 
         Returns 0.0–1.0.
         """
@@ -347,109 +339,28 @@ class ParticipantDiversityConviction(BaseStrategy):
             exchanges = ask_exchanges
             conviction_score = ask_conviction
 
-        # 1. Participant score (0.0–0.25)
-        # How diverse the participants are
-        conf_participants = 0.0
-        participant_score = min(1.0, participants / max_participants_norm)
-        # At threshold = baseline, above = bonus
-        min_participants = params.get("min_participants", 3.0)
-        if participants >= min_participants:
-            # Scale: at min_participants = 0.15, at max_participants_norm = 0.25
-            conf_participants = 0.15 + 0.10 * min(
-                1.0, (participants - min_participants) / (max_participants_norm - min_participants)
-            )
-        else:
-            conf_participants = 0.05 * (participants / min_participants)
+        # 1. Participant diversity: participants from 0→max_participants_norm, higher = higher
+        c1 = normalize(participants, 0.0, max_participants_norm)
 
-        # 2. Exchange score (0.0–0.20)
-        # How many exchanges contribute
-        conf_exchanges = 0.0
-        exchange_score = min(1.0, exchanges / max_exchanges_norm)
-        min_exchanges = params.get("min_exchanges", 2)
-        if exchanges >= min_exchanges:
-            # Scale: at min_exchanges = 0.10, at max_exchanges_norm = 0.20
-            conf_exchanges = 0.10 + 0.10 * min(
-                1.0, (exchanges - min_exchanges) / (max_exchanges_norm - min_exchanges)
-            )
-        else:
-            conf_exchanges = 0.05 * (exchanges / min_exchanges) if min_exchanges > 0 else 0.0
+        # 2. Exchange diversity: exchanges from 0→max_exchanges_norm, higher = higher
+        c2 = normalize(exchanges, 0.0, max_exchanges_norm)
 
-        # 3. Score magnitude (0.0–0.15)
-        # Conviction score vs threshold
-        conf_magnitude = 0.0
-        if conviction_score > conviction_threshold:
-            # Scale: at threshold = 0.08, at 1.0 = 0.15
-            conf_magnitude = 0.08 + 0.07 * min(
-                1.0, (conviction_score - conviction_threshold) / (1.0 - conviction_threshold)
-            )
-        elif conviction_score > conviction_threshold * 0.8:
-            conf_magnitude = 0.03
+        # 3. Conviction magnitude: conviction_score from conviction_threshold→1.0, higher = higher
+        c3 = normalize(conviction_score, conviction_threshold, 1.0)
 
-        # 4. Score ROC (0.0–0.10)
-        # Conviction rising or falling
-        conf_roc = 0.0
+        # 4. Conviction ROC: roc from -0.3→0.3, use abs, higher = higher
+        roc = 0.0
         conviction_window = rolling_data.get(KEY_CONVICT_SCORE_5M)
-        if conviction_window and conviction_window.count >= 5:
-            past_conviction = conviction_window.values[-5]
-            if past_conviction > 0:
-                roc = (conviction_score - past_conviction) / past_conviction
-                if direction == "LONG" and roc > 0:
-                    conf_roc = min(0.10, 0.10 * min(1.0, roc / 0.3))
-                elif direction == "SHORT" and roc < 0:
-                    conf_roc = min(0.10, 0.10 * min(1.0, abs(roc) / 0.3))
+        if conviction_window and conviction_window.count >= 5 and conviction_window.values[-5] > 0:
+            roc = (conviction_score - conviction_window.values[-5]) / conviction_window.values[-5]
+        c4 = normalize(abs(roc), 0.0, 0.3)
 
-        # 5. Size correlation (0.0–0.10)
-        # Depth size consistent with history
-        conf_size = 0.0
-        min_size_ratio = params.get("min_size_ratio", 0.5)
-        depth_bid_window = rolling_data.get("depth_bid_size_5m")
-        depth_ask_window = rolling_data.get("depth_ask_size_5m")
+        # 5. Volume confirmation: vol_ratio from 0→2.0, higher = higher
+        volume_window = rolling_data.get(KEY_VOLUME_5M)
+        vol_ratio = 1.0
+        if volume_window and volume_window.count > 0 and volume_window.mean > 0:
+            vol_ratio = volume_window.latest / volume_window.mean
+        c5 = normalize(vol_ratio, 0.0, 2.0)
 
-        if direction == "LONG":
-            window = depth_bid_window
-        else:
-            window = depth_ask_window
-
-        if window and window.count > 0:
-            current = window.latest
-            avg = window.mean
-            if current is not None and avg is not None and avg > 0:
-                size_ratio = current / avg
-                # Scale: at min_size_ratio = 0.05, at 1.5× avg = 0.10
-                conf_size = 0.05 + 0.05 * min(1.0, (size_ratio - min_size_ratio) / (1.5 - min_size_ratio))
-
-        # 6. VAMP validation (0.0–0.10)
-        # VAMP direction aligns with signal
-        conf_vamp = 0.05  # baseline
-        vamp_levels = rolling_data.get("vamp_levels")
-        if vamp_levels:
-            vamp_mid_dev = vamp_levels.get("vamp_mid_dev", 0)
-            if direction == "LONG" and vamp_mid_dev >= 0:
-                conf_vamp = 0.10
-            elif direction == "SHORT" and vamp_mid_dev <= 0:
-                conf_vamp = 0.10
-            elif abs(vamp_mid_dev) < 0.0005:
-                conf_vamp = 0.08
-
-        # 7. GEX regime alignment (0.0–0.10)
-        # Signal direction matches GEX bias
-        conf_gex = 0.05  # baseline
-        if gex_calc and regime:
-            net_gamma = gex_calc.get_net_gamma() if hasattr(gex_calc, "get_net_gamma") else 0
-            if direction == "LONG" and net_gamma > 0:
-                conf_gex = 0.10
-            elif direction == "SHORT" and net_gamma < 0:
-                conf_gex = 0.10
-            elif regime in ("POSITIVE", "NEGATIVE"):
-                if direction == "LONG" and regime == "POSITIVE":
-                    conf_gex = 0.08
-                elif direction == "SHORT" and regime == "NEGATIVE":
-                    conf_gex = 0.08
-
-        # Sum all components
-        confidence = (
-            conf_participants + conf_exchanges +
-            conf_magnitude + conf_roc +
-            conf_size + conf_vamp + conf_gex
-        )
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))

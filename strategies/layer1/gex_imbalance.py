@@ -54,7 +54,7 @@ STRONG_CALL_RATIO = 0.75     # very strong short signal
 MIN_MESSAGES = 20            # minimum data points for signal quality
 STOP_VOL_MULT = 2.5          # stop = 2.5x rolling price std dev
 TARGET_RISK_MULT = 1.5       # target = 1.5x stop distance
-MIN_CONFIDENCE = 0.30        # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.15        # Minimum confidence to emit signal
 
 # v2 Imbalance-Velocity constants
 RATIO_ROC_WINDOW = 5         # Number of ticks back for ROC

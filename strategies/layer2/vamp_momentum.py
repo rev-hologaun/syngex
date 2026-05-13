@@ -43,7 +43,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.VampMomentum")
 
-MIN_CONFIDENCE = 0.30
+MIN_CONFIDENCE = 0.15
 
 
 class VampMomentum(BaseStrategy):

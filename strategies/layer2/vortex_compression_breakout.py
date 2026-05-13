@@ -46,7 +46,14 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.VortexCompressionBreakout")
 
-MIN_CONFIDENCE = 0.30
+MIN_CONFIDENCE = 0.15
+
+
+def normalize(val: float, vmin: float, vmax: float) -> float:
+    """Normalize a value to [0, 1] given a min/max range."""
+    if vmax == vmin:
+        return 0.5
+    return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
 
 
 class VortexCompressionBreakout(BaseStrategy):
@@ -229,74 +236,31 @@ class VortexCompressionBreakout(BaseStrategy):
             return vamp_mid_dev <= 0.001
 
     def _compute_confidence(
-        self,
-        spread_z: float,
-        liq_density: float,
-        part_eq: float,
-        vol_spike: float,
-        spread_widening: float,
-        direction: str,
-        rolling_data: Dict[str, Any],
-        data: Dict[str, Any],
-        params: Dict[str, Any],
-        regime: str,
-        gex_calc: Any,
-    ) -> float:
-        """
-        Compute 7-component confidence score (sum to 1.0).
+        self, spread_z, liq_density, part_eq, vol_spike, spread_widening,
+        direction, rolling_data, data, params, regime, gex_calc, depth_score=None,
+    ):
+        """Combine all factors into a single confidence score — 5 components.
 
         Returns 0.0–1.0.
         """
         liq_density_threshold = params.get("liq_density_threshold", 5000.0)
         vol_spike_threshold = params.get("vol_spike_threshold", 1.5)
-        spread_z_threshold = params.get("spread_z_threshold", -2.0)
 
-        # 1. Spread compression depth (0.0–0.25)
-        # More negative = deeper compression = higher confidence
-        # -2.0 = baseline, -4.0 = max
-        conf_spread = 0.0
-        if spread_z < spread_z_threshold:
-            conf_spread = min(0.25, 0.25 * min(1.0, abs(spread_z) / 4.0))
+        # 1. Spread compression: abs(spread_z) from 0→4.0, higher compression = higher
+        c1 = normalize(abs(spread_z), 0.0, 4.0)
 
-        # 2. Liquidity density (0.0–0.20)
-        conf_liq = 0.0
-        if liq_density > liq_density_threshold:
-            conf_liq = min(0.20, 0.20 * min(1.0, liq_density / (liq_density_threshold * 2)))
+        # 2. Liquidity density: liq_density from 0→liq_density_threshold*2, higher = higher
+        c2 = normalize(liq_density, 0.0, liq_density_threshold * 2.0)
 
-        # 3. Participant equilibrium (0.0–0.10)
-        conf_part = 0.05  # baseline
-        if direction == "LONG" and part_eq > 1.0:
-            conf_part = min(0.10, 0.05 + 0.05 * min(1.0, (part_eq - 1.0) * 2))
-        elif direction == "SHORT" and part_eq < 1.0:
-            conf_part = min(0.10, 0.05 + 0.05 * min(1.0, (1.0 - part_eq) * 2))
+        # 3. Participant equilibrium: part_eq deviation from 1.0 from 0→1.0, higher deviation = higher
+        part_eq_dev = abs(part_eq - 1.0)
+        c3 = normalize(part_eq_dev, 0.0, 1.0)
 
-        # 4. Volume spike magnitude (0.0–0.15)
-        conf_vol = 0.05  # baseline (gate C passed)
-        if vol_spike > vol_spike_threshold:
-            conf_vol = min(0.15, 0.05 + 0.10 * min(1.0, (vol_spike - vol_spike_threshold) / vol_spike_threshold))
+        # 4. Volume spike: vol_spike from vol_spike_threshold→3.0, higher = higher
+        c4 = normalize(vol_spike, vol_spike_threshold, vol_spike_threshold * 2.0)
 
-        # 5. Spread widening velocity (0.0–0.10)
-        conf_widen = 0.0
-        if spread_widening > 0:
-            conf_widen = min(0.10, 0.10 * min(1.0, spread_widening / 0.05))
+        # 5. Spread widening velocity: spread_widening from 0→0.05, higher = higher
+        c5 = normalize(spread_widening, 0.0, 0.05)
 
-        # 6. VAMP validation (0.0–0.10)
-        conf_vamp = 0.05
-        vamp_levels = rolling_data.get("vamp_levels")
-        if vamp_levels:
-            vamp_mid_dev = vamp_levels.get("vamp_mid_dev", 0)
-            if direction == "LONG" and vamp_mid_dev >= 0:
-                conf_vamp = 0.10
-            elif direction == "SHORT" and vamp_mid_dev <= 0:
-                conf_vamp = 0.10
-
-        # 7. GEX regime alignment (0.0–0.10)
-        conf_gex = 0.05
-        if gex_calc and regime:
-            net_gamma = gex_calc.get_net_gamma() if hasattr(gex_calc, "get_net_gamma") else 0
-            if direction == "LONG" and net_gamma > 0:
-                conf_gex = 0.10
-            elif direction == "SHORT" and net_gamma < 0:
-                conf_gex = 0.10
-
-        return min(1.0, max(0.0, conf_spread + conf_liq + conf_part + conf_vol + conf_widen + conf_vamp + conf_gex))
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+        return min(1.0, max(0.0, confidence))

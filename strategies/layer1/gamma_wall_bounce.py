@@ -44,7 +44,7 @@ WALL_PROXIMITY_PCT = 0.005       # 0.5% — how close price must be to wall
 STOP_PAST_WALL_PCT = 0.004       # 0.4% — stop beyond the wall
 TARGET_RISK_MULT = 1.5           # 1.5× risk for target
 MIN_WALL_GEX = 500000            # Minimum |GEX| to consider a wall
-MIN_CONFIDENCE = 0.30            # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.15            # Minimum confidence to emit signal
 
 
 class GammaWallBounce(BaseStrategy):

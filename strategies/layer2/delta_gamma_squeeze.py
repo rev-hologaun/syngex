@@ -63,7 +63,7 @@ PRICE_ABOVE_MEAN_CONFIDENCE = 0.55    # Price in upper half of 5m window
 MIN_DATA_POINTS = 3                   # Fewer points needed (was 5)
 
 # Minimum confidence threshold
-MIN_CONFIDENCE = 0.30
+MIN_CONFIDENCE = 0.15
 
 # Stop and target parameters
 STOP_BELOW_WALL_PCT = 0.008           # 0.8% below entry

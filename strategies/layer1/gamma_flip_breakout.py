@@ -44,7 +44,7 @@ FLIP_ZONE_PCT = 0.015           # 1.5% — the transition zone around flip
 STOP_OTHER_SIDE_PCT = 0.01      # 1% — stop on other side of flip
 ATR_MULT = 1.5                   # 1.5× rolling range as ATR proxy
 TARGET_RR = 2.5                  # 1:2.5 risk-reward minimum
-MIN_CONFIDENCE = 0.30            # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.15            # Minimum confidence to emit signal
 MIN_GAMMA_STRENGTH = 100000      # Minimum |net_gamma| for regime confidence
 
 # Regime-adjusted stop multipliers

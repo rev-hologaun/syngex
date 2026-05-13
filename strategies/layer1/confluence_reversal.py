@@ -59,7 +59,7 @@ logger = logging.getLogger("Syngex.Strategies.ConfluenceReversal")
 
 CONFLUENCE_DISTANCE_PCT = 0.003  # 0.3% — max distance for confluence
 MIN_STRUCTURAL_SIGNALS = 1        # Wall-level confluence alone is valid
-MIN_CONFIDENCE = 0.30             # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.15             # Minimum confidence to emit signal
 STOP_PCT = 0.008                  # 0.8% stop
 TARGET_RISK_MULT = 2.0            # 2× risk for target
 

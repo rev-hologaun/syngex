@@ -50,7 +50,7 @@ BREAKOUT_PCT = 0.002          # 0.2% — price must be this far past magnet to b
 MAX_BREAKOUT_PCT = 0.02       # 2% — max distance past magnet (no chasing)
 TRAIL_STOP_PCT = 0.01         # 1% — trailing stop for Phase 2
 TARGET_RISK_MULT = 1.5        # Minimum 1.5× risk for target distance
-MIN_CONFIDENCE = 0.30         # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.15         # Minimum confidence to emit signal
 
 
 class MagnetAccelerate(BaseStrategy):

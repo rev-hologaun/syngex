@@ -60,9 +60,16 @@ from strategies.rolling_keys import (
     KEY_ASK_PARTICIPANTS_5M,
 )
 
+
+def normalize(val: float, vmin: float, vmax: float) -> float:
+    """Normalize a value to [0, 1] given a min/max range."""
+    if vmax == vmin:
+        return 0.5
+    return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
+
 logger = logging.getLogger("Syngex.Strategies.OrderBookStacking")
 
-MIN_CONFIDENCE = 0.30
+MIN_CONFIDENCE = 0.15
 
 
 class OrderBookStacking(BaseStrategy):
@@ -217,7 +224,7 @@ class OrderBookStacking(BaseStrategy):
             current_sis_bid, current_sis_ask,
             current_bid_roc, current_ask_roc,
             vol_ratio, spread, avg_spread,
-            rolling_data, params, avg_level_size,
+            rolling_data, data, params, regime, gex_calc,
         )
 
         min_confidence = MIN_CONFIDENCE
@@ -423,94 +430,40 @@ class OrderBookStacking(BaseStrategy):
     # ------------------------------------------------------------------
 
     def _compute_confidence(
-        self,
-        signal_type: str,
-        direction: str,
-        sis_bid: float,
-        sis_ask: float,
-        bid_roc: float,
-        ask_roc: float,
-        vol_ratio: float,
-        spread: float,
-        avg_spread: float,
-        rolling_data: Dict[str, Any],
-        params: Dict[str, Any],
-        avg_level_size: float,
-    ) -> float:
-        """
-        Compute 5-component confidence score.
+        self, signal_type, direction, sis_bid, sis_ask, bid_roc, ask_roc,
+        vol_ratio, spread, avg_spread, rolling_data, data, params, regime,
+        gex_calc, depth_score=None,
+    ):
+        """Combine all factors into a single confidence score — 5 components.
 
         Returns 0.0–1.0.
         """
-        sis_threshold = params.get("sis_threshold", 4.0)
-        magnitude_factor = params.get("magnitude_factor", 3.0)
+        intensity_threshold = params.get("intensity_threshold", 0.5)
 
-        # Determine which side is the signal side
-        if direction == "LONG":
-            signal_sis = sis_bid
-            signal_roc = bid_roc
-            signal_side = "bid"
+        # Select based on signal type and direction
+        if signal_type.startswith("SPOOF"):
+            intensity = top_wall_size
+            decay_val = decay
         else:
-            signal_sis = sis_ask
-            signal_roc = ask_roc
-            signal_side = "ask"
+            intensity = avg_level_size / top_wall_size if top_wall_size > 0 else 1.0
+            decay_val = decay
 
-        # 1. Stack intensity magnitude (0.0–0.35)
-        # How extreme the stack is — at threshold = baseline, above = bonus
-        conf_intensity = 0.0
-        if signal_sis > sis_threshold:
-            # Scale: at threshold = 0.20, at 2× threshold = 0.35
-            conf_intensity = 0.20 + 0.15 * min(1.0, (signal_sis - sis_threshold) / sis_threshold)
+        # 1. Intensity: intensity from threshold→2.0, higher = higher
+        c1 = normalize(intensity, intensity_threshold, 2.0)
 
-        # 2. Stack decay velocity (0.0–0.25)
-        # For breach signals: how fast the stack is being consumed
-        # For bounce signals: how stable the stack is
-        conf_decay = 0.0
-        if signal_type.startswith("STACK_BREACH"):
-            # Negative ROC = stack evaporating = stronger signal
-            if signal_roc < 0:
-                conf_decay = min(0.25, 0.25 * min(1.0, abs(signal_roc) / 0.5))
-        else:
-            # Bounce: no decay needed, stack just needs to exist
-            conf_decay = 0.15  # baseline for bounce
+        # 2. Decay: abs(decay_val) from 0→0.5, higher = higher
+        c2 = normalize(abs(decay_val), 0.0, 0.5)
 
-        # 3. Participant diversity (0.0–0.15)
-        # How many participants back the stack
-        conf_participants = 0.05  # baseline (gate B already passed)
-        participant_window = (
-            rolling_data.get(KEY_BID_PARTICIPANTS_5M)
-            if direction == "LONG"
-            else rolling_data.get(KEY_ASK_PARTICIPANTS_5M)
-        )
-        if participant_window and participant_window.count > 0:
-            current_participants = participant_window.values[-1]
-            max_participants_norm = 5.0
-            conf_participants = 0.05 + 0.10 * min(1.0, current_participants / max_participants_norm)
+        # 3. Wall significance: wall_ratio from 1→10, higher = higher
+        wall_ratio = top_wall_size / avg_level_size if avg_level_size > 0 else 1.0
+        c3 = normalize(wall_ratio, 1.0, 10.0)
 
-        # 4. Volume confirmation (0.0–0.15)
-        # Volume/depth ratio matches signal type
-        conf_volume = 0.05  # baseline
-        if signal_type.startswith("STACK_BREACH"):
-            vol_threshold = params.get("vol_ratio_breach", 0.15)
-            if vol_ratio >= vol_threshold:
-                conf_volume = 0.05 + 0.10 * min(1.0, vol_ratio / vol_threshold)
-        else:
-            # Bounce: moderate volume = wall being tested
-            conf_volume = 0.10  # moderate volume confirms wall is real
+        # 4. Volume: vol_ratio from 0→2.0, higher = higher
+        c4 = normalize(vol_ratio, 0.0, 2.0)
 
-        # 5. Spread tightness (0.0–0.10)
-        # Spread tight relative to average
-        conf_spread = 0.05  # baseline (gate D already passed)
-        if avg_spread > 0 and spread > 0:
-            spread_ratio = spread / avg_spread
-            if spread_ratio <= 1.0:
-                conf_spread = 0.10
-            elif spread_ratio < 2.0:
-                conf_spread = 0.05 + 0.05 * (2.0 - spread_ratio)
+        # 5. Spread stability: spread_ratio from 0→1.5, lower = more stable, invert
+        spread_ratio = spread / avg_spread if avg_spread > 0 else 1.0
+        c5 = 1.0 - normalize(spread_ratio, 0.0, 1.5)
 
-        # Sum all components
-        confidence = (
-            conf_intensity + conf_decay + conf_participants +
-            conf_volume + conf_spread
-        )
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))

@@ -48,7 +48,7 @@ def normalize(val: float, vmin: float, vmax: float) -> float:
     return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
 
 
-MIN_CONFIDENCE = 0.30
+MIN_CONFIDENCE = 0.15
 
 
 class SmileDynamics(BaseStrategy):

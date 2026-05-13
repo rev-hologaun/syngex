@@ -58,7 +58,7 @@ MIN_GREEKS_POINTS = 3
 IV_SKEW_THRESHOLD = 0.03            # 3% IV difference
 
 # Minimum confidence to emit (v2: raised from 0.35)
-MIN_CONFIDENCE = 0.30
+MIN_CONFIDENCE = 0.15
 
 # Stop and target
 STOP_PCT = 0.006                    # 0.6% stop

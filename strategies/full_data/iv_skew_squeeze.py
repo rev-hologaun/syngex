@@ -75,7 +75,7 @@ STOP_PCT = 0.005                   # 0.5% stop
 TARGET_PCT = 0.008                 # 0.8% target (1.6:1 R:R)
 
 # Min confidence — raised from 0.25 to 0.35 for v2
-MIN_CONFIDENCE = 0.30
+MIN_CONFIDENCE = 0.15
 
 # Min data points
 MIN_DATA_POINTS = 5                # Need data for basic checks

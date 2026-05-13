@@ -60,7 +60,7 @@ STOP_PCT = 0.005                 # 0.5% stop
 TARGET_RISK_MULT = 2.0           # 2.0× risk for target
 
 # Min confidence — v2 cap
-MIN_CONFIDENCE = 0.30
+MIN_CONFIDENCE = 0.15
 
 # Ask size sigma minimum (absolute)
 MIN_ASK_SIZE_SIGMA = 1.0

@@ -101,7 +101,7 @@ class BaseStrategy:
 @dataclass
 class EngineConfig:
     """Configuration for the StrategyEngine."""
-    min_confidence: float = 0.40       # Minimum confidence to pass the filter
+    min_confidence: float = 0.15       # Minimum confidence to pass the filter
     max_signals_per_tick: int = 10     # Prevent signal spam
     dedup_window_seconds: float = 60.0  # Don't repeat same strategy signal within this window
 

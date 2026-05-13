@@ -58,7 +58,14 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.OrderBookFragmentation")
 
-MIN_CONFIDENCE = 0.30
+MIN_CONFIDENCE = 0.15
+
+
+def normalize(val: float, vmin: float, vmax: float) -> float:
+    """Normalize a value to [0, 1] given a min/max range."""
+    if vmax == vmin:
+        return 0.5
+    return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
 
 
 class OrderBookFragmentation(BaseStrategy):
@@ -430,122 +437,63 @@ class OrderBookFragmentation(BaseStrategy):
     # ------------------------------------------------------------------
 
     def _compute_confidence(
-        self,
-        signal_type: str,
-        direction: str,
-        frag_bid: float,
-        frag_ask: float,
-        decay_bid: float,
-        decay_ask: float,
-        vol_ratio: float,
-        spread: float,
-        avg_spread: float,
-        rolling_data: Dict[str, Any],
-        params: Dict[str, Any],
-        avg_wall_size: float,
-    ) -> float:
-        """
-        Compute 6-component confidence score.
+        self, signal_type, direction, frag_bid, frag_ask, decay_bid, decay_ask,
+        vol_ratio, spread, avg_spread, rolling_data, params, avg_wall_size,
+        depth_score=None,
+    ):
+        """Combine all factors into a single confidence score — 5 components.
 
         Returns 0.0–1.0.
         """
         frag_threshold = params.get("frag_threshold", 0.5)
-        decay_threshold = params.get("decay_threshold", -0.1)
 
-        # Select the relevant fragility/decay based on signal type and direction
+        # Select frag/decay based on signal type and direction
         if signal_type.startswith("SPOOF"):
             frag = frag_ask if direction == "LONG" else frag_bid
             decay = decay_ask if direction == "LONG" else decay_bid
-        else:  # ROBUST
+        else:
             frag = frag_bid if direction == "LONG" else frag_ask
-            decay = decay_bid if direction == "LONG" else decay_ask
+            decay = decay_bid if direction == "LONG" else decay_bid
 
-        # 1. Fragility magnitude (0.0–0.30)
-        # How extreme the fragility is — at threshold = baseline, above/below = bonus
-        conf_frag = 0.0
+        # 1. Fragility magnitude: frag from frag_threshold→1.0 (SPOOF) or 0→frag_threshold (ROBUST)
         if signal_type.startswith("SPOOF"):
-            # Higher fragility = stronger signal (wall is fake)
-            if frag > frag_threshold:
-                conf_frag = min(0.30, 0.30 * min(1.0, (frag - frag_threshold) / (1.0 - frag_threshold) + 0.5))
+            c1 = normalize(frag, frag_threshold, 1.0)
         else:
-            # Lower fragility = stronger signal (wall is robust)
-            if frag < frag_threshold:
-                conf_frag = min(0.30, 0.30 * min(1.0, (frag_threshold - frag) / frag_threshold + 0.5))
+            c1 = 1.0 - normalize(frag, 0.0, frag_threshold)
 
-        # 2. Decay velocity (0.0–0.25)
-        # How fast the wall is evaporating (spoof) or holding (robust)
-        conf_decay = 0.0
-        if signal_type.startswith("SPOOF"):
-            # Negative decay = wall evaporating
-            if decay < decay_threshold:
-                # More negative = stronger signal
-                conf_decay = min(0.25, 0.25 * min(1.0, abs(decay - decay_threshold) / abs(decay_threshold) + 0.5))
-        else:
-            # Positive decay = wall growing/stable
-            if decay > decay_threshold:
-                conf_decay = min(0.25, 0.25 * min(1.0, decay / abs(decay_threshold) + 0.5))
+        # 2. Decay velocity: abs(decay) from 0→0.5, higher = higher
+        c2 = normalize(abs(decay), 0.0, 0.5)
 
-        # 3. Wall significance (0.0–0.15)
-        # How significant the wall is relative to average level size
-        conf_wall = 0.05  # baseline (gate A already passed)
+        # 3. Wall significance: wall_ratio from 3→10, higher = higher
+        wall_ratio = 1.0
         if avg_wall_size > 0:
-            top_wall_key = (
-                KEY_TOP_WALL_BID_SIZE_5M if direction == "LONG" else KEY_TOP_WALL_ASK_SIZE_5M
-            )
+            top_wall_key = KEY_TOP_WALL_BID_SIZE_5M if direction == "LONG" else KEY_TOP_WALL_ASK_SIZE_5M
             top_wall_rw = rolling_data.get(top_wall_key)
             if top_wall_rw and top_wall_rw.count > 0:
                 current_wall = top_wall_rw.values[-1]
                 if current_wall > 0:
                     wall_ratio = current_wall / avg_wall_size
-                    # Scale: at 3× = baseline, at 10× = max
-                    conf_wall = 0.05 + 0.10 * min(1.0, (wall_ratio - 3.0) / 7.0)
+        c3 = normalize(wall_ratio, 3.0, 10.0)
 
-        # 4. VAMP validation (0.0–0.15)
-        # VAMP direction confirms the signal
-        conf_vamp = 0.05  # baseline (gate B already passed)
+        # 4. VAMP validation: vamp_mid_dev from -0.001→0.001, alignment = 1 if matches
+        vamp_alignment = 0.5
         vamp_mid_dev_window = rolling_data.get(KEY_VAMP_MID_DEV_5M)
         if vamp_mid_dev_window and vamp_mid_dev_window.count > 0:
             vamp_mid_dev = vamp_mid_dev_window.values[-1]
             if signal_type.startswith("SPOOF"):
                 if direction == "LONG" and vamp_mid_dev > 0:
-                    conf_vamp = 0.15
+                    vamp_alignment = 1.0
                 elif direction == "SHORT" and vamp_mid_dev < 0:
-                    conf_vamp = 0.15
-                elif abs(vamp_mid_dev) < 0.0005:
-                    conf_vamp = 0.10
+                    vamp_alignment = 1.0
             else:
                 if direction == "LONG" and vamp_mid_dev <= 0:
-                    conf_vamp = 0.15
+                    vamp_alignment = 1.0
                 elif direction == "SHORT" and vamp_mid_dev >= 0:
-                    conf_vamp = 0.15
-                elif abs(vamp_mid_dev) < 0.0005:
-                    conf_vamp = 0.10
+                    vamp_alignment = 1.0
+        c4 = vamp_alignment
 
-        # 5. Volume confirmation (0.0–0.10)
-        # Volume/depth ratio matches signal type
-        conf_volume = 0.05  # baseline (gate C already passed)
-        if signal_type.startswith("SPOOF"):
-            vol_threshold = params.get("vol_ratio_spoof", 0.1)
-            if vol_ratio < vol_threshold:
-                conf_volume = 0.05 + 0.05 * min(1.0, (vol_threshold - vol_ratio) / vol_threshold)
-        else:
-            vol_threshold = params.get("vol_ratio_robust", 0.5)
-            if vol_ratio > vol_threshold:
-                conf_volume = 0.05 + 0.05 * min(1.0, (vol_ratio - vol_threshold) / vol_threshold)
+        # 5. Volume confirmation: vol_ratio from 0→2.0, higher = higher
+        c5 = normalize(vol_ratio, 0.0, 2.0)
 
-        # 6. Spread tightness (0.0–0.05)
-        # Spread tight relative to average
-        conf_spread = 0.025  # baseline (gate D already passed)
-        if avg_spread > 0 and spread > 0:
-            spread_ratio = spread / avg_spread
-            if spread_ratio <= 1.0:
-                conf_spread = 0.05
-            elif spread_ratio < 2.0:
-                conf_spread = 0.025 + 0.025 * (2.0 - spread_ratio)
-
-        # Sum all components
-        confidence = (
-            conf_frag + conf_decay + conf_wall +
-            conf_vamp + conf_volume + conf_spread
-        )
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))
