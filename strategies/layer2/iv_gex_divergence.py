@@ -81,10 +81,7 @@ STOP_PCT = 0.006                      # 0.6% fallback stop
 TARGET_RISK_MULT = 1.5                # 1.5× risk toward mean
 
 # Min confidence threshold for signal emission (raised to 0.35 for v2)
-MIN_CONFIDENCE = 0.35
-
-# Max confidence cap
-MAX_CONFIDENCE = 0.95
+MIN_CONFIDENCE = 0.30
 
 # v2 Volatility-Snap parameters
 IV_SKEW_OTM_PCT = 0.05              # 5% OTM for skew calculation
@@ -711,7 +708,7 @@ class IVGEXDivergence(BaseStrategy):
         regime_conf = self._regime_intensity_confidence(net_gamma)
         confidence += regime_conf
 
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        return max(0.0, confidence)
 
     def _price_extremeness_confidence(self, price_percentile: float) -> float:
         """Price extremeness: 0.0–0.15."""
@@ -828,7 +825,7 @@ class IVGEXDivergence(BaseStrategy):
 
             return Signal(
                 direction=Direction.SHORT,
-                confidence=round(min(confidence, MAX_CONFIDENCE), 3),
+                confidence=round(confidence, 3),
                 entry=round(entry, 2),
                 stop=round(stop_price, 2),
                 target=round(target, 2),
@@ -879,7 +876,7 @@ class IVGEXDivergence(BaseStrategy):
 
             return Signal(
                 direction=Direction.LONG,
-                confidence=round(min(confidence, MAX_CONFIDENCE), 3),
+                confidence=round(confidence, 3),
                 entry=round(entry, 2),
                 stop=round(stop_price, 2),
                 target=round(target, 2),

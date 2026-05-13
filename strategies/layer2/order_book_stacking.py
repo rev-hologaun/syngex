@@ -62,6 +62,8 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.OrderBookStacking")
 
+MIN_CONFIDENCE = 0.30
+
 
 class OrderBookStacking(BaseStrategy):
     """
@@ -218,9 +220,9 @@ class OrderBookStacking(BaseStrategy):
             rolling_data, params, avg_level_size,
         )
 
-        min_confidence = params.get("min_confidence", 0.55)
-        max_confidence = params.get("max_confidence", 0.90)
-        confidence = max(min_confidence, min(confidence, max_confidence))
+        min_confidence = MIN_CONFIDENCE
+        max_confidence = 1.0
+        confidence = max(min_confidence, confidence)
 
         if confidence < min_confidence:
             return []

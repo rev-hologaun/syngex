@@ -35,6 +35,8 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.ParticipantDiversityConviction")
 
+MIN_CONFIDENCE = 0.30
+
 
 class ParticipantDiversityConviction(BaseStrategy):
     """
@@ -202,9 +204,9 @@ class ParticipantDiversityConviction(BaseStrategy):
             gex_calc=gex_calc,
         )
 
-        min_confidence = params.get("min_confidence", 0.40)
-        max_confidence = params.get("max_confidence", 0.90)
-        confidence = max(min_confidence, min(confidence, max_confidence))
+        min_confidence = MIN_CONFIDENCE
+        max_confidence = 1.0
+        confidence = max(min_confidence, confidence)
 
         if confidence < min_confidence:
             return []

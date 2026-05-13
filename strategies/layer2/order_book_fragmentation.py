@@ -58,6 +58,8 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.OrderBookFragmentation")
 
+MIN_CONFIDENCE = 0.30
+
 
 class OrderBookFragmentation(BaseStrategy):
     """
@@ -217,9 +219,9 @@ class OrderBookFragmentation(BaseStrategy):
             rolling_data, params, avg_wall_size,
         )
 
-        min_confidence = params.get("min_confidence", 0.45)
-        max_confidence = params.get("max_confidence", 0.90)
-        confidence = max(min_confidence, min(confidence, max_confidence))
+        min_confidence = MIN_CONFIDENCE
+        max_confidence = 1.0
+        confidence = max(min_confidence, confidence)
 
         if confidence < min_confidence:
             return []
