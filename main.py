@@ -1043,19 +1043,19 @@ class SyngexOrchestrator:
                                     omega = abs(put_slope) / abs(call_slope)
 
                                     omega_window = self._rolling_data.get(
-                                        "curve_omega_5m"
+                                        KEY_CURVE_OMEGA_5M
                                     )
                                     if omega_window:
                                         omega_window.push(omega, ts)
 
                                     ps_window = self._rolling_data.get(
-                                        "put_slope_5m"
+                                        KEY_PUT_SLOPE_5M
                                     )
                                     if ps_window:
                                         ps_window.push(put_slope, ts)
 
                                     cs_window = self._rolling_data.get(
-                                        "call_slope_5m"
+                                        KEY_CALL_SLOPE_5M
                                     )
                                     if cs_window:
                                         cs_window.push(call_slope, ts)
