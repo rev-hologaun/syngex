@@ -625,43 +625,28 @@ class DeltaIVDivergence(BaseStrategy):
         wall_bonus: float,
         direction: str,
         greeks_summary: Dict,
+        depth_score: Optional[float] = None,
     ) -> float:
-        """
-        Combine v2 confidence factors into a score 0.0–1.0.
+        """Combine v2 confidence factors into a score 0.0–1.0 (Family A simple average)."""
+        def normalize(val, vmin, vmax):
+            return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
 
-        Hard gates (all must pass for signal):
-        1. Skew divergence: 0.0 or 0.20
-        2. Decoupling: 0.0 or 0.15
-        3. Gamma regime: 0.0 or 0.15
+        # 1. Skew divergence: bool → 0 or 1 (remove hard gate, normalize)
+        c1 = 1.0 if skew_divergence else 0.0
 
-        Soft factors (boost confidence):
-        4. Divergence strength: 0.0–0.10
-        5. Volume conviction: 0.0–0.10
-        6. Wall proximity: +0.0 to +0.10
-        7. Regime intensity: 0.05–0.10
-        """
-        # 1. Skew gradient (hard gate — 0.0 or 0.20)
-        skew_conf = 0.20 if skew_divergence else 0.0
+        # 2. Decoupling: bool → 0 or 1
+        c2 = 1.0 if decoupling else 0.0
 
-        # 2. Decoupling coefficient (hard gate — 0.0 or 0.15)
-        decouple_conf = 0.15 if decoupling else 0.0
+        # 3. Gamma decline: bool → 0 or 1
+        c3 = 1.0 if gamma_decline else 0.0
 
-        # 3. Gamma regime filter (hard gate — 0.0 or 0.15)
-        gamma_conf = 0.15 if gamma_decline else 0.0
+        # 4. Divergence strength: divergence_strength from 0→2.0, higher = higher
+        c4 = normalize(divergence_strength, 0.0, 2.0)
 
-        # 4. Divergence strength (soft — 0.0–0.10)
-        div_conf = self._divergence_confidence(divergence_strength)
+        # 5. Net gamma: abs(net_gamma) from 0→5M, higher = higher
+        c5 = normalize(abs(net_gamma), 0.0, 5000000.0)
 
-        # 5. Volume-weighted conviction (soft — 0.0–0.10)
-        vol_conf = self._volume_conviction_confidence(iv_expansion, greeks_summary)
-
-        # 6. Wall proximity (soft — 0.0–0.10)
-        wall_conf = wall_bonus
-
-        # 7. Regime intensity (soft — 0.05–0.10)
-        regime_conf = self._regime_confidence(net_gamma, direction)
-
-        confidence = skew_conf + decouple_conf + gamma_conf + div_conf + vol_conf + wall_conf + regime_conf
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))
 
     def _divergence_confidence(self, divergence_strength: float) -> float:

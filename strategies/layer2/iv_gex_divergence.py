@@ -658,57 +658,46 @@ class IVGEXDivergence(BaseStrategy):
         regime: str,
         price: float,
         greeks_summary: Dict[str, Any],
+        depth_score: Optional[float] = None,
     ) -> float:
-        """
-        Combine all factors into confidence score (v2 — 7 components).
+        """Combine all factors into confidence score (Family A simple average)."""
+        def normalize(val, vmin, vmax):
+            return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
 
-        Hard gates (all must pass for signal):
-            - Price extremeness (checked before calling)
-            - IV skew acceleration (checked before calling)
-            - Gamma density decline (checked before calling)
+        # 1. Price extremeness: price_percentile from 0.75→1.0, higher = higher
+        c1 = normalize(price_percentile, 0.75, 1.0)
 
-        Soft factors (boost confidence but don't block):
-            1. Price extremeness          (0.0–0.15)
-            2. Volume-weighted IV          (0.0–0.10)
-            3. Net gamma magnitude         (0.0–0.10)
-            4. Wall proximity              (0.0–0.10)
-            5. Regime intensity            (0.05–0.15)
+        # 2. Net gamma: abs(net_gamma) from 0→5M, higher = higher
+        c2 = normalize(abs(net_gamma), 0.0, 5000000.0)
 
-        Plus hard gate contributions:
-            - IV skew acceleration: 0.20
-            - Gamma density decline: 0.15
-        """
-        confidence = 0.0
+        # 3. Wall proximity: wall GEX from 0→5M, higher = higher
+        wall_gex = 0.0
+        if wall:
+            wall_gex = abs(wall.get("gex", 0))
+        c3 = normalize(wall_gex, 0.0, 5000000.0)
 
-        # 1. Price extremeness (0.0–0.15)
-        pct_conf = self._price_extremeness_confidence(price_percentile)
-        confidence += pct_conf
+        # 4. Volume conviction: total_volume from 0→100k, higher = higher
+        total_volume = 0.0
+        if greeks_summary:
+            for strike_data in greeks_summary.values():
+                call_vol = strike_data.get("call_volume", 0)
+                put_vol = strike_data.get("put_volume", 0)
+                total_volume += call_vol + put_vol
+        c4 = normalize(total_volume, 0.0, 100000.0)
 
-        # 2. IV skew acceleration (hard gate — 0.0 or 0.20)
-        # Already passed as gate, add full weight
-        confidence += 0.20
+        # 5. Regime alignment: regime intensity from 0→1, higher = higher
+        regime_intensity = 0.0
+        if regime:
+            if regime == "NEGATIVE":
+                regime_intensity = 0.15
+            elif regime == "POSITIVE":
+                regime_intensity = 0.10
+            else:
+                regime_intensity = 0.05
+        c5 = normalize(regime_intensity, 0.05, 0.15)
 
-        # 3. Gamma density decline (hard gate — 0.0 or 0.15)
-        # Already passed as gate, add full weight
-        confidence += 0.15
-
-        # 4. Volume-weighted IV (soft — 0.0–0.10)
-        vol_iv_conf = self._conviction_iv_confidence(greeks_summary, price)
-        confidence += vol_iv_conf
-
-        # 5. Net gamma magnitude (0.0–0.10)
-        gamma_conf = self._gamma_magnitude_confidence(net_gamma)
-        confidence += gamma_conf
-
-        # 6. Wall proximity (0.0–0.10)
-        wall_conf = self._wall_proximity_confidence(wall)
-        confidence += wall_conf
-
-        # 7. Regime intensity (0.05–0.15)
-        regime_conf = self._regime_intensity_confidence(net_gamma)
-        confidence += regime_conf
-
-        return max(0.0, confidence)
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+        return min(1.0, max(0.0, confidence))
 
     def _price_extremeness_confidence(self, price_percentile: float) -> float:
         """Price extremeness: 0.0–0.15."""

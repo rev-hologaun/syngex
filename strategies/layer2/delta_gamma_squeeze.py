@@ -428,57 +428,30 @@ class DeltaGammaSqueeze(BaseStrategy):
         gex_accel: Optional[float] = None,
         iv_roc: Optional[float] = None,
         iv_roc_bonus: float = 0.0,
+        depth_score: Optional[float] = None,
     ) -> float:
-        """Combine all factors into a single confidence score — 8 components (was 6).
+        """Combine all factors into a single confidence score — Family A simple average.
 
         Returns 0.0–1.0.
         """
-        # 1. Proximity to wall (0.25–0.35)
-        # Closer = higher confidence
-        proximity_conf = 0.25 + 0.10 * (1 - distance_pct / WALL_PROXIMITY_PCT)
+        def normalize(val, vmin, vmax):
+            return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
 
-        # 2. Delta acceleration (0.20–0.30)
-        # Higher ratio = more urgency
-        accel_conf = 0.20 + 0.10 * min(1.0, (accel_ratio - 1.0) / 1.0)
+        # 1. Proximity: distance_pct from 0→0.005, closer = higher, invert
+        c1 = 1.0 - normalize(distance_pct, 0.0, 0.005)
 
-        # 3. Volume spike (0.05–0.10)
-        vol_conf = 0.10 if vol_spike else 0.05
+        # 2. Delta acceleration: accel_ratio from 1.0→3.0, higher = higher
+        c2 = normalize(accel_ratio, 1.0, 3.0)
 
-        # 4. Price momentum (0.05–0.10)
-        # LONG needs UP, SHORT needs DOWN
-        if direction == "LONG":
-            momentum_conf = 0.10 if price_trend == "UP" else 0.05
-        else:
-            momentum_conf = 0.10 if price_trend == "DOWN" else 0.05
+        # 3. Volume spike: bool → 0 or 1
+        c3 = 1.0 if vol_spike else 0.0
 
-        # 5. Regime alignment (0.05–0.10)
-        # LONG prefers POSITIVE, SHORT prefers NEGATIVE
-        # NEUTRAL/UNKNOWN gets partial 0.05 boost (was 0.0)
-        if direction == "LONG":
-            regime_conf = 0.10 if regime == "POSITIVE" else 0.05
-        else:
-            regime_conf = 0.10 if regime == "NEGATIVE" else 0.05
+        # 4. Price momentum: direction matches trend = 1.0, else 0.5
+        momentum = 1.0 if ((direction == "LONG" and price_trend == "UP") or (direction == "SHORT" and price_trend == "DOWN")) else 0.5
+        c4 = momentum
 
-        # 6. Wall strength (0.0–0.05)
-        wall_conf = 0.05 * min(1.0, abs(wall_gex) / 5_000_000)
+        # 5. Net gamma: abs(net_gamma) from 0→5M, higher = higher
+        c5 = normalize(abs(net_gamma), 0.0, 5000000.0)
 
-        # 7. GEX acceleration (0.05–0.10)
-        if gex_accel is not None:
-            gex_conf = 0.05 + 0.05 * min(1.0, (gex_accel - 1.0) / 0.5)
-        else:
-            gex_conf = 0.05
-
-        # 8. IV ROC bonus (0.0–0.08)
-        iv_conf = iv_roc_bonus
-
-        # Normalize each component to [0,1] and average
-        norm_prox = (proximity_conf - 0.25) / (0.35 - 0.25) if 0.35 != 0.25 else 1.0
-        norm_accel = (accel_conf - 0.20) / (0.30 - 0.20) if 0.30 != 0.20 else 1.0
-        norm_vol = (vol_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
-        norm_mom = (momentum_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
-        norm_regime = (regime_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
-        norm_wall = wall_conf / 0.05 if 0.05 != 0 else 0.0
-        norm_gex = (gex_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
-        norm_iv = iv_conf / IV_CONF_BONUS if IV_CONF_BONUS != 0 else 0.0
-        confidence = (norm_prox + norm_accel + norm_vol + norm_mom + norm_regime + norm_wall + norm_gex + norm_iv) / 8.0
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))

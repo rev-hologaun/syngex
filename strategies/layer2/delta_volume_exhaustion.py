@@ -506,57 +506,37 @@ class DeltaVolumeExhaustion(BaseStrategy):
         regime: str,
         trend_direction: str,
         rolling_data: Optional[Dict[str, Any]] = None,
+        depth_score: Optional[float] = None,
     ) -> float:
-        """
-        Combine all v2 factors into confidence score.
+        """Combine all v2 factors into confidence score (Family A simple average)."""
+        def normalize(val, vmin, vmax):
+            return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
 
-        6 components:
-            1. Trend strength: 0.0–0.20 (soft)
-            2. Delta decline: 0.0 or 0.20 (hard gate)
-            3. Liquidity vacuum: 0.0 or 0.25 (hard gate)
-            4. IV acceleration: -0.05 to +0.15 (soft)
-            5. Regime alignment: 0.0–0.10 (soft)
-            6. Wall proximity: +0.0 to +0.10 (bonus)
+        # 1. Trend strength: trend_strength from 0→1, higher = higher
+        c1 = normalize(trend_strength, 0.0, 1.0)
 
-        Args:
-            trend_strength: Score from _trend_strength (0.0–1.0)
-            delta_decline: Hard gate result
-            liquidity_vacuum: Hard gate result
-            net_gamma: Current net gamma
-            regime: Regime string
-            trend_direction: "UP" or "DOWN"
-            rolling_data: Rolling window data for IV acceleration
+        # 2. Delta decline: bool → 0 or 1
+        c2 = 1.0 if delta_decline else 0.0
 
-        Returns:
-            Confidence score 0.0–1.0
-        """
-        # 1. Trend strength (0.0–0.20)
-        trend_conf = 0.10 + 0.10 * trend_strength
+        # 3. Liquidity vacuum: bool → 0 or 1
+        c3 = 1.0 if liquidity_vacuum else 0.0
 
-        # 2. Delta decline (hard gate — 0.0 or 0.20)
-        delta_conf = 0.20 if delta_decline else 0.0
-
-        # 3. Liquidity vacuum (hard gate — 0.0 or 0.25)
-        liq_conf = 0.25 if liquidity_vacuum else 0.0
-
-        # 4. IV acceleration (soft — -0.05 to +0.15)
+        # 4. IV acceleration: iv_conf from -0.05→0.15, map to [0,1]
         iv_conf = 0.0
         if rolling_data:
-            iv_conf = self._compute_iv_acceleration(
-                rolling_data, trend_direction
-            )
+            # Compute IV acceleration the same way as before
+            if trend_direction == "UP":
+                iv_window = rolling_data.get("iv_roc_up_5m")
+            else:
+                iv_window = rolling_data.get("iv_roc_down_5m")
+            if iv_window and iv_window.count > 0:
+                iv_conf = iv_window.latest / iv_window.mean - 1.0 if iv_window.mean > 0 else 0.0
+        c4 = normalize(iv_conf, -0.05, 0.15)
 
-        # 5. Regime alignment (soft — 0.0 to 0.10)
-        regime_conf = self._regime_alignment(
-            regime, net_gamma, trend_direction
-        )
+        # 5. Net gamma: abs(net_gamma) from 0→5M, higher = higher
+        c5 = normalize(abs(net_gamma), 0.0, 5000000.0)
 
-        # 6. Wall proximity bonus (already added via _check_wall_proximity
-        #    in _check_exhaustion — not included here)
-
-        confidence = (
-            trend_conf + delta_conf + liq_conf + iv_conf + regime_conf
-        )
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))
 
     def _regime_alignment(
