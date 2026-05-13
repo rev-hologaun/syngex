@@ -20,6 +20,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from strategies.rolling_keys import (
+    MSG_TYPE_OPTION_UPDATE,
+    MSG_TYPE_UNDERLYING_UPDATE,
+)
+
 logger = logging.getLogger("Syngex.Engine.GEXCalculator")
 
 
@@ -160,12 +165,12 @@ class GEXCalculator:
         try:
             msg_type = message.get("type")
 
-            if msg_type == "underlying_update" and "price" in message:
+            if msg_type == MSG_TYPE_UNDERLYING_UPDATE and "price" in message:
                 self._quote_count += 1
                 self._update_underlying_price(message["price"])
                 return
 
-            if msg_type == "option_update":
+            if msg_type == MSG_TYPE_OPTION_UPDATE:
                 self._option_count += 1
                 self._update_strike(message)
                 return

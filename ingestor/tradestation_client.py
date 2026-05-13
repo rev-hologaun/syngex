@@ -27,6 +27,13 @@ import aiohttp
 
 from .token_manager import TokenManager
 
+from strategies.rolling_keys import (
+    KEY_MARKET_DEPTH_AGG,
+    MSG_TYPE_MARKET_DEPTH_QUOTES,
+    MSG_TYPE_OPTION_UPDATE,
+    MSG_TYPE_UNDERLYING_UPDATE,
+)
+
 logger = logging.getLogger("Syngex.Ingestor.TradeStationClient")
 
 
@@ -267,11 +274,11 @@ class TradeStationClient:
                             if self._watched_symbol and "Symbol" in data and data["Symbol"] == self._watched_symbol:
                                 bid = data.get("Bid", 0)
                                 if bid and float(bid) > 0:
-                                    self._dispatch({"type": "underlying_update", "price": float(bid)})
+                                    self._dispatch({"type": MSG_TYPE_UNDERLYING_UPDATE, "price": float(bid)})
                                 else:
                                     last = data.get("Last", 0)
                                     if last and float(last) > 0:
-                                        self._dispatch({"type": "underlying_update", "price": float(last)})
+                                        self._dispatch({"type": MSG_TYPE_UNDERLYING_UPDATE, "price": float(last)})
                             self._dispatch(data)
                         except json.JSONDecodeError:
                             logger.debug(f"NON-JSON LINE: {line_str}")
@@ -500,7 +507,7 @@ class TradeStationClient:
                 "ask_exchanges": ask_exchange_map,
             })
         return {
-            "type": "market_depth_quotes",
+            "type": MSG_TYPE_MARKET_DEPTH_QUOTES,
             "symbol": data.get("symbol", ""),
             "Bids": bids,
             "Asks": asks,
@@ -617,7 +624,7 @@ class TradeStationClient:
                 "LatestTime": a.get("LatestTime", ""),
             })
         return {
-            "type": "market_depth_agg",
+            "type": KEY_MARKET_DEPTH_AGG,
             "symbol": data.get("symbol", ""),
             "Bids": bids,
             "Asks": asks,
@@ -650,7 +657,7 @@ class TradeStationClient:
         price = underlying.get("lastPrice") or underlying.get("last") or 0.0
         if price and price > 0:
             contracts.append({
-                "type": "underlying_update",
+                "type": MSG_TYPE_UNDERLYING_UPDATE,
                 "price": price,
             })
 
@@ -672,7 +679,7 @@ class TradeStationClient:
                 side_label = "call" if side_key == "calls" else "put"
 
                 contracts.append({
-                    "type": "option_update",
+                    "type": MSG_TYPE_OPTION_UPDATE,
                     "symbol": symbol,
                     "strike": strike,
                     "gamma": gamma,

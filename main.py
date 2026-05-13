@@ -204,6 +204,10 @@ from strategies.rolling_keys import (
     KEY_VOLUME_SPIKE_5M,
     KEY_MARKET_DEPTH_AGG,
     KEY_VAMP_LEVELS,
+    MSG_TYPE_QUOTE_UPDATE,
+    MSG_TYPE_OPTION_UPDATE,
+    MSG_TYPE_UNDERLYING_UPDATE,
+    MSG_TYPE_MARKET_DEPTH_QUOTES,
 )
 from strategies.layer1 import (
     GammaWallBounce,
@@ -823,7 +827,7 @@ class SyngexOrchestrator:
             ts = time.time()
 
             # Update rolling windows with underlying price
-            if data.get("type") == "underlying_update":
+            if data.get("type") == MSG_TYPE_UNDERLYING_UPDATE:
                 price = data.get("price")
                 if price and price > 0:
                     self._rolling_data[KEY_PRICE_5M].push(price, ts)
@@ -844,7 +848,7 @@ class SyngexOrchestrator:
                 self._rolling_data[KEY_NET_GAMMA_5M].push(ng)
 
             # Track call/put option update counts for volume_up/volume_down proxy
-            if data.get("type") == "option_update":
+            if data.get("type") == MSG_TYPE_OPTION_UPDATE:
                 side = data.get("side", "")
                 if side == "call":
                     self._call_update_count += 1
@@ -1639,7 +1643,7 @@ class SyngexOrchestrator:
 
             # ── Depth data capture (L2/TotalView) ──
             msg_type = data.get("type", "")
-            if msg_type in ("market_depth_quotes", KEY_MARKET_DEPTH_AGG):
+            if msg_type in (MSG_TYPE_MARKET_DEPTH_QUOTES, KEY_MARKET_DEPTH_AGG):
                 bids = data.get("Bids", [])
                 asks = data.get("Asks", [])
 
@@ -1647,7 +1651,7 @@ class SyngexOrchestrator:
                 old_ask = 0.0
 
                 # Aggregate size from all bid/ask levels
-                if msg_type == "market_depth_quotes":
+                if msg_type == MSG_TYPE_MARKET_DEPTH_QUOTES:
                     # Per-exchange: Size field is string → int
                     total_bid_size = sum(int(b.get("Size", 0)) for b in bids)
                     total_ask_size = sum(int(a.get("Size", 0)) for a in asks)
@@ -1657,7 +1661,7 @@ class SyngexOrchestrator:
                     total_ask_size = sum(int(a.get("TotalSize", 0)) for a in asks)
 
                 # ── Exchange Flow Concentration: parse per-exchange sizes (quotes only) ──
-                if msg_type == "market_depth_quotes":
+                if msg_type == MSG_TYPE_MARKET_DEPTH_QUOTES:
                     exchange_bid_sizes: Dict[str, int] = {}
                     exchange_ask_sizes: Dict[str, int] = {}
                     for b in bids:
@@ -2355,7 +2359,7 @@ class SyngexOrchestrator:
                         pass
 
             # Aggression Flow from quotes stream — detect aggressive trades
-            if data.get("type") == "quote_update":
+            if data.get("type") == MSG_TYPE_QUOTE_UPDATE:
                 last = data.get("last", 0)
                 bid = data.get("bid", 0)
                 ask = data.get("ask", 0)

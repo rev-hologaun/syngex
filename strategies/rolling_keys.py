@@ -184,6 +184,12 @@ KEY_MARKET_DEPTH_AGG = "market_depth_agg"
 # --- VAMP Levels ---
 KEY_VAMP_LEVELS = "vamp_levels"
 
+# --- Message Type Identifiers (JSON stream protocol) ---
+MSG_TYPE_QUOTE_UPDATE = "quote_update"
+MSG_TYPE_OPTION_UPDATE = "option_update"
+MSG_TYPE_UNDERLYING_UPDATE = "underlying_update"
+MSG_TYPE_MARKET_DEPTH_QUOTES = "market_depth_quotes"
+
 # --- IV Skew Dynamics (SKEW-ALPHA) ---
 KEY_SKEW_PSI_5M = "skew_psi_5m"
 KEY_SKEW_PSI_ROC_5M = "skew_psi_roc_5m"
@@ -400,5 +406,9 @@ __all__ = [
     "KEY_SPREAD_ZSCORE_5M", "KEY_LIQUIDITY_DENSITY_5M",
     "KEY_PARTICIPANT_EQUILIBRIUM_5M", "KEY_VOLUME_SPIKE_5M",
     "KEY_MARKET_DEPTH_AGG", "KEY_VAMP_LEVELS",
+    "MSG_TYPE_QUOTE_UPDATE",
+    "MSG_TYPE_OPTION_UPDATE",
+    "MSG_TYPE_UNDERLYING_UPDATE",
+    "MSG_TYPE_MARKET_DEPTH_QUOTES",
     "CORE_KEYS", "DEPTH_KEYS", "DEPTH_DECAY_KEYS", "ALL_KEYS", "OBI_KEYS",
 ]

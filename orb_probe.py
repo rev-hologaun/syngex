@@ -31,6 +31,13 @@ from typing import Any, Dict, List
 
 import aiohttp
 
+from strategies.rolling_keys import (
+    KEY_MARKET_DEPTH_AGG,
+    MSG_TYPE_MARKET_DEPTH_QUOTES,
+    MSG_TYPE_OPTION_UPDATE,
+    MSG_TYPE_QUOTE_UPDATE,
+)
+
 TOKEN_PATH = Path.home() / "projects/tfresh2/token.json"
 
 
@@ -62,7 +69,7 @@ def write_line(path: Path, data: Dict) -> None:
 def _parse_quote_line(raw: Dict) -> Dict:
     """Transform a raw TradeStation quote into a clean parsed object."""
     parsed = {
-        "type": "quote_update",
+        "type": MSG_TYPE_QUOTE_UPDATE,
         "symbol": raw.get("Symbol", ""),
         "last": _safe_float(raw.get("Last")),
         "bid": _safe_float(raw.get("Bid")),
@@ -298,7 +305,7 @@ def _parse_option_chain_line(raw: Dict) -> Dict:
             expiration = leg.get("Expiration", "")
 
     parsed = {
-        "type": "option_update",
+        "type": MSG_TYPE_OPTION_UPDATE,
         "symbol": parsed_sym,
         "strike": strike,
         "side": side,
@@ -454,7 +461,7 @@ def _parse_depth_line(raw: Dict) -> Dict:
             ask_exchanges[ex] = ask_exchanges.get(ex, 0) + a["size"]
 
     return {
-        "type": "market_depth_quotes",
+        "type": MSG_TYPE_MARKET_DEPTH_QUOTES,
         "symbol": raw.get("symbol", ""),
         "best_bid": best_bid,
         "best_ask": best_ask,
@@ -589,7 +596,7 @@ def _parse_depth_agg_line(raw: Dict) -> Dict:
     ask_max_participants = max((a["num_participants"] for a in asks), default=0)
 
     return {
-        "type": "market_depth_agg",
+        "type": KEY_MARKET_DEPTH_AGG,
         "symbol": raw.get("symbol", ""),
         "best_bid": best_bid,
         "best_ask": best_ask,
