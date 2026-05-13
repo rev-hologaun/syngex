@@ -687,6 +687,7 @@ class SyngexOrchestrator:
                 "exchange_flow_asymmetry": ExchangeFlowAsymmetry,
                 "order_book_fragmentation": OrderBookFragmentation,
                 "order_book_stacking": OrderBookStacking,
+                "vortex_compression_breakout": VortexCompressionBreakout,
             },
             "layer3": {
                 "gamma_volume_convergence": GammaVolumeConvergence,

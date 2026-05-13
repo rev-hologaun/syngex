@@ -22,11 +22,13 @@ class VolumeFilter:
       - reason: str — explanation
     """
 
-    # Thresholds are inlined in evaluate() — this dict was dead config
-    # (ratio < 0.01 → CRITICAL via the else branch)
-    THRESHOLD_HIGH = 1.3
-    THRESHOLD_NORMAL = 1.0
-    THRESHOLD_LOW = 0.01
+    """
+    Thresholds are inlined in evaluate():
+      HIGH: ratio >= 1.3
+      NORMAL: ratio >= 1.0
+      LOW: ratio >= 0.01
+      CRITICAL: ratio < 0.01
+    """
 
     @staticmethod
     def evaluate(rolling_data: Dict[str, Any], min_confidence: float = 0.0) -> Dict:
