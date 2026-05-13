@@ -198,6 +198,7 @@ class DepthDecayMomentum(BaseStrategy):
             top5_bid, top5_ask, vol_ratio_window,
             depth_snapshot, rolling_data,
             direction, regime, gex_calc,
+            depth_score=None,
         )
 
         min_confidence = MIN_CONFIDENCE
@@ -273,109 +274,58 @@ class DepthDecayMomentum(BaseStrategy):
         _direction: str,  # noqa: ARG002 — used for clarity
         regime: str,
         gex_calc: Any,
+        depth_score=None,
     ) -> float:
         """
-        Compute 7-component confidence score.
+        Compute 5-component confidence score (Family A: simple average).
 
         Returns 0.0–1.0.
         """
         params = self._params
 
-        # Direction-specific ROC
+        def normalize(val, vmin, vmax):
+            return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
+
         decay_roc = ask_roc if direction == "LONG" else bid_roc
         decay_magnitude = abs(decay_roc)
 
-        # 1. Depth decay magnitude (0.0–0.25)
-        # |ROC| scaled linearly; at threshold = ~0.12, at 3× threshold = 0.25
+        # 1. Depth decay: decay_magnitude from 0→0.45 (threshold=0.15, 3x=0.45), higher = higher
         depth_decay_threshold = params.get("depth_decay_threshold", 0.15)
-        conf_decay = min(0.25, 0.12 * (decay_magnitude / depth_decay_threshold)) if depth_decay_threshold > 0 else 0.0
+        c1 = normalize(decay_magnitude, 0.0, depth_decay_threshold * 3.0)
 
-        # 2. Volume/depth ratio strength (0.0–0.20)
-        # Lower ratio = higher confidence (evaporated not consumed)
+        # 2. Volume/depth ratio: current_vol_ratio from 0→0.2, lower = higher, invert
         max_vol_ratio = params.get("max_vol_ratio", 0.2)
-        conf_vol_ratio = 0.0
-        if vol_ratio_window and vol_ratio_window.count > 0:
-            current_vol_ratio = vol_ratio_window.values[-1]
-            # At 0 ratio = 0.20, at threshold = 0.0
-            conf_vol_ratio = 0.20 * max(0.0, 1.0 - current_vol_ratio / max_vol_ratio)
+        current_vol_ratio = vol_ratio_window.values[-1] if vol_ratio_window and vol_ratio_window.count > 0 else 0
+        c2 = 1.0 - normalize(current_vol_ratio, 0.0, max_vol_ratio)
 
-        # 3. Top-level concentration (0.0–0.15)
-        # How much decay is concentrated in top 5 vs total depth
-        conf_concentration = 0.05  # baseline
+        # 3. Concentration: concentration from 0→1, higher = higher
         market_depth = rolling_data.get("market_depth_agg", {})
         bid_levels = market_depth.get("bid_levels", [])
         ask_levels = market_depth.get("ask_levels", [])
-        total_bid_depth = sum(l["size"] for l in bid_levels)
-        total_ask_depth = sum(l["size"] for l in ask_levels)
-        if direction == "LONG" and total_ask_depth > 0:
-            top5_ask_depth = sum(l["size"] for l in ask_levels[:5])
-            concentration = top5_ask_depth / total_ask_depth
-            conf_concentration = 0.05 + 0.10 * concentration
-        elif direction == "SHORT" and total_bid_depth > 0:
-            top5_bid_depth = sum(l["size"] for l in bid_levels[:5])
-            concentration = top5_bid_depth / total_bid_depth
-            conf_concentration = 0.05 + 0.10 * concentration
+        if direction == "LONG":
+            total = sum(l["size"] for l in ask_levels)
+            top5 = sum(l["size"] for l in ask_levels[:5]) if total > 0 else 0
+        else:
+            total = sum(l["size"] for l in bid_levels)
+            top5 = sum(l["size"] for l in bid_levels[:5]) if total > 0 else 0
+        concentration = top5 / total if total > 0 else 0
+        c3 = normalize(concentration, 0.0, 1.0)
 
-        # 4. Participant consistency (0.0–0.10)
-        # Few participants = single-player pull = higher confidence
-        max_evap_participants = params.get("max_evap_participants", 2)
-        conf_participants = 0.05  # baseline
-        if depth_snapshot:
-            if direction == "LONG":
-                avg_participants = depth_snapshot.get("ask_avg_participants", 0)
-            else:
-                avg_participants = depth_snapshot.get("bid_avg_participants", 0)
-            if avg_participants <= max_evap_participants:
-                conf_participants = 0.10
-            elif avg_participants <= max_evap_participants * 2:
-                conf_participants = 0.07
-
-        # 5. VAMP directional alignment (0.0–0.10)
-        # VAMP bias matches decay direction
-        conf_vamp = 0.05  # baseline
+        # 4. VAMP alignment: vamp_mid_dev from -0.001→0.001, use abs for alignment
         use_vamp_bias = params.get("use_vamp_bias", True)
+        vamp_mid_dev = 0.0
         if use_vamp_bias:
             vamp_levels = rolling_data.get("vamp_levels")
             if vamp_levels:
                 vamp_mid_dev = vamp_levels.get("mid_price", 0)
-                if direction == "LONG" and vamp_mid_dev >= 0:
-                    conf_vamp = 0.10
-                elif direction == "SHORT" and vamp_mid_dev <= 0:
-                    conf_vamp = 0.10
-                elif vamp_mid_dev != 0:
-                    # Partial alignment based on magnitude
-                    conf_vamp = 0.05 + 0.05 * min(1.0, abs(vamp_mid_dev) / 0.001)
+        vamp_alignment = 1.0 if ((direction == "LONG" and vamp_mid_dev >= 0) or (direction == "SHORT" and vamp_mid_dev <= 0)) else 0.0
+        c4 = vamp_alignment
 
-        # 6. Overall depth magnitude (0.0–0.10)
-        # Deeper book = more meaningful signal
-        conf_depth = 0.05  # baseline
-        if direction == "LONG" and top5_ask and top5_ask.count > 0:
-            top5_depth = top5_ask.values[-1]
-            min_top5 = params.get("min_top5_depth", 100)
-            conf_depth = 0.05 + 0.05 * min(1.0, top5_depth / (min_top5 * 3))
-        elif direction == "SHORT" and top5_bid and top5_bid.count > 0:
-            top5_depth = top5_bid.values[-1]
-            min_top5 = params.get("min_top5_depth", 100)
-            conf_depth = 0.05 + 0.05 * min(1.0, top5_depth / (min_top5 * 3))
-
-        # 7. GEX regime alignment (0.0–0.10)
-        # Decay direction matches GEX bias
-        conf_gex = 0.05  # baseline
+        # 5. GEX regime alignment: net_gamma from 0→5M, higher = higher
+        net_gamma = 0
         if gex_calc and regime:
             net_gamma = gex_calc.get_net_gamma() if hasattr(gex_calc, "get_net_gamma") else 0
-            if direction == "LONG" and net_gamma > 0:
-                conf_gex = 0.10
-            elif direction == "SHORT" and net_gamma < 0:
-                conf_gex = 0.10
-            elif regime in ("POSITIVE", "NEGATIVE"):
-                if direction == "LONG" and regime == "POSITIVE":
-                    conf_gex = 0.08
-                elif direction == "SHORT" and regime == "NEGATIVE":
-                    conf_gex = 0.08
+        c5 = normalize(abs(net_gamma), 0.0, 5000000.0)
 
-        # Sum all components
-        confidence = (
-            conf_decay + conf_vol_ratio + conf_concentration +
-            conf_participants + conf_vamp + conf_depth + conf_gex
-        )
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))

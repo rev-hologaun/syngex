@@ -235,6 +235,7 @@ class ExchangeFlowAsymmetry(BaseStrategy):
             exchange_ask_sizes,
             data,
             params,
+            depth_score=None,
         )
 
         min_confidence = MIN_CONFIDENCE
@@ -400,12 +401,16 @@ class ExchangeFlowAsymmetry(BaseStrategy):
         exchange_ask_sizes: Dict[str, int],
         data: Dict[str, Any],
         params: Dict[str, Any],
+        depth_score=None,
     ) -> float:
         """
-        Compute 5-component confidence score.
+        Compute 5-component confidence score (Family A: simple average).
 
         Returns 0.0–1.0.
         """
+        def normalize(val, vmin, vmax):
+            return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
+
         esi_threshold = params.get("esi_threshold", 0.8)
         volume_ratio_threshold = params.get("volume_ratio_threshold", 1.5)
 
@@ -418,53 +423,23 @@ class ExchangeFlowAsymmetry(BaseStrategy):
             venue_deviation = bats_deviation
             venue_vol_ratio = current_bats_vol_ratio
 
-        # 1. ESI magnitude (0.0–0.30)
-        # How extreme the venue imbalance is
-        conf_esi = 0.0
-        if direction == "LONG" and venue_esi > 0:
-            conf_esi = min(0.30, 0.30 * min(1.0, venue_esi / 1.0))
-        elif direction == "SHORT" and venue_esi < 0:
-            conf_esi = min(0.30, 0.30 * min(1.0, abs(venue_esi) / 1.0))
+        # 1. ESI magnitude: venue_esi from 0→1 (LONG) or -1→0 (SHORT), use abs
+        c1 = normalize(abs(venue_esi), 0.0, 1.0)
 
-        # 2. Baseline deviation (0.0–0.25)
-        # Z-score style: how far deviation is from zero
-        conf_deviation = 0.0
-        if direction == "LONG" and venue_deviation > 0:
-            conf_deviation = min(0.25, 0.25 * min(1.0, venue_deviation / 0.3))
-        elif direction == "SHORT" and venue_deviation < 0:
-            conf_deviation = min(0.25, 0.25 * min(1.0, abs(venue_deviation) / 0.3))
+        # 2. Baseline deviation: venue_deviation from 0→0.3, higher = higher
+        c2 = normalize(abs(venue_deviation), 0.0, 0.3)
 
-        # 3. Volume confirmation (0.0–0.20)
-        # Volume ratio above 1.5×
-        conf_volume = 0.0
-        if venue_vol_ratio > volume_ratio_threshold:
-            conf_volume = min(
-                0.20,
-                0.20 * min(1.0, (venue_vol_ratio - volume_ratio_threshold) / 1.5 + 0.5),
-            )
+        # 3. Volume confirmation: venue_vol_ratio from threshold→3.0, higher = higher
+        c3 = normalize(venue_vol_ratio, volume_ratio_threshold, volume_ratio_threshold * 2.0)
 
-        # 4. Book alignment (0.0–0.15)
-        # OBI direction matches venue ESI direction
-        conf_alignment = 0.0
-        if direction == "LONG" and current_obi > 0 and venue_esi > 0:
-            conf_alignment = min(0.15, 0.15 * min(1.0, abs(current_obi) / 0.5))
-        elif direction == "SHORT" and current_obi < 0 and venue_esi < 0:
-            conf_alignment = min(0.15, 0.15 * min(1.0, abs(current_obi) / 0.5))
+        # 4. Book alignment: current_obi from -0.5→0.5, alignment = 1 if matches direction
+        alignment = 1.0 if ((direction == "LONG" and current_obi > 0) or (direction == "SHORT" and current_obi < 0)) else 0.0
+        c4 = alignment
 
-        # 5. Cross-venue confluence (0.0–0.10)
-        # Other exchanges also participating
-        conf_confluence = 0.0
+        # 5. Cross-venue confluence: participating from 0→7, higher = higher
         other_exchanges = ["EDGX", "ARCA", "IEX", "EDGA", "BYX", "BZX"]
-        participating = 0
-        for exch in other_exchanges:
-            bid = exchange_bid_sizes.get(exch, 0)
-            ask = exchange_ask_sizes.get(exch, 0)
-            if (bid + ask) > 0:
-                participating += 1
-        conf_confluence = min(0.10, 0.10 * min(1.0, participating / 2.0))
+        participating = sum(1 for exch in other_exchanges if (exchange_bid_sizes.get(exch, 0) + exchange_ask_sizes.get(exch, 0)) > 0)
+        c5 = normalize(participating, 0.0, 7.0)
 
-        confidence = (
-            conf_esi + conf_deviation + conf_volume +
-            conf_alignment + conf_confluence
-        )
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))

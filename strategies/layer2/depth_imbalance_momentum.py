@@ -166,6 +166,7 @@ class DepthImbalanceMomentum(BaseStrategy):
             current_ir, current_ir_roc, direction,
             rolling_data, data, params,
             regime, gex_calc,
+            depth_score=None,
         )
 
         min_confidence = MIN_CONFIDENCE
@@ -330,117 +331,49 @@ class DepthImbalanceMomentum(BaseStrategy):
         params: Dict[str, Any],
         regime: str,
         gex_calc: Any,
+        depth_score=None,
     ) -> float:
         """
-        Compute 7-component confidence score.
+        Compute 5-component confidence score (Family A: simple average).
 
         Returns 0.0–1.0.
         """
-        # Direction-specific IR for scoring
-        if direction == "LONG":
-            ir_extreme = current_ir - 1.0  # How far above 1.0
-        else:
-            ir_extreme = 1.0 - current_ir  # How far below 1.0
+        def normalize(val, vmin, vmax):
+            return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
 
-        # 1. IR magnitude (0.0–0.25)
-        # How extreme the IR is — at threshold = baseline, above = bonus
-        ir_threshold = params.get("ir_threshold_long", 3.0) if direction == "LONG" else params.get("ir_threshold_short", 0.6)
-        conf_ir = 0.0
-        if direction == "LONG":
-            # IR > 3.0 = strong; scale from 0 at IR=1.0 to 0.25 at IR=6.0+
-            if current_ir > 1.0:
-                conf_ir = min(0.25, 0.25 * min(1.0, (current_ir - 1.0) / 5.0))
-        else:
-            # IR < 0.6 = strong; scale from 0 at IR=1.0 to 0.25 at IR=0.1
-            if current_ir < 1.0:
-                conf_ir = min(0.25, 0.25 * min(1.0, (1.0 - current_ir) / 0.5))
+        # 1. IR magnitude: ir_extreme from 0→5 (LONG: current_ir-1.0, SHORT: 1.0-current_ir), higher = higher
+        ir_extreme = current_ir - 1.0 if direction == "LONG" else 1.0 - current_ir
+        ir_range = 5.0 if direction == "LONG" else 0.5
+        c1 = normalize(abs(ir_extreme), 0.0, ir_range)
 
-        # 2. IR ROC strength (0.0–0.20)
-        # How fast the imbalance is changing
-        conf_roc = 0.0
-        if direction == "LONG" and current_ir_roc > 0:
-            conf_roc = min(0.20, 0.20 * min(1.0, current_ir_roc / 0.5))
-        elif direction == "SHORT" and current_ir_roc < 0:
-            conf_roc = min(0.20, 0.20 * min(1.0, abs(current_ir_roc) / 0.5))
+        # 2. IR ROC: current_ir_roc from -0.5→0.5, use abs, higher = higher
+        c2 = normalize(abs(current_ir_roc), 0.0, 0.5)
 
-        # 3. Participant conviction (0.0–0.15)
-        # Avg participants above threshold
-        min_avg_participants = params.get("min_avg_participants", 2.0)
-        conf_participants = 0.05  # baseline (gate A already passed)
+        # 3. Participant conviction: avg_participants from threshold→2×threshold, higher = higher
         depth_snapshot = data.get("depth_snapshot")
+        min_avg_participants = params.get("min_avg_participants", 2.0)
+        avg_participants = 0
         if depth_snapshot:
-            if direction == "LONG":
-                avg_participants = depth_snapshot.get("bid_avg_participants", 0)
-            else:
-                avg_participants = depth_snapshot.get("ask_avg_participants", 0)
-            # Scale: at threshold = 0.10, at 2× threshold = 0.15
-            if avg_participants > min_avg_participants:
-                conf_participants = 0.10 + 0.05 * min(
-                    1.0, (avg_participants - min_avg_participants) / min_avg_participants
-                )
+            avg_participants = depth_snapshot.get("bid_avg_participants", 0) if direction == "LONG" else depth_snapshot.get("ask_avg_participants", 0)
+        c3 = normalize(avg_participants, min_avg_participants, min_avg_participants * 2.0)
 
-        # 4. Depth decay check (0.0–0.10)
-        # Total depth stable (not evaporating)
-        max_total_depth_decay = params.get("max_total_depth_decay", 0.05)
-        conf_depth = 0.05  # baseline (gate B already passed)
-        bid_decay_window = rolling_data.get("depth_decay_bid_5m")
-        ask_decay_window = rolling_data.get("depth_decay_ask_5m")
-        if bid_decay_window and bid_decay_window.count > 0:
-            latest_bid_decay = bid_decay_window.values[-1]
-            if latest_bid_decay >= -max_total_depth_decay * 0.5:
-                conf_depth = 0.10
-            elif latest_bid_decay < -max_total_depth_decay:
-                conf_depth = 0.02
-        if ask_decay_window and ask_decay_window.count > 0:
-            latest_ask_decay = ask_decay_window.values[-1]
-            if latest_ask_decay >= -max_total_depth_decay * 0.5:
-                conf_depth = max(conf_depth, 0.10)
-            elif latest_ask_decay < -max_total_depth_decay:
-                conf_depth = min(conf_depth, 0.02)
-
-        # 5. Volume confirmation (0.0–0.10)
-        # Volume above average
-        volume_min_mult = params.get("volume_min_mult", 1.0)
-        conf_volume = 0.05  # baseline (gate C already passed)
+        # 4. Volume confirmation: vol_ratio from 1.0→2.0, higher = higher
         volume_window = rolling_data.get(KEY_VOLUME_5M)
-        if volume_window and volume_window.count > 0:
-            current_vol = volume_window.latest
-            avg_vol = volume_window.mean
-            if current_vol is not None and avg_vol is not None and avg_vol > 0:
-                vol_ratio = current_vol / avg_vol
-                conf_volume = 0.05 + 0.05 * min(1.0, (vol_ratio - volume_min_mult) / volume_min_mult)
+        vol_ratio = 1.0
+        if volume_window and volume_window.count > 0 and volume_window.mean > 0:
+            vol_ratio = volume_window.latest / volume_window.mean
+        c4 = normalize(vol_ratio, 1.0, 2.0)
 
-        # 6. VAMP validation (0.0–0.10)
-        # VAMP near mid (not divergent)
-        conf_vamp = 0.05  # baseline (validation already passed)
+        # 5. VAMP alignment: vamp_mid_dev from -0.001→0.001
+        vamp_alignment = 1.0
         vamp_levels = rolling_data.get("vamp_levels")
         if vamp_levels:
             vamp_mid_dev = vamp_levels.get("vamp_mid_dev", 0)
-            if direction == "LONG" and vamp_mid_dev >= 0:
-                conf_vamp = 0.10
-            elif direction == "SHORT" and vamp_mid_dev <= 0:
-                conf_vamp = 0.10
-            elif abs(vamp_mid_dev) < 0.0005:
-                conf_vamp = 0.08
+            if direction == "LONG" and vamp_mid_dev < 0:
+                vamp_alignment = 0.0
+            elif direction == "SHORT" and vamp_mid_dev > 0:
+                vamp_alignment = 0.0
+        c5 = vamp_alignment
 
-        # 7. GEX regime alignment (0.0–0.10)
-        # IR direction matches GEX bias
-        conf_gex = 0.05  # baseline
-        if gex_calc and regime:
-            net_gamma = gex_calc.get_net_gamma() if hasattr(gex_calc, "get_net_gamma") else 0
-            if direction == "LONG" and net_gamma > 0:
-                conf_gex = 0.10
-            elif direction == "SHORT" and net_gamma < 0:
-                conf_gex = 0.10
-            elif regime in ("POSITIVE", "NEGATIVE"):
-                if direction == "LONG" and regime == "POSITIVE":
-                    conf_gex = 0.08
-                elif direction == "SHORT" and regime == "NEGATIVE":
-                    conf_gex = 0.08
-
-        # Sum all components
-        confidence = (
-            conf_ir + conf_roc + conf_participants +
-            conf_depth + conf_volume + conf_vamp + conf_gex
-        )
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))
