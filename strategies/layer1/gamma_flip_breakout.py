@@ -44,7 +44,7 @@ FLIP_ZONE_PCT = 0.015           # 1.5% — the transition zone around flip
 STOP_OTHER_SIDE_PCT = 0.01      # 1% — stop on other side of flip
 ATR_MULT = 1.5                   # 1.5× rolling range as ATR proxy
 TARGET_RR = 2.5                  # 1:2.5 risk-reward minimum
-MIN_CONFIDENCE = 0.65            # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.30            # Minimum confidence to emit signal
 MIN_GAMMA_STRENGTH = 100000      # Minimum |net_gamma| for regime confidence
 
 # Regime-adjusted stop multipliers
@@ -316,7 +316,7 @@ class GammaFlipBreakout(BaseStrategy):
         else:
             target = price - (risk * TARGET_RR)
 
-        confidence = self._fade_confidence(
+        confidence = self._compute_confidence(
             risk, price, net_gamma, regime, "short",
             flip_mid, confirmation_score,
         )
@@ -374,7 +374,7 @@ class GammaFlipBreakout(BaseStrategy):
         else:
             target = price + (risk * TARGET_RR)
 
-        confidence = self._fade_confidence(
+        confidence = self._compute_confidence(
             risk, price, net_gamma, regime, "long",
             flip_mid, confirmation_score,
         )
@@ -480,7 +480,7 @@ class GammaFlipBreakout(BaseStrategy):
         else:
             target = price + (risk * TARGET_RR)
 
-        confidence = self._breakout_confidence(
+        confidence = self._compute_confidence(
             risk, price, net_gamma, regime, "long",
             flip_mid, confirmation_score,
         )
@@ -537,7 +537,7 @@ class GammaFlipBreakout(BaseStrategy):
         else:
             target = price - (risk * TARGET_RR)
 
-        confidence = self._breakout_confidence(
+        confidence = self._compute_confidence(
             risk, price, net_gamma, regime, "short",
             flip_mid, confirmation_score,
         )
@@ -584,7 +584,7 @@ class GammaFlipBreakout(BaseStrategy):
         # Fallback: 0.5% of price
         return price * 0.005
 
-    def _fade_confidence(
+    def _compute_confidence(
         self,
         risk: float,
         price: float,
@@ -593,89 +593,62 @@ class GammaFlipBreakout(BaseStrategy):
         side: str,
         flip_mid: float = 0.0,
         confirmation_score: float = 0.5,
+        depth_score: Optional[float] = None,
     ) -> float:
-        """Confidence for fade signals (above flip).
-
-        v2 additions:
-            - confirmation_score component (0.1–0.2 weight)
-            - distance-from-flip-zone component (0.05–0.15 weight)
         """
-        # 1. Risk/reward: tighter risk = higher confidence (0.2–0.3)
-        risk_conf = 0.2 + 0.1 * min(1.0, 0.005 / (risk / price))
+        Compute confidence for fade and breakout signals.
 
-        # 2. Gamma strength: stronger positive gamma = better fade (0.2–0.3)
-        gamma_conf = 0.2 + 0.3 * min(1.0, net_gamma / 1_000_000)
+        Family A — simple average of 4 normalized components:
 
-        # 3. Regime alignment (0.2–0.3)
-        regime_conf = 0.3 if regime == "POSITIVE" else 0.15
+            1. Risk/rward: for fade, tighter risk = higher (range [0, 0.005]);
+               for breakout, wider risk = higher (range [0.005, 0.02]).
+            2. Gamma strength: abs(net_gamma) in [0, 1_000_000], higher = higher.
+            3. Regime alignment: 1.0 if aligned, 0.5 if not.
+            4. Wall proximity: abs(net_gamma) in [0, 500_000], higher = higher.
 
-        # 4. Wall proximity bonus (0.1–0.2)
-        wall_conf = 0.1 + 0.1 * min(1.0, abs(net_gamma) / 500_000)
+        Future (Phase 5):
+            depth_score: if provided, used as 5th component instead of wall proximity.
 
-        # 5. NEW: Regime confirmation (0.1–0.2)
-        confirmation_conf = 0.1 + 0.1 * confirmation_score
-
-        # 6. NEW: Distance from flip zone (0.05–0.15)
-        if flip_mid > 0 and price > 0:
-            distance_pct = abs(price - flip_mid) / price
-            dist_conf = 0.05 + 0.1 * min(1.0, 1.0 - (distance_pct / FLIP_ZONE_PCT))
-        else:
-            dist_conf = 0.05  # neutral if no flip_mid
-
-        # Normalize each component to [0,1] and average
-        norm_risk = (risk_conf - 0.2) / (0.3 - 0.2) if 0.3 != 0.2 else 1.0
-        norm_gamma = (gamma_conf - 0.2) / (0.5 - 0.2) if 0.5 != 0.2 else 1.0
-        norm_regime = (regime_conf - 0.15) / (0.3 - 0.15) if 0.3 != 0.15 else 1.0
-        norm_wall = (wall_conf - 0.1) / (0.2 - 0.1) if 0.2 != 0.1 else 1.0
-        norm_confirm = (confirmation_conf - 0.1) / (0.2 - 0.1) if 0.2 != 0.1 else 1.0
-        norm_dist = (dist_conf - 0.05) / (0.15 - 0.05) if 0.15 != 0.05 else 1.0
-
-        return min(1.0, max(0.0, (norm_risk + norm_gamma + norm_regime + norm_wall + norm_confirm + norm_dist) / 6.0))
-
-    def _breakout_confidence(
-        self,
-        risk: float,
-        price: float,
-        net_gamma: float,
-        regime: str,
-        side: str,
-        flip_mid: float = 0.0,
-        confirmation_score: float = 0.5,
-    ) -> float:
-        """Confidence for breakout signals (below flip).
-
-        v2 additions:
-            - confirmation_score component (0.1–0.2 weight)
-            - distance-from-flip-zone component (0.05–0.15 weight)
+        Returns 0.0–1.0.
         """
-        # 1. Risk/reward: wider risk = higher confidence for breakouts (0.2–0.3)
-        risk_conf = 0.2 + 0.1 * min(1.0, (risk / price) / 0.01)
+        risk_pct = risk / price if price > 0 else 0.0
 
-        # 2. Gamma strength: stronger negative gamma = better breakout (0.2–0.3)
-        gamma_conf = 0.2 + 0.3 * min(1.0, abs(net_gamma) / 1_000_000)
-
-        # 3. Regime alignment (0.2–0.3)
-        regime_conf = 0.3 if regime == "NEGATIVE" else 0.15
-
-        # 4. Wall proximity bonus (0.1–0.2)
-        wall_conf = 0.1 + 0.1 * min(1.0, abs(net_gamma) / 500_000)
-
-        # 5. NEW: Regime confirmation (0.1–0.2)
-        confirmation_conf = 0.1 + 0.1 * confirmation_score
-
-        # 6. NEW: Distance from flip zone (0.05–0.15)
-        if flip_mid > 0 and price > 0:
-            distance_pct = abs(price - flip_mid) / price
-            dist_conf = 0.05 + 0.1 * min(1.0, 1.0 - (distance_pct / FLIP_ZONE_PCT))
+        # 1. Risk/rward — different normalization for fade vs breakout
+        if side in ("short", "long"):
+            # Determine if this is a fade (above flip, positive gamma) or breakout
+            # Heuristic: if regime is POSITIVE, it's a fade; if NEGATIVE, it's a breakout
+            is_breakout = regime == "NEGATIVE"
+            if is_breakout:
+                # Breakout: wider risk = higher confidence, range [0.005, 0.02]
+                risk_norm = (
+                    (risk_pct - 0.005) / (0.02 - 0.005)
+                    if 0.02 != 0.005
+                    else 1.0
+                )
+            else:
+                # Fade: tighter risk = higher confidence, range [0, 0.005]
+                risk_norm = (
+                    1.0 - (risk_pct / 0.005)
+                    if 0.005 > 0
+                    else 1.0
+                )
         else:
-            dist_conf = 0.05  # neutral if no flip_mid
+            risk_norm = 0.5  # unknown side — neutral
 
-        # Normalize each component to [0,1] and average
-        norm_risk = (risk_conf - 0.2) / (0.3 - 0.2) if 0.3 != 0.2 else 1.0
-        norm_gamma = (gamma_conf - 0.2) / (0.5 - 0.2) if 0.5 != 0.2 else 1.0
-        norm_regime = (regime_conf - 0.15) / (0.3 - 0.15) if 0.3 != 0.15 else 1.0
-        norm_wall = (wall_conf - 0.1) / (0.2 - 0.1) if 0.2 != 0.1 else 1.0
-        norm_confirm = (confirmation_conf - 0.1) / (0.2 - 0.1) if 0.2 != 0.1 else 1.0
-        norm_dist = (dist_conf - 0.05) / (0.15 - 0.05) if 0.15 != 0.05 else 1.0
+        # 2. Gamma strength: abs(net_gamma) in [0, 1_000_000]
+        gamma_norm = min(1.0, abs(net_gamma) / 1_000_000)
 
-        return min(1.0, max(0.0, (norm_risk + norm_gamma + norm_regime + norm_wall + norm_confirm + norm_dist) / 6.0))
+        # 3. Regime alignment: 1.0 if aligned, 0.5 if not
+        if regime == "POSITIVE":
+            regime_norm = 1.0 if side in ("short", "long") else 0.5
+        elif regime == "NEGATIVE":
+            regime_norm = 1.0 if side in ("short", "long") else 0.5
+        else:
+            regime_norm = 0.5
+
+        # 4. Wall proximity: abs(net_gamma) in [0, 500_000]
+        wall_norm = min(1.0, abs(net_gamma) / 500_000)
+
+        confidence = (risk_norm + gamma_norm + regime_norm + wall_norm) / 4.0
+
+        return min(1.0, max(0.0, confidence))

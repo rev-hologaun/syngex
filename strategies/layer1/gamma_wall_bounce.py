@@ -44,8 +44,7 @@ WALL_PROXIMITY_PCT = 0.005       # 0.5% — how close price must be to wall
 STOP_PAST_WALL_PCT = 0.004       # 0.4% — stop beyond the wall
 TARGET_RISK_MULT = 1.5           # 1.5× risk for target
 MIN_WALL_GEX = 500000            # Minimum |GEX| to consider a wall
-MIN_CONFIDENCE = 0.25            # Minimum confidence to emit signal
-MAX_CONFIDENCE = 0.85            # Hard cap — wall bounce alone can't be max conviction
+MIN_CONFIDENCE = 0.30            # Minimum confidence to emit signal
 
 
 class GammaWallBounce(BaseStrategy):
@@ -442,54 +441,52 @@ class GammaWallBounce(BaseStrategy):
         vol_score: float = 0.5,
         gex_calc: Any = None,
         price: float = 0.0,
+        depth_score: Optional[float] = None,
     ) -> float:
         """
-        Combine proximity, wall strength, rejection, liquidity validation,
-        and vol support into confidence.
+        Compute confidence for a gamma wall bounce signal.
+
+        Family A — simple average of 4 normalized components (3 core + regime):
+
+        Core components (3):
+            1. Proximity: distance_pct in [0, WALL_PROXIMITY_PCT], closer = higher
+            2. Wall strength: gex_magnitude in [MIN_WALL_GEX, 5_000_000], higher = higher
+            3. Rejection score: in [0, 1.0], higher = higher
+
+        Regime bonus (applied AFTER averaging):
+            +0.1 if aligned (call + POSITIVE or put + NEGATIVE)
+            -0.05 if misaligned
+
+        Future (Phase 5):
+            depth_score: if provided, used as 5th component instead of regime bonus.
 
         Returns 0.0–1.0.
         """
-        # Proximity component: closer = higher confidence (0.3–0.5)
-        proximity_conf = 0.3 + 0.2 * (1 - distance_pct / WALL_PROXIMITY_PCT)
+        # 1. Proximity: closer = higher
+        norm_prox = 1.0 - (distance_pct / WALL_PROXIMITY_PCT) if WALL_PROXIMITY_PCT > 0 else 1.0
 
-        # Wall strength component: higher GEX = higher confidence (0.2–0.3)
-        # Normalize: 500k = low, 5M+ = high
-        strength_conf = 0.2 + 0.3 * min(1.0, gex_magnitude / 5_000_000)
-
-        # Rejection component: 0.2–0.3
-        rejection_conf = 0.2 + 0.1 * rejection_score
-
-        # Normalize each component to [0,1]
-        norm_prox = (proximity_conf - 0.3) / (0.5 - 0.3) if 0.5 != 0.3 else 1.0
-        norm_strength = (strength_conf - 0.2) / (0.5 - 0.2) if 0.5 != 0.2 else 1.0
-        norm_reject = (rejection_conf - 0.2) / (0.3 - 0.2) if 0.3 != 0.2 else 1.0
-
-        # Regime component
-        regime_bonus = 0.0
-        if side == "call" and regime == "POSITIVE":
-            regime_bonus = 0.15  # dealers sell rallies in positive regime
-        elif side == "put" and regime == "NEGATIVE":
-            regime_bonus = 0.15  # dealers buy dips in negative regime
-        elif regime_bonus == 0:
-            regime_bonus = -0.10  # misaligned regime — still fire but penalize
-        norm_regime = regime_bonus / 0.15 if regime_bonus > 0 else 0.0
-
-        # Liquidity validation component: 0.0–0.2 weight
-        norm_liquidity = liq_score
-
-        # Vol support component: 0.0–0.15 weight
-        norm_vol_support = vol_score
-
-        # Weighted average with depth-aware components
-        confidence = (
-            0.25 * norm_prox +
-            0.21 * norm_strength +
-            0.18 * norm_reject +
-            0.15 * norm_regime +
-            0.12 * norm_liquidity +
-            0.09 * norm_vol_support
+        # 2. Wall strength: higher GEX = higher
+        norm_strength = (
+            (gex_magnitude - MIN_WALL_GEX) / (5_000_000 - MIN_WALL_GEX)
+            if 5_000_000 != MIN_WALL_GEX
+            else 1.0
         )
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+
+        # 3. Rejection score: already [0, 1]
+        norm_reject = rejection_score
+
+        # Average core components
+        confidence = (norm_prox + norm_strength + norm_reject) / 3.0
+
+        # Regime bonus (applied after averaging)
+        if side == "call" and regime == "POSITIVE":
+            confidence += 0.1
+        elif side == "put" and regime == "NEGATIVE":
+            confidence += 0.1
+        else:
+            confidence -= 0.05
+
+        return min(1.0, max(0.0, confidence))
 
     # ------------------------------------------------------------------
     # Depth-aware helpers

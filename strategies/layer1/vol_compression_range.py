@@ -56,7 +56,7 @@ logger = logging.getLogger("Syngex.Strategies.VolCompressionRange")
 COMPRESSION_PCT = 0.003                          # 0.3% max range for compression
 MIN_RANGE_BARS = 20                              # Minimum data points in rolling window
 WALL_EDGE_PROXIMITY = 0.004                      # 0.4% from wall for edge trade
-MIN_CONFIDENCE = 0.45                            # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.30                            # Minimum confidence to emit signal
 STOP_PCT = 0.006                                 # 0.6% stop (wider for scalping)
 TARGET_RISK_MULT = 1.5                           # 1.5× risk for target
 STD_THRESHOLD = 0.002                            # Max std of price for compression
@@ -488,64 +488,47 @@ class VolCompressionRange(BaseStrategy):
         iv_compressed: bool = True,
         delta_density: float = 0.0,
         regime_stop_mult: float = 1.0,
+        depth_score: Optional[float] = None,
     ) -> float:
         """
         Compute confidence for a range edge signal.
 
-        8 components (was 6):
-        1. Position in range (0.2–0.3)
-        2. Wall proximity (0.2–0.3)
-        3. Range tightness (0.1–0.2)
-        4. Wall GEX strength (0.1–0.2)
-        5. Data quality (0.0–0.1)
-        6. Regime alignment (0.1)
-        7. IV compression (0.0–0.1) — NEW
-        8. Delta density (0.0–0.1) — NEW
+        Family A — simple average of 5 normalized components:
+
+            1. Position in range: 0–1, closer to edge = higher.
+            2. Wall proximity: wall_distance in [0, WALL_EDGE_PROXIMITY], closer = higher.
+            3. Range tightness: range_pct in [0, COMPRESSION_PCT], tighter = higher.
+            4. Wall strength: abs(wall_gex) in [0, 5_000_000], higher = higher.
+            5. Data quality: window_count in [0, 200], more = higher.
+
+        Future (Phase 5):
+            depth_score: if provided, used as 6th component.
+
+        Returns 0.0–1.0.
         """
-        # 1. Position confidence
+        # 1. Position in range: closer to edge = higher
         if direction == "short":
-            edge_proximity = 1.0 - position_in_range
+            norm_pos = 1.0 - position_in_range
         else:
-            edge_proximity = position_in_range
-        position_conf = 0.2 + 0.1 * edge_proximity
+            norm_pos = position_in_range
 
-        # 2. Wall proximity
-        wall_conf = 0.2 + 0.1 * (1 - wall_distance / WALL_EDGE_PROXIMITY)
+        # 2. Wall proximity: closer = higher, range [0, WALL_EDGE_PROXIMITY]
+        norm_wall = (
+            1.0 - (wall_distance / WALL_EDGE_PROXIMITY)
+            if WALL_EDGE_PROXIMITY > 0
+            else 1.0
+        )
 
-        # 3. Range tightness
-        tightness_conf = 0.1 + 0.1 * max(0, 1 - range_pct / COMPRESSION_PCT)
+        # 3. Range tightness: tighter = higher, range [0, COMPRESSION_PCT]
+        norm_tight = max(0.0, 1.0 - (range_pct / COMPRESSION_PCT)) if COMPRESSION_PCT > 0 else 1.0
 
-        # 4. Wall strength
-        strength_conf = 0.1 + 0.1 * min(1.0, abs(wall_gex) / 5_000_000)
+        # 4. Wall strength: higher GEX = higher, range [0, 5_000_000]
+        norm_strength = min(1.0, abs(wall_gex) / 5_000_000)
 
-        # 5. Data quality
-        data_conf = min(0.1, window_count / 200)
+        # 5. Data quality: more data = higher, range [0, 200]
+        norm_data = min(1.0, window_count / 200.0)
 
-        # 6. Regime bonus
-        regime_conf = 0.1
-
-        # 7. IV compression bonus (NEW)
-        iv_conf = 0.1 if iv_compressed else 0.0
-
-        # 8. Delta density bonus (NEW)
-        delta_conf = 0.1 * delta_density
-
-        # Normalize each to [0,1] and average
-        norm_pos = (position_conf - 0.2) / (0.3 - 0.2) if 0.3 != 0.2 else 1.0
-        norm_wall = (wall_conf - 0.2) / (0.3 - 0.2) if 0.3 != 0.2 else 1.0
-        norm_tight = (tightness_conf - 0.1) / (0.2 - 0.1) if 0.2 != 0.1 else 1.0
-        norm_strength = (strength_conf - 0.1) / (0.2 - 0.1) if 0.2 != 0.1 else 1.0
-        norm_data = data_conf / 0.1 if 0.1 != 0 else 0.0
-        norm_regime = regime_conf / 0.1 if 0.1 != 0 else 0.0
-        norm_iv = iv_conf / 0.1 if 0.1 != 0 else 0.0
-        norm_delta = delta_conf / 0.1 if 0.1 != 0 else 0.0
-
-        confidence = (norm_pos + norm_wall + norm_tight + norm_strength +
-                      norm_data + norm_regime + norm_iv + norm_delta) / 8.0
-
-        # Put wall bonus (only meaningful for LONG side)
-        if is_put_wall:
-            confidence += 0.05
+        confidence = (norm_pos + norm_wall + norm_tight + norm_strength + norm_data) / 5.0
 
         return min(1.0, max(0.0, confidence))
 

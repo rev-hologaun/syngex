@@ -52,7 +52,7 @@ PIN_MAX_RANGE_PCT = 0.003     # 0.3% — max rolling range for pin detection
 WALL_PROXIMITY_PCT = 0.003    # 0.3% — price must be near wall for breakout
 VOLUME_SURGE_MULT = 1.5       # 1.5× average volume = confirmation
 MIN_WALL_GEX = 500000         # Minimum |GEX| for wall consideration
-MIN_CONFIDENCE = 0.50         # was 0.25
+MIN_CONFIDENCE = 0.30         # was 0.25
 TARGET_RISK_MULT = 2.0        # 2× risk for squeeze targets
 MIN_MASSIVE_WALL_GEX = 5_000_000  # Fallback threshold for POSITIVE regime filter
 
@@ -654,38 +654,40 @@ class GammaSqueeze(BaseStrategy):
         depth_snapshot: Optional[Dict[str, Any]] = None,
         wall_strength: float = 0.5,
         liquidity_vacuum: float = 0.0,
+        depth_score: Optional[float] = None,
     ) -> float:
         """
-        Confidence for squeeze trade (v2 with depth-aware components).
+        Confidence for squeeze trade.
 
-        Higher when:
-            - Wall GEX is massive (bigger squeeze potential)
-            - Net gamma is positive (dealer acceleration)
-            - Risk is tight (clean breakout)
-            - Liquidity vacuum is strong (depth collapse)
-            - Wall has high IV strength (active hedging)
+        Family A — simple average of 5 normalized components:
+
+            1. Wall GEX: abs(wall_gex) in [0, 5_000_000], higher = higher.
+            2. Net gamma: net_gamma in [0, 500_000], higher = higher.
+            3. Risk tightness: risk_pct in [0, 0.005], tighter = higher.
+            4. Liquidity vacuum: in [0, 1], higher = higher.
+            5. Wall IV strength: in [0, 1], higher = higher.
+
+        Future (Phase 5):
+            depth_score: if provided, used as 6th component.
+
+        Returns 0.0–1.0.
         """
-        # Existing: wall strength (GEX)
-        wall_conf = 0.2 + 0.15 * min(1.0, abs(wall_gex) / 5_000_000)
+        # 1. Wall GEX: higher = higher, range [0, 5_000_000]
+        norm_wall = min(1.0, abs(wall_gex) / 5_000_000)
 
-        # Existing: net gamma
-        gamma_conf = 0.2 + 0.15 * min(1.0, net_gamma / 500_000)
+        # 2. Net gamma: higher = higher, range [0, 500_000]
+        norm_gamma = min(1.0, net_gamma / 500_000) if net_gamma > 0 else 0.0
 
-        # Existing: risk tightness
-        risk_pct = risk / price
-        risk_conf = 0.15 + 0.1 * min(1.0, 0.005 / max(risk_pct, 0.001))
+        # 3. Risk tightness: tighter = higher, range [0, 0.005]
+        risk_pct = risk / price if price > 0 else 0.005
+        norm_risk = 1.0 - min(1.0, risk_pct / 0.005)
 
-        # NEW: Liquidity vacuum score (0.1-0.2 weight)
-        vacuum_conf = 0.1 + 0.1 * liquidity_vacuum
+        # 4. Liquidity vacuum: already [0, 1]
+        norm_vacuum = liquidity_vacuum
 
-        # NEW: Wall IV strength (0.05-0.1 weight)
-        iv_conf = 0.05 + 0.05 * wall_strength
+        # 5. Wall IV strength: already [0, 1]
+        norm_iv = wall_strength
 
-        # Normalize each component to [0,1] and average
-        norm_wall = (wall_conf - 0.2) / (0.35 - 0.2) if 0.35 != 0.2 else 1.0
-        norm_gamma = (gamma_conf - 0.2) / (0.35 - 0.2) if 0.35 != 0.2 else 1.0
-        norm_risk = (risk_conf - 0.15) / (0.25 - 0.15) if 0.25 != 0.15 else 1.0
-        norm_vacuum = (vacuum_conf - 0.1) / (0.2 - 0.1) if 0.2 != 0.1 else 1.0
-        norm_iv = (iv_conf - 0.05) / (0.1 - 0.05) if 0.1 != 0.05 else 1.0
+        confidence = (norm_wall + norm_gamma + norm_risk + norm_vacuum + norm_iv) / 5.0
 
-        return min(1.0, max(0.0, (norm_wall + norm_gamma + norm_risk + norm_vacuum + norm_iv) / 5.0))
+        return min(1.0, max(0.0, confidence))

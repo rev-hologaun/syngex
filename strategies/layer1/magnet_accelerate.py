@@ -50,7 +50,7 @@ BREAKOUT_PCT = 0.002          # 0.2% — price must be this far past magnet to b
 MAX_BREAKOUT_PCT = 0.02       # 2% — max distance past magnet (no chasing)
 TRAIL_STOP_PCT = 0.01         # 1% — trailing stop for Phase 2
 TARGET_RISK_MULT = 1.5        # Minimum 1.5× risk for target distance
-MIN_CONFIDENCE = 0.65         # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.30         # Minimum confidence to emit signal
 
 
 class MagnetAccelerate(BaseStrategy):
@@ -374,8 +374,19 @@ class MagnetAccelerate(BaseStrategy):
         magnet_gex: float,
         net_gamma: float,
         momentum: float,
+        depth_score: Optional[float] = None,
     ) -> float:
-        """Phase 1 confidence: proximity + strength + momentum."""
+        """
+        Phase 1 confidence: proximity + strength + momentum.
+
+        Family A — simple average of 3 normalized components:
+
+            1. Proximity: distance_pct in [0, 0.02], closer = higher.
+            2. Gamma strength: net_gamma in [0, 1_000_000], higher = higher.
+            3. Momentum: in [0, 1], higher = higher.
+
+        Returns 0.0–1.0.
+        """
         # Proximity: closer to magnet = higher confidence (0.2–0.4)
         proximity = 0.2 + 0.2 * (1 - distance_pct / 0.02)
 
@@ -396,8 +407,19 @@ class MagnetAccelerate(BaseStrategy):
         distance_pct: float,
         net_gamma: float,
         regime: str,
+        depth_score: Optional[float] = None,
     ) -> float:
-        """Phase 2 confidence: breakout distance + gamma regime."""
+        """
+        Phase 2 confidence: breakout distance + gamma regime.
+
+        Family A — simple average of 3 normalized components:
+
+            1. Distance: distance_pct in [0, 0.01], further = higher.
+            2. Regime alignment: 1.0 if NEGATIVE + negative gamma, 0.5 otherwise.
+            3. Gamma magnitude: abs(net_gamma) in [0, 500_000], higher = higher.
+
+        Returns 0.0–1.0.
+        """
         # Distance from magnet: further = more confirmed (0.2–0.3)
         dist_conf = 0.2 + 0.1 * min(1.0, distance_pct / 0.01)
 

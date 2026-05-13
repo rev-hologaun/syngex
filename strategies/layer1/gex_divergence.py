@@ -52,7 +52,7 @@ logger = logging.getLogger("Syngex.Strategies.GEXDivergence")
 DIVERGENCE_MIN_SLOPE = 0.0005   # Minimum slope magnitude (0.05% — catches subtler divergences)
 DIVERGENCE_WINDOW = 30           # Number of points for slope calculation
 CONFIRMATION_CANDLE_PCT = 0.002  # 0.2% candle for confirmation
-MIN_CONFIDENCE = 0.25            # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.30            # Minimum confidence to emit signal
 STOP_PCT = 0.005                 # 0.5% stop
 TARGET_RISK_MULT = 1.5           # 1.5× risk for target
 MIN_DATA_POINTS = 15             # Minimum data points for slope calculation
@@ -410,39 +410,55 @@ class GEXDivergence(BaseStrategy):
         gamma_accel: Optional[Dict] = None,
         wall_bonus: float = 0.0,
         regime_intensity: float = 0.0,
+        depth_score: Optional[float] = None,
     ) -> float:
-        """Compute divergence signal confidence — 8 components (was 5)."""
-        price_conf = 0.15 + 0.10 * min(1.0, abs(price_slope) / 0.01)
-        gamma_conf = 0.15 + 0.10 * min(1.0, abs(gamma_slope) / 0.01)
-        slope_ratio = min(abs(price_slope), abs(gamma_slope)) / max(abs(price_slope), abs(gamma_slope)) if max(abs(price_slope), abs(gamma_slope)) > 0 else 0
-        balance_conf = 0.1 + 0.05 * slope_ratio
+        """
+        Compute divergence signal confidence.
+
+        Family A — simple average of 5 normalized components:
+
+            1. Price slope: abs(price_slope) in [0, 0.01], higher = higher.
+            2. Gamma slope: abs(gamma_slope) in [0, 0.01], higher = higher.
+            3. Balance (slope ratio): min(|price|, |gamma|) / max(|price|, |gamma|) in [0, 1].
+            4. Data quality: min(window counts) in [MIN_DATA_POINTS, MIN_DATA_POINTS+100].
+            5. Regime alignment: 1.0 if aligned, 0.5 if not.
+
+        Future (Phase 5):
+            depth_score: if provided, used as 5th component instead of regime.
+
+        Returns 0.0–1.0.
+        """
+        # 1. Price slope: abs in [0, 0.01]
+        norm_price = min(1.0, abs(price_slope) / 0.01)
+
+        # 2. Gamma slope: abs in [0, 0.01]
+        norm_gamma = min(1.0, abs(gamma_slope) / 0.01)
+
+        # 3. Balance: slope ratio in [0, 1]
+        max_slope = max(abs(price_slope), abs(gamma_slope))
+        norm_balance = (
+            min(abs(price_slope), abs(gamma_slope)) / max_slope
+            if max_slope > 0
+            else 0.0
+        )
+
+        # 4. Data quality: window count in [MIN_DATA_POINTS, MIN_DATA_POINTS+100]
         min_count = min(price_window.count, gamma_window.count)
-        data_conf = min(0.1, (min_count - MIN_DATA_POINTS) / 100)
-        regime_conf = 0.0
+        norm_data = (
+            (min_count - MIN_DATA_POINTS) / 100.0
+            if 100.0 != 0
+            else 1.0
+        )
+        norm_data = min(1.0, max(0.0, norm_data))
+
+        # 5. Regime alignment: 1.0 if aligned, 0.5 if not
         if not regime_misaligned:
-            if divergence_type == "bullish" and regime == "POSITIVE":
-                regime_conf = 0.1
-            elif divergence_type == "bearish" and regime == "NEGATIVE":
-                regime_conf = 0.1
-        wall_conf = wall_bonus
-        intensity_conf = regime_intensity
-        accel_conf = 0.0
-        if price_accel and gamma_accel:
-            price_accel_ok = abs(price_accel.get("acceleration", 0)) >= ACCEL_MIN_PRICE
-            gamma_accel_ok = abs(gamma_accel.get("acceleration", 0)) >= ACCEL_MIN_GAMMA
-            if price_accel_ok and gamma_accel_ok:
-                accel_conf = 0.1
-            elif price_accel_ok or gamma_accel_ok:
-                accel_conf = 0.05
-        norm_price = (price_conf - 0.15) / (0.25 - 0.15) if 0.25 != 0.15 else 1.0
-        norm_gamma = (gamma_conf - 0.15) / (0.25 - 0.15) if 0.25 != 0.15 else 1.0
-        norm_balance = (balance_conf - 0.1) / (0.15 - 0.1) if 0.15 != 0.1 else 1.0
-        norm_data = data_conf / 0.1 if 0.1 != 0 else 0.0
-        norm_regime = regime_conf / 0.1 if 0.1 != 0 else 0.0
-        norm_wall = wall_conf / WALL_PROXIMITY_BONUS if WALL_PROXIMITY_BONUS != 0 else 0.0
-        norm_intensity = intensity_conf / STRONG_REGIME_CONF_BONUS if STRONG_REGIME_CONF_BONUS != 0 else 0.0
-        norm_accel = accel_conf / 0.1 if 0.1 != 0 else 0.0
-        confidence = (norm_price + norm_gamma + norm_balance + norm_data + norm_regime + norm_wall + norm_intensity + norm_accel) / 8.0
+            norm_regime = 1.0
+        else:
+            norm_regime = 0.5
+
+        confidence = (norm_price + norm_gamma + norm_balance + norm_data + norm_regime) / 5.0
+
         return min(1.0, max(0.0, confidence))
 
     # ------------------------------------------------------------------

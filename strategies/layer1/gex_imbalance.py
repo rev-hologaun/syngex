@@ -54,7 +54,7 @@ STRONG_CALL_RATIO = 0.75     # very strong short signal
 MIN_MESSAGES = 20            # minimum data points for signal quality
 STOP_VOL_MULT = 2.5          # stop = 2.5x rolling price std dev
 TARGET_RISK_MULT = 1.5       # target = 1.5x stop distance
-MIN_CONFIDENCE = 0.55        # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.30        # Minimum confidence to emit signal
 
 # v2 Imbalance-Velocity constants
 RATIO_ROC_WINDOW = 5         # Number of ticks back for ROC
@@ -366,44 +366,50 @@ class GEXImbalance(BaseStrategy):
         regime_intensity: float, total_msgs: int,
         vwap_dev: Optional[float], roc: Optional[float],
         depth_alignment: Optional[float],
+        depth_score: Optional[float] = None,
     ) -> float:
-        """Combine 6 components into a normalized confidence score [0, 1]."""
-        # 1. Ratio extremity (0.15–0.25)
+        """
+        Compute confidence for GEX imbalance signal.
+
+        Family A — simple average of 4 normalized components:
+
+            1. Ratio extremity: how extreme the call/put ratio is.
+               For put-heavy: ratio in [0, PUT_HEAVY_RATIO], lower = higher.
+               For call-heavy: ratio in [CALL_HEAVY_RATIO, 3.0], higher = higher.
+            2. Bias strength: in [0, 1], how extreme the imbalance is.
+            3. Depth alignment: in [0, 1], liquidity support for bias.
+            4. VWAP deviation: in [0, 3.0] std-dev units, further = higher.
+
+        Future (Phase 5):
+            depth_score: if provided, used as 5th component.
+
+        Returns 0.0–1.0.
+        """
+        # 1. Ratio extremity: normalize to [0, 1]
         if ratio < PUT_HEAVY_RATIO:
-            if ratio <= STRONG_PUT_RATIO:
-                ratio_conf = 0.25
-            else:
-                ratio_conf = 0.15 + 0.10 * (1 - ratio / PUT_HEAVY_RATIO)
+            # Put-heavy: lower ratio = higher confidence
+            norm_ratio = 1.0 - (ratio / PUT_HEAVY_RATIO) if PUT_HEAVY_RATIO > 0 else 1.0
         elif ratio > CALL_HEAVY_RATIO:
-            if ratio >= STRONG_CALL_RATIO:
-                ratio_conf = 0.25
-            else:
-                ratio_conf = 0.15 + 0.10 * min(1.0, (ratio - CALL_HEAVY_RATIO) / (STRONG_CALL_RATIO - CALL_HEAVY_RATIO))
+            # Call-heavy: higher ratio = higher confidence, range [CALL_HEAVY_RATIO, 3.0]
+            norm_ratio = min(1.0, (ratio - CALL_HEAVY_RATIO) / (3.0 - CALL_HEAVY_RATIO))
         else:
-            ratio_conf = 0.15  # neutral zone — baseline
+            norm_ratio = 0.0  # neutral zone
 
-        # 2. Bias strength (0.1–0.15)
-        bias_conf = 0.1 + 0.05 * bias_strength
+        # 2. Bias strength: already [0, 1]
+        norm_bias = bias_strength
 
-        # 3. Regime intensity (0.05–0.2) — magnitude-scaled
-        regime_conf = 0.05 + 0.15 * min(1.0, abs(regime_intensity) / 0.15) if regime_intensity else 0.05
-
-        # 4. ROC (0.05–0.15) — velocity confirmation
-        if roc is not None:
-            roc_conf = 0.05 + 0.10 * min(1.0, abs(roc) / RATIO_ROC_THRESHOLD)
-        else:
-            roc_conf = 0.05  # insufficient history → baseline
-
-        # 5. Depth alignment (0.05–0.15)
+        # 3. Depth alignment: in [0, 1]
         if depth_alignment is not None:
-            depth_conf = 0.05 + 0.10 * depth_alignment
+            norm_depth = depth_alignment
         else:
-            depth_conf = 0.10  # no depth data → neutral (0.5 maps to 0.10)
+            norm_depth = 0.5  # no data → neutral
 
-        # 6. VWAP deviation (0.05–0.15)
+        # 4. VWAP deviation: in [0, 3.0]
         if vwap_dev is not None:
-            vwap_conf = 0.05 + 0.10 * min(1.0, vwap_dev / 3.0)
+            norm_vwap = min(1.0, vwap_dev / 3.0)
         else:
-            vwap_conf = 0.05  # no data → baseline
+            norm_vwap = 0.0  # no data
 
-        return min(1.0, max(0.0, (ratio_conf + bias_conf + regime_conf + roc_conf + depth_conf + vwap_conf) / 6.0))
+        confidence = (norm_ratio + norm_bias + norm_depth + norm_vwap) / 4.0
+
+        return min(1.0, max(0.0, confidence))

@@ -59,8 +59,7 @@ logger = logging.getLogger("Syngex.Strategies.ConfluenceReversal")
 
 CONFLUENCE_DISTANCE_PCT = 0.003  # 0.3% — max distance for confluence
 MIN_STRUCTURAL_SIGNALS = 1        # Wall-level confluence alone is valid
-MAX_CONFIDENCE_BASE = 0.6         # Base confidence for score 3
-MIN_CONFIDENCE = 0.65             # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.30             # Minimum confidence to emit signal
 STOP_PCT = 0.008                  # 0.8% stop
 TARGET_RISK_MULT = 2.0            # 2× risk for target
 
@@ -340,39 +339,24 @@ class ConfluenceReversal(BaseStrategy):
         if risk <= 0:
             return None
 
-        # === 7-component confidence ===
-        # 1. Base from structural count
-        base_conf = 0.35 if structural_count >= 3 else 0.25
+        # === 4-component confidence (Family A) ===
+        # 1. Base from structural count: normalized to [0, 1]
+        #    score 3 → 1.0, score 2 → 0.5, score 1 → 0.25
+        norm_base = min(1.0, structural_count / 3.0)
 
-        # 2. Wall integrity (IV-weighted)
+        # 2. Wall integrity: already [0, 1] from _compute_wall_integrity
         wall_integrity = self._compute_wall_integrity(
             abs(gex), wall_side, rolling_data
         )
-        integrity_conf = wall_integrity * 0.20
+        norm_integrity = wall_integrity
 
-        # 3. Technical signal
-        tech_conf = 0.05 if level.get("has_technical") else 0.0
+        # 3. Velocity: already [0, 1]
+        norm_velocity = velocity_score
 
-        # 4. Regime alignment
-        if regime == "NEGATIVE":
-            regime_conf = 0.20
-        elif regime == "POSITIVE":
-            regime_conf = 0.05
-        else:
-            regime_conf = 0.10
+        # 4. Absorption: already [0, 1]
+        norm_absorption = absorption_score
 
-        # 5. Velocity
-        velocity_conf = 0.05 + 0.10 * velocity_score
-
-        # 6. Absorption
-        absorption_conf = 0.05 + 0.10 * absorption_score
-
-        # 7. Trend penalty
-        trend = price_window.trend if price_window else "UNKNOWN"
-        trend_conf = 0.0 if trend in ("FLAT", "UNKNOWN") else -0.05
-
-        confidence = (base_conf + integrity_conf + tech_conf + regime_conf
-                      + velocity_conf + absorption_conf + trend_conf)
+        confidence = (norm_base + norm_integrity + norm_velocity + norm_absorption) / 4.0
         confidence = min(1.0, max(0.0, confidence))
 
         if confidence < MIN_CONFIDENCE:
@@ -450,29 +434,24 @@ class ConfluenceReversal(BaseStrategy):
         if risk <= 0:
             return None
 
-        # === 7-component confidence ===
-        base_conf = 0.35 if structural_count >= 3 else 0.25
+        # === 4-component confidence (Family A) ===
+        # 1. Base from structural count: normalized to [0, 1]
+        #    score 3 → 1.0, score 2 → 0.5, score 1 → 0.25
+        norm_base = min(1.0, structural_count / 3.0)
+
+        # 2. Wall integrity: already [0, 1] from _compute_wall_integrity
         wall_integrity = self._compute_wall_integrity(
             abs(gex), wall_side, rolling_data
         )
-        integrity_conf = wall_integrity * 0.20
-        tech_conf = 0.05 if level.get("has_technical") else 0.0
+        norm_integrity = wall_integrity
 
-        if regime == "POSITIVE":
-            regime_conf = 0.20
-        elif regime == "NEGATIVE":
-            regime_conf = 0.05
-        else:
-            regime_conf = 0.10
+        # 3. Velocity: already [0, 1]
+        norm_velocity = velocity_score
 
-        velocity_conf = 0.05 + 0.10 * velocity_score
-        absorption_conf = 0.05 + 0.10 * absorption_score
+        # 4. Absorption: already [0, 1]
+        norm_absorption = absorption_score
 
-        trend = price_window.trend if price_window else "UNKNOWN"
-        trend_conf = 0.0 if trend in ("FLAT", "UNKNOWN") else -0.05
-
-        confidence = (base_conf + integrity_conf + tech_conf + regime_conf
-                      + velocity_conf + absorption_conf + trend_conf)
+        confidence = (norm_base + norm_integrity + norm_velocity + norm_absorption) / 4.0
         confidence = min(1.0, max(0.0, confidence))
 
         if confidence < MIN_CONFIDENCE:
