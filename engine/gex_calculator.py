@@ -335,8 +335,10 @@ class GEXCalculator:
 
         The Gamma Flip is the strike where net gamma shifts from
         positive (above) to negative (below) — i.e. the highest
-        strike where cumulative net gamma goes negative when
-        scanning from high to low.
+        strike where cumulative normalized net gamma goes negative when
+        scanning from high to low. Uses normalized (per-message average)
+        gamma values, consistent with gamma_walls and other regime
+        detection functions.
 
         Returns the flip strike price, or None if no flip detected.
         """
@@ -347,7 +349,7 @@ class GEXCalculator:
         cumulative = 0.0
 
         for strike in sorted_strikes:
-            cumulative += self._ladder[strike].net_gamma
+            cumulative += self._ladder[strike].normalized_gamma()
             if cumulative < 0:
                 return strike
 
