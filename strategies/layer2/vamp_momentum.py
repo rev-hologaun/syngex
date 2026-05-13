@@ -254,76 +254,51 @@ class VampMomentum(BaseStrategy):
         gex_calc: Any,
         bid_levels: List[Dict[str, Any]],
         ask_levels: List[Dict[str, Any]],
+        depth_score: Optional[float] = None,
     ) -> float:
         """
-        Compute 7-component confidence score.
+        Compute 5-component simple average confidence score (Family A).
+
+        Each component normalizes to [0,1], then average equally (÷5).
 
         Returns 0.0–1.0.
         """
+        def normalize(val: float, vmin: float, vmax: float) -> float:
+            return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
+
         params = self._params
 
-        # 1. VAMP deviation magnitude (0.0–0.25)
-        # |Δ_VAMP| scaled linearly; at threshold = ~0.15, at 5× threshold = 0.25
+        # 1. VAMP deviation: abs(vamp_mid_dev) from 0→0.0025 (threshold=0.0005, 5x=0.0025), higher = higher
         dev_threshold = params.get("vamp_mid_dev_threshold", 0.0005)
-        dev_mag = abs(vamp_mid_dev)
-        conf_dev = min(0.25, 0.15 * (dev_mag / dev_threshold) if dev_threshold > 0 else 0.0)
+        c1 = normalize(abs(vamp_mid_dev), 0.0, dev_threshold * 5.0)
 
-        # 2. VAMP ROC strength (0.0–0.20)
-        # |ROC| scaled, direction-aligned (boost if ROC matches direction)
+        # 2. VAMP ROC: abs(vamp_roc) from 0→0.01, aligned = 1.0, misaligned = 0.25
         roc_magnitude = abs(vamp_roc)
-        roc_aligned = vamp_roc > 0 if direction == "LONG" else vamp_roc < 0
-        conf_roc = 0.20 * min(1.0, roc_magnitude / 0.01) if roc_aligned else 0.05
-
-        # 3. Participant conviction (0.0–0.15)
-        min_participants = params.get("min_avg_participants", 1.5)
-        if min_participants > 0:
-            conf_participants = 0.15 * min(1.0, avg_participants / (min_participants * 2))
+        roc_aligned = (vamp_roc > 0 if direction == "LONG" else vamp_roc < 0)
+        if roc_aligned:
+            c2 = normalize(roc_magnitude, 0.0, 0.01)
         else:
-            conf_participants = 0.05
+            c2 = 0.25  # baseline for misaligned
 
-        # 4. Liquidity density (0.0–0.15)
-        liquidity_density_min_mult = params.get("liquidity_density_min_mult", 1.2)
-        conf_density = 0.0
+        # 3. Participant conviction: avg_participants from min_participants→2×min_participants, higher = higher
+        min_participants = params.get("min_avg_participants", 1.5)
+        c3 = normalize(avg_participants, min_participants, min_participants * 2.0)
+
+        # 4. Liquidity density: density_ratio from 0→2.0, higher = higher
+        density_ratio = 0.0
         if depth_density_history and depth_density_history.count > 0:
             ma_depth = depth_density_history.mean or 0
             if ma_depth > 0:
                 density_ratio = current_total_size / ma_depth
-                # Ratio at threshold = 0.10, above 1.5× threshold = 0.15
-                conf_density = min(0.15, 0.10 * (density_ratio / liquidity_density_min_mult))
+        c4 = normalize(density_ratio, 0.0, 2.0)
 
-        # 5. Spread stability (0.0–0.10)
-        conf_spread = 0.0
+        # 5. Spread stability: spread_ratio from 0→1.0, lower = more stable, invert
+        spread_ratio = 1.0
         if spread_ma_window and spread_ma_window.count > 0:
             ma_spread = spread_ma_window.mean or 0
-            if ma_spread > 0 and current_spread < ma_spread:
-                # How much below MA? Closer to 0 = more stable
+            if ma_spread > 0:
                 spread_ratio = current_spread / ma_spread
-                conf_spread = 0.10 * (1.0 - spread_ratio)
+        c5 = 1.0 - normalize(spread_ratio, 0.0, 1.0)
 
-        # 6. GEX regime alignment (0.0–0.10)
-        # VAMP direction matches GEX bias
-        conf_gex = 0.05  # baseline
-        if gex_calc and regime:
-            net_gamma = gex_calc.get_net_gamma() if hasattr(gex_calc, "get_net_gamma") else 0
-            if direction == "LONG" and net_gamma > 0:
-                conf_gex = 0.10
-            elif direction == "SHORT" and net_gamma < 0:
-                conf_gex = 0.10
-            elif regime in ("POSITIVE", "NEGATIVE"):
-                # Regime provides partial alignment
-                if direction == "LONG" and regime == "POSITIVE":
-                    conf_gex = 0.08
-                elif direction == "SHORT" and regime == "NEGATIVE":
-                    conf_gex = 0.08
-
-        # 7. Depth level quality (0.0–0.05)
-        # Number of levels with participants > 1
-        total_levels = len(bid_levels) + len(ask_levels)
-        quality_levels = sum(
-            1 for l in bid_levels + ask_levels if l.get("participants", 0) > 1
-        )
-        conf_quality = 0.05 * (quality_levels / total_levels) if total_levels > 0 else 0.0
-
-        # Sum all components
-        confidence = conf_dev + conf_roc + conf_participants + conf_density + conf_spread + conf_gex + conf_quality
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))

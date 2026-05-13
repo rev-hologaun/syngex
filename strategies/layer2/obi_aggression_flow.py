@@ -239,102 +239,51 @@ class ObiAggressionFlow(BaseStrategy):
         direction: str,
         regime: str,
         gex_calc: Any,
+        depth_score: Optional[float] = None,
     ) -> float:
         """
-        Compute 7-component confidence score.
+        Compute 5-component simple average confidence score (Family A).
+
+        Each component normalizes to [0,1], then average equally (÷5).
 
         Returns 0.0–1.0.
         """
-        # --- 1. OBI magnitude (0.0–0.25) ---
-        # |OBI| scaled linearly; at threshold = ~0.15, at 1.0 = 0.25
+        def normalize(val: float, vmin: float, vmax: float) -> float:
+            return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
+
         obi_threshold = params.get("obi_threshold", 0.75)
-        obi_mag = abs(current_obi)
-        conf_obi = min(0.25, 0.15 * (obi_mag / obi_threshold) if obi_threshold > 0 else 0.0)
-
-        # --- 2. AF magnitude (0.0–0.25) ---
-        # |AF| scaled linearly; at threshold = ~0.15, at 1.0 = 0.25
         af_threshold = params.get("af_threshold", 0.5)
-        af_mag = abs(current_af)
-        conf_af = min(0.25, 0.15 * (af_mag / af_threshold) if af_threshold > 0 else 0.0)
+        trade_size_mult = params.get("volume_spike_mult", 2.0)
 
-        # --- 3. OBI × AF confluence (0.0–0.15) ---
-        # Product magnitude, direction-aligned
+        # 1. OBI magnitude: abs(current_obi) from 0→1.0, higher = higher
+        c1 = normalize(abs(current_obi), 0.0, 1.0)
+
+        # 2. AF magnitude: abs(current_af) from 0→1.0, higher = higher
+        c2 = normalize(abs(current_af), 0.0, 1.0)
+
+        # 3. OBI×AF confluence: abs(product) from 0→1.0, higher = higher
         obi_af_product = current_obi * current_af
         obi_af_mag = abs(obi_af_product)
-        conf_confluence = min(0.15, 0.10 * (obi_af_mag / 0.375) if obi_af_mag > 0 else 0.0)
-        # Bonus if direction-aligned (both positive for LONG, both negative for SHORT)
-        if (direction == "LONG" and obi_af_product > 0) or (
-            direction == "SHORT" and obi_af_product > 0
-        ):
-            conf_confluence = min(0.15, conf_confluence + 0.05)
+        c3 = normalize(obi_af_mag, 0.0, 1.0)
 
-        # --- 4. Volume spike strength (0.0–0.10) ---
-        trade_size_mult = params.get("volume_spike_mult", 2.0)
+        # 4. Volume spike: trade_size_ratio from 0→trade_size_mult, higher = higher
         trade_size_window = rolling_data.get(KEY_TRADE_SIZE_5M)
-        conf_volume = 0.0
+        trade_size_ratio = 1.0
         if trade_size_window and trade_size_window.count > 0:
-            avg_trade_size = sum(trade_size_window.values) / len(
-                trade_size_window.values
-            )
+            avg_trade_size = sum(trade_size_window.values) / len(trade_size_window.values)
             depth_snapshot = data.get("depth_snapshot", {})
             latest_trade_size = depth_snapshot.get("last_size", 0)
             if avg_trade_size > 0:
-                ratio = latest_trade_size / avg_trade_size
-                conf_volume = min(0.10, 0.05 * (ratio / trade_size_mult))
+                trade_size_ratio = latest_trade_size / avg_trade_size
+        c4 = normalize(trade_size_ratio, 0.0, trade_size_mult)
 
-        # --- 5. Participant diversity (0.0–0.10) ---
+        # 5. Participant diversity: avg_participants from 0→min_avg_participants*2, higher = higher
         min_avg_participants = params.get("min_avg_participants", 1.0)
         depth_snapshot = data.get("depth_snapshot", {})
         bid_avg = depth_snapshot.get("bid_avg_participants", 0)
         ask_avg = depth_snapshot.get("ask_avg_participants", 0)
-        conf_participants = 0.0
-        if bid_avg > 0 or ask_avg > 0:
-            avg_participants = (bid_avg + ask_avg) / 2
-            if min_avg_participants > 0:
-                conf_participants = min(
-                    0.10,
-                    0.05 * (avg_participants / min_avg_participants),
-                )
+        avg_participants = (bid_avg + ask_avg) / 2 if (bid_avg > 0 or ask_avg > 0) else 0
+        c5 = normalize(avg_participants, 0.0, min_avg_participants * 2.0)
 
-        # --- 6. Spread stability (0.0–0.05) ---
-        max_spread_mult = params.get("max_spread_multiplier", 1.5)
-        conf_spread = 0.0
-        spread_window = rolling_data.get(KEY_DEPTH_SPREAD_5M)
-        if spread_window and spread_window.count > 0:
-            ma_spread = spread_window.mean or 0
-            current_spread = depth_snapshot.get("spread", 0)
-            if ma_spread > 0:
-                spread_ratio = current_spread / ma_spread
-                if spread_ratio < max_spread_mult:
-                    # How much below MA threshold? Closer to 0 = more stable
-                    conf_spread = min(
-                        0.05,
-                        0.03 * (1.0 - (spread_ratio / max_spread_mult)),
-                    )
-
-        # --- 7. GEX regime alignment (0.0–0.10) ---
-        # OBI direction matches GEX bias
-        conf_gex = 0.05  # baseline
-        if gex_calc and regime:
-            try:
-                net_gamma = gex_calc.get_net_gamma() if hasattr(
-                    gex_calc, "get_net_gamma"
-                ) else 0
-            except Exception:
-                net_gamma = 0
-            if direction == "LONG" and net_gamma > 0:
-                conf_gex = 0.10
-            elif direction == "SHORT" and net_gamma < 0:
-                conf_gex = 0.10
-            elif regime in ("POSITIVE", "NEGATIVE"):
-                if direction == "LONG" and regime == "POSITIVE":
-                    conf_gex = 0.08
-                elif direction == "SHORT" and regime == "NEGATIVE":
-                    conf_gex = 0.08
-
-        # Sum all components
-        confidence = (
-            conf_obi + conf_af + conf_confluence + conf_volume
-            + conf_participants + conf_spread + conf_gex
-        )
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))

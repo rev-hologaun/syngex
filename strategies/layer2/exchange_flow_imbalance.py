@@ -358,94 +358,41 @@ class ExchangeFlowImbalance(BaseStrategy):
         params: Dict[str, Any],
         regime: str,
         gex_calc: Any,
+        depth_score: Optional[float] = None,
     ) -> float:
         """
-        Compute 7-component confidence score.
+        Compute 5-component simple average confidence score (Family A).
+
+        Each component normalizes to [0,1], then average equally (÷5).
 
         Returns 0.0–1.0.
         """
+        def normalize(val: float, vmin: float, vmax: float) -> float:
+            return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
+
         vsi_threshold = params.get("vsi_threshold", 0.3)
         iex_intent_threshold = params.get("iex_intent_threshold", 0.15)
         venue_conc_threshold = params.get("venue_concentration_threshold", 0.3)
 
-        # 1. VSI magnitude (0.0–0.25)
-        # How extreme the VSI is — at threshold = baseline, above = bonus
-        conf_vsi = 0.0
-        if direction == "LONG" and current_aggressor_vsi > 0:
-            # VSI > 0.3 = strong; scale from 0 at VSI=0 to 0.25 at VSI=0.8+
-            conf_vsi = min(0.25, 0.25 * min(1.0, current_aggressor_vsi / 0.8))
-        elif direction == "SHORT" and current_aggressor_vsi < 0:
-            # VSI < -0.3 = strong; scale from 0 at VSI=0 to 0.25 at VSI=-0.8+
-            conf_vsi = min(0.25, 0.25 * min(1.0, abs(current_aggressor_vsi) / 0.8))
+        # 1. VSI magnitude: abs(current_aggressor_vsi) from 0→0.8, higher = higher
+        vsi_mag = abs(current_aggressor_vsi)
+        c1 = normalize(vsi_mag, 0.0, 0.8)
 
-        # 2. VSI velocity (0.0–0.20)
-        # How fast the imbalance is changing
-        conf_roc = 0.0
-        if direction == "LONG" and current_aggressor_vsi_roc > 0:
-            conf_roc = min(0.20, 0.20 * min(1.0, current_aggressor_vsi_roc / 0.5))
-        elif direction == "SHORT" and current_aggressor_vsi_roc < 0:
-            conf_roc = min(0.20, 0.20 * min(1.0, abs(current_aggressor_vsi_roc) / 0.5))
+        # 2. VSI ROC: abs(current_aggressor_vsi_roc) from 0→0.5, higher = higher
+        c2 = normalize(abs(current_aggressor_vsi_roc), 0.0, 0.5)
 
-        # 3. IEX intent suppression (0.0–0.15)
-        # Low IEX intent = high conviction (genuine flow on aggressive venues)
-        conf_iex = 0.05  # baseline (gate B already passed)
-        if current_iex_intent <= iex_intent_threshold * 0.5:
-            conf_iex = 0.15
-        elif current_iex_intent < iex_intent_threshold:
-            conf_iex = 0.05 + 0.10 * (
-                1.0 - current_iex_intent / iex_intent_threshold
-            )
+        # 3. IEX intent: current_iex_intent from 0→max_iex_intent, lower = higher, invert
+        c3 = 1.0 - normalize(current_iex_intent, 0.0, iex_intent_threshold)
 
-        # 4. Venue concentration (0.0–0.10)
-        # Higher concentration = more conviction that aggressors are driving
-        conf_conc = 0.05  # baseline (gate C already passed)
-        if current_venue_conc > venue_conc_threshold:
-            conf_conc = 0.05 + 0.05 * min(
-                1.0, (current_venue_conc - venue_conc_threshold) / venue_conc_threshold
-            )
+        # 4. Venue concentration: current_venue_conc from threshold→2×threshold, higher = higher
+        c4 = normalize(current_venue_conc, venue_conc_threshold, venue_conc_threshold * 2.0)
 
-        # 5. Volume confirmation (0.0–0.10)
-        # Volume above average
-        conf_volume = 0.05  # baseline
+        # 5. Volume confirmation: vol_ratio from 0.8→2.0, higher = higher
         volume_window = rolling_data.get(KEY_VOLUME_5M)
-        if volume_window and volume_window.count > 0:
-            current_vol = volume_window.latest
-            avg_vol = volume_window.mean
-            if current_vol is not None and avg_vol is not None and avg_vol > 0:
-                vol_ratio = current_vol / avg_vol
-                conf_volume = 0.05 + 0.05 * min(1.0, max(0, (vol_ratio - 0.8) / 0.8))
+        vol_ratio = 1.0
+        if volume_window and volume_window.count > 0 and volume_window.mean > 0:
+            vol_ratio = volume_window.latest / volume_window.mean
+        c5 = normalize(vol_ratio, 0.8, 2.0)
 
-        # 6. VAMP validation (0.0–0.10)
-        # VAMP direction aligns with signal
-        conf_vamp = 0.05  # baseline (validation already passed)
-        vamp_levels = rolling_data.get("vamp_levels")
-        if vamp_levels:
-            vamp_mid_dev = vamp_levels.get("vamp_mid_dev", 0)
-            if direction == "LONG" and vamp_mid_dev >= 0:
-                conf_vamp = 0.10
-            elif direction == "SHORT" and vamp_mid_dev <= 0:
-                conf_vamp = 0.10
-            elif abs(vamp_mid_dev) < 0.0005:
-                conf_vamp = 0.08
-
-        # 7. GEX regime alignment (0.0–0.10)
-        # Signal direction matches GEX bias
-        conf_gex = 0.05  # baseline
-        if gex_calc and regime:
-            net_gamma = gex_calc.get_net_gamma() if hasattr(gex_calc, "get_net_gamma") else 0
-            if direction == "LONG" and net_gamma > 0:
-                conf_gex = 0.10
-            elif direction == "SHORT" and net_gamma < 0:
-                conf_gex = 0.10
-            elif regime in ("POSITIVE", "NEGATIVE"):
-                if direction == "LONG" and regime == "POSITIVE":
-                    conf_gex = 0.08
-                elif direction == "SHORT" and regime == "NEGATIVE":
-                    conf_gex = 0.08
-
-        # Sum all components
-        confidence = (
-            conf_vsi + conf_roc + conf_iex + conf_conc +
-            conf_volume + conf_vamp + conf_gex
-        )
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))
