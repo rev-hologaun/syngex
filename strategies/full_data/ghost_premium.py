@@ -35,6 +35,13 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.GhostPremium")
 
+
+def normalize(val: float, vmin: float, vmax: float) -> float:
+    """Normalize a value to [0, 1] given a min/max range."""
+    if vmax == vmin:
+        return 0.5
+    return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -53,8 +60,7 @@ STOP_PCT = 0.005                 # 0.5% stop
 TARGET_RISK_MULT = 2.0           # 2.0× risk for target
 
 # Min confidence — v2 cap
-MIN_CONFIDENCE = 0.35
-MAX_CONFIDENCE = 0.85            # v2 strategies cap
+MIN_CONFIDENCE = 0.30
 
 # Ask size sigma minimum (absolute)
 MIN_ASK_SIZE_SIGMA = 1.0
@@ -117,8 +123,8 @@ class GhostPremium(BaseStrategy):
         max_net_change_pct = params.get("max_net_change_pct", MAX_NET_CHANGE_PCT)
         stop_pct = params.get("stop_pct", STOP_PCT)
         target_risk_mult = params.get("target_risk_mult", TARGET_RISK_MULT)
-        min_confidence = params.get("min_confidence", MIN_CONFIDENCE)
-        max_confidence = params.get("max_confidence", MAX_CONFIDENCE)
+        min_confidence = MIN_CONFIDENCE
+        max_confidence = 1.0
 
         # --- Get PDR rolling window ---
         pdr_window = rolling_data.get(KEY_PDR_5M)
@@ -170,7 +176,7 @@ class GhostPremium(BaseStrategy):
             ask_size_sigma, data, params, regime, gex_calc,
         )
 
-        confidence = max(min_confidence, min(confidence, max_confidence))
+        confidence = max(min_confidence, confidence)
 
         if confidence < min_confidence:
             return []
@@ -316,70 +322,37 @@ class GhostPremium(BaseStrategy):
         params: Dict[str, Any],
         regime: str,
         gex_calc: Any,
+        depth_score=None,
     ) -> float:
         """
-        Compute 5-component confidence score.
+        Compute 5-component confidence score (Family A).
 
-        1. PDR magnitude (0.0–0.30) — how extreme the premium is
-        2. PDR velocity (0.0–0.20) — is the premium growing or shrinking?
-        3. Ask size conviction (0.0–0.15) — liquidity behind the premium
-        4. IV alignment (0.0–0.15) — IV not already capturing this move
-        5. GEX regime alignment (0.0–0.10) — signal direction matches GEX bias
+        5 components, simple average:
+            1. PDR magnitude (0.6→3.0)
+            2. PDR velocity (abs roc, 0→0.2)
+            3. Ask size sigma (0→5)
+            4. IV alignment (iv_ratio, 0.5→2.0)
+            5. GEX regime alignment (abs net_gamma, 0→5M)
         """
-        # 1. PDR magnitude (0.0–0.30)
-        # Scale: 0.60 → 0.05, 1.00 → 0.15, 2.00+ → 0.30
-        pdr_scaled = min(1.0, (current_pdr - PDR_TRIGGER) / (2.0 - PDR_TRIGGER))
-        conf_pdr_mag = 0.05 + 0.25 * pdr_scaled
-
-        # 2. PDR velocity (0.0–0.20)
-        # Positive ROC = premium growing = more conviction
-        conf_pdr_vel = 0.05  # baseline
-        if current_pdr_roc is not None:
-            if current_pdr_roc > 0:
-                # Growing premium = bullish confirmation
-                vel_scaled = min(1.0, current_pdr_roc / 0.5)
-                conf_pdr_vel = 0.05 + 0.15 * vel_scaled
-            elif current_pdr_roc < -0.1:
-                # Shrinking premium = losing conviction
-                conf_pdr_vel = max(0.01, 0.05 - 0.04 * abs(current_pdr_roc))
-
-        # 3. Ask size conviction (0.0–0.15)
-        # Higher sigma = more conviction that this is a real event
-        conf_ask = 0.05  # baseline
-        if ask_size_sigma > 0:
-            # Scale: 1.0 → 0.05, 3.0 → 0.10, 5.0+ → 0.15
-            ask_scaled = min(1.0, (ask_size_sigma - 1.0) / 4.0)
-            conf_ask = 0.05 + 0.10 * ask_scaled
-
-        # 4. IV alignment (0.0–0.15)
-        # Check if IV is already capturing the move
-        conf_iv = 0.05  # baseline (neutral)
+        # 1. PDR magnitude: current_pdr from 0.6 to 3.0, higher = higher
+        c1 = normalize(current_pdr, 0.6, 3.0)
+        # 2. PDR velocity: current_pdr_roc from -0.2 to 0.2, use abs
+        abs_roc = abs(current_pdr_roc) if current_pdr_roc is not None else 0.0
+        c2 = normalize(abs_roc, 0.0, 0.2)
+        # 3. Ask size conviction: ask_size_sigma from 0→5, higher = higher
+        c3 = normalize(ask_size_sigma, 0.0, 5.0)
+        # 4. IV alignment: use IV window from params
         iv_window = data.get("iv_window")
-        if iv_window is not None:
-            current_iv = iv_window.get("latest", 0.0)
-            avg_iv = iv_window.get("mean", 0.0)
-            if avg_iv > 0 and current_iv > 0:
-                iv_roc = (current_iv - avg_iv) / avg_iv
-                # If IV is rising much slower than PDR, premium is demand-driven
-                if iv_roc < current_pdr * 0.5:
-                    conf_iv = 0.15
-                elif iv_roc < current_pdr:
-                    conf_iv = 0.10
-
-        # 5. GEX regime alignment (0.0–0.10)
-        # LONG signal aligns with positive gamma regime
-        conf_gex = 0.05  # baseline
-        if gex_calc and regime:
-            net_gamma = gex_calc.get_net_gamma() if hasattr(gex_calc, "get_net_gamma") else 0
-            if regime in ("POSITIVE", "NEGATIVE"):
-                if regime == "POSITIVE":
-                    conf_gex = 0.10  # Positive gamma supports upward move
-                elif regime == "NEGATIVE":
-                    conf_gex = 0.07  # Negative gamma less supportive
-
-        # Sum all components
-        confidence = (conf_pdr_mag + conf_pdr_vel + conf_ask + conf_iv + conf_gex)
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        if iv_window:
+            iv_ratio = iv_window.latest / iv_window.mean if iv_window.mean > 0 else 1.0
+        else:
+            iv_ratio = 1.0
+        c4 = normalize(iv_ratio, 0.5, 2.0)
+        # 5. GEX regime alignment: use net_gamma
+        net_gamma = data.get("net_gamma", 0.0)
+        c5 = normalize(abs(net_gamma), 0.0, 5000000.0)
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+        return min(1.0, max(0.0, confidence))
 
     # ------------------------------------------------------------------
     # Intensity Classification

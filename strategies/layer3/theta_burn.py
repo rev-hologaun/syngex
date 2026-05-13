@@ -91,8 +91,7 @@ MAX_TARGET_PCT = 0.004      # 0.4% max target
 RANGE_NARROWNESS_RATIO = 0.40  # 40%
 
 # Min confidence — raised from 0.25 to 0.35 for v2
-MIN_CONFIDENCE = 0.35
-MAX_CONFIDENCE = 0.80  # Micro-signal cap, lower for pin trades
+MIN_CONFIDENCE = 0.30
 
 # Min data points
 MIN_DATA_POINTS = 3
@@ -1080,7 +1079,7 @@ class ThetaBurn(BaseStrategy):
         norm_iv = (iv_conf - 0.05) / (0.10 - 0.05)
 
         confidence = (norm_gamma + norm_prox + norm_nar + norm_div + norm_liq + norm_iv) / 6.0
-        return min(MAX_CONFIDENCE, max(MIN_CONFIDENCE, confidence))
+        return max(MIN_CONFIDENCE, confidence)
 
     # ------------------------------------------------------------------
     # Confidence Computation — Slice Mode (7 components)
@@ -1155,7 +1154,7 @@ class ThetaBurn(BaseStrategy):
         norm_tod = (tod_conf - 0.05) / (0.10 - 0.05)
 
         confidence = (norm_gamma + norm_div + norm_liq + norm_nar + norm_vol + norm_iv + norm_tod) / 7.0
-        return min(MAX_CONFIDENCE, max(MIN_CONFIDENCE, confidence))
+        return max(MIN_CONFIDENCE, confidence)
 
     # ------------------------------------------------------------------
     # Helper: Volume Confidence

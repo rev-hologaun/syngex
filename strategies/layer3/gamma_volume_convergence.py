@@ -71,10 +71,9 @@ VOLUME_SPIKE_RATIO = 1.20
 STOP_PCT = 0.005
 
 # Minimum confidence to emit a signal (raised from 0.25)
-MIN_CONFIDENCE = 0.35
+MIN_CONFIDENCE = 0.30
 
 # Maximum confidence — micro-signals shouldn't carry max conviction
-MAX_CONFIDENCE = 0.90
 
 # Minimum data points in rolling windows before trusting signals
 MIN_DATA_POINTS = 3
@@ -722,7 +721,7 @@ class GammaVolumeConvergence(BaseStrategy):
         wall_conf = self._wall_proximity_confidence(price, direction, gex_calc)
 
         confidence = delta_conf + gamma_conf + vol_conf + coupling_conf + target_conf + wall_conf
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        return max(0.0, confidence)
 
     @staticmethod
     def _delta_accel_confidence(delta_accel: float) -> float:

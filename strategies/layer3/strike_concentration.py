@@ -76,8 +76,7 @@ STOP_PCT_SLICE = 0.003  # 0.3% against entry for slices
 TARGET_RISK_MULT = 1.5  # 1.5× risk for bounce targets
 
 # Min confidence (v2: raised from 0.25 to 0.35)
-MIN_CONFIDENCE = 0.35
-MAX_CONFIDENCE = 0.85  # Micro-signal cap
+MIN_CONFIDENCE = 0.30
 
 # Min data points
 MIN_DATA_POINTS = 3
@@ -1236,7 +1235,7 @@ class StrikeConcentration(BaseStrategy):
         norm_atr = (atr_quality - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
 
         confidence = (norm_rank + norm_prox + norm_gamma + norm_signal + norm_regime + norm_atr) / 6.0
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        return max(0.0, confidence)
 
     def _compute_slice_confidence(
         self,
@@ -1352,4 +1351,4 @@ class StrikeConcentration(BaseStrategy):
 
         confidence = (norm_rank + norm_body + norm_gamma + norm_signal +
                       norm_vac + norm_delta + norm_regime + norm_atr) / 8.0
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        return max(0.0, confidence)

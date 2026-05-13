@@ -41,6 +41,16 @@ from strategies.rolling_keys import (
 logger = logging.getLogger("Syngex.Strategies.WhaleTracker")
 
 
+def normalize(val: float, vmin: float, vmax: float) -> float:
+    """Normalize a value to [0, 1] given a min/max range."""
+    if vmax == vmin:
+        return 0.5
+    return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
+
+
+MIN_CONFIDENCE = 0.30
+
+
 class WhaleTracker(BaseStrategy):
     """
     Whale Tracker strategy — detects institutional "whale" orders via
@@ -190,9 +200,9 @@ class WhaleTracker(BaseStrategy):
             data,
         )
 
-        min_confidence = params.get("min_confidence", 0.35)
-        max_confidence = params.get("max_confidence", 0.85)
-        confidence = max(min_confidence, min(confidence, max_confidence))
+        min_confidence = MIN_CONFIDENCE
+        max_confidence = 1.0
+        confidence = max(min_confidence, confidence)
 
         if confidence < min_confidence:
             return []
@@ -335,88 +345,22 @@ class WhaleTracker(BaseStrategy):
         regime: str,
         gex_calc: Any,
         data: Dict[str, Any],
+        depth_score=None,
     ) -> float:
         """
-        Compute 5-component confidence score.
+        Compute 5-component confidence score (Family A).
 
         Returns 0.0–1.0.
         """
-        min_conc_sigma_threshold = params.get("min_conc_sigma", 5.0)
-        max_participants = params.get("max_participants", 2)
-
-        # 1. Concentration magnitude (0.0–0.30)
-        # How many σ the concentration ratio is — higher = more conviction
-        conf_conc = 0.0
-        if current_conc_sigma > 0:
-            # Scale: at threshold = baseline 0.15, above = bonus
-            conf_conc = min(
-                0.30,
-                0.15 + 0.15 * min(
-                    1.0,
-                    (conc_zscore - min_conc_sigma_threshold)
-                    / min_conc_sigma_threshold,
-                ),
-            )
-            conf_conc = max(0.10, conf_conc)
-
-        # 2. Participant conviction (0.0–0.20)
-        # Fewer participants = higher conviction (single entity)
-        conf_participants = 0.0
-        if current_participants <= 1:
-            conf_participants = 0.20
-        elif current_participants <= max_participants:
-            # Linear interpolation: 2 participants = baseline, 1 = max
-            conf_participants = 0.10 + 0.10 * (
-                1.0 - (current_participants - 1) / max(1, max_participants - 1)
-            )
-        else:
-            # More than max — should have been filtered by gate B
-            conf_participants = 0.0
-
-        # 3. Size anomaly (0.0–0.15)
-        # Biggest size > 3σ above rolling average
-        conf_size = 0.0
-        if biggest_window and biggest_window.count >= 10:
-            mean_biggest = biggest_window.mean
-            sigma_biggest = biggest_window.std if hasattr(biggest_window, 'std') else 0
-            if sigma_biggest > 0 and mean_biggest > 0:
-                size_zscore = (current_biggest - mean_biggest) / sigma_biggest
-                conf_size = min(
-                    0.15,
-                    0.05 + 0.10 * min(1.0, max(0, (size_zscore - 3.0) / 2.0)),
-                )
-
-        # 4. Gamma coincidence (0.0–0.10)
-        # Concentration near a gamma wall = highest conviction
-        # (We check if there's a gamma wall nearby)
-        conf_gamma = 0.05  # baseline (gate C already passed)
-        wall_distance = data.get("wall_distance", float('inf'))
-        gamma_wall_gex = params.get("gamma_wall_gex", 0)
-        if gamma_wall_gex > 0 and wall_distance < 0.01:
-            conf_gamma = 0.10
-
-        # 5. GEX regime alignment (0.0–0.10)
-        # Signal direction matches GEX bias
-        conf_gex = 0.05  # baseline (gate C already passed)
-        if gex_calc and regime:
-            net_gamma = (
-                gex_calc.get_net_gamma()
-                if hasattr(gex_calc, "get_net_gamma")
-                else 0
-            )
-            if direction == "LONG" and net_gamma > 0:
-                conf_gex = 0.10
-            elif direction == "SHORT" and net_gamma < 0:
-                conf_gex = 0.10
-            elif regime in ("POSITIVE", "NEGATIVE"):
-                if direction == "LONG" and regime == "POSITIVE":
-                    conf_gex = 0.08
-                elif direction == "SHORT" and regime == "NEGATIVE":
-                    conf_gex = 0.08
-
-        # Sum all components
-        confidence = (
-            conf_conc + conf_participants + conf_size +
-            conf_gamma + conf_gex
-        )
+        # 1. Concentration magnitude: current_conc_ratio from 0→1, higher = higher
+        c1 = normalize(current_conc_ratio, 0.0, 1.0)
+        # 2. Concentration sigma: current_conc_sigma from 0→5, higher = higher
+        c2 = normalize(current_conc_sigma, 0.0, 5.0)
+        # 3. Z-score: conc_zscore from 0→5, higher = higher
+        c3 = normalize(conc_zscore, 0.0, 5.0)
+        # 4. Biggest whale: current_biggest from 0→1, higher = higher
+        c4 = normalize(current_biggest, 0.0, 1.0)
+        # 5. Participant diversity: current_participants from 0→5, higher = higher
+        c5 = normalize(current_participants, 0.0, 5.0)
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))

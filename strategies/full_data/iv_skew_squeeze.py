@@ -49,6 +49,13 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.IVSkewSqueeze")
 
+
+def normalize(val: float, vmin: float, vmax: float) -> float:
+    """Normalize a value to [0, 1] given a min/max range."""
+    if vmax == vmin:
+        return 0.5
+    return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -68,8 +75,7 @@ STOP_PCT = 0.005                   # 0.5% stop
 TARGET_PCT = 0.008                 # 0.8% target (1.6:1 R:R)
 
 # Min confidence — raised from 0.25 to 0.35 for v2
-MIN_CONFIDENCE = 0.35
-MAX_CONFIDENCE = 0.80              # v2 strategies cap
+MIN_CONFIDENCE = 0.30
 
 # Min data points
 MIN_DATA_POINTS = 5                # Need data for basic checks
@@ -433,38 +439,32 @@ class IVSkewSqueeze(BaseStrategy):
         volume_ratio: Optional[float],
         net_gamma: float,
         direction: str,
+        depth_score=None,
     ) -> float:
         """
-        Compute unified confidence for LONG and SHORT signals (v2).
+        Compute unified confidence for LONG and SHORT signals (Family A).
 
-        6 components:
-            1. Skew acceleration (hard gate, 0.20–0.30)
-            2. Volume-weighted stability (hard gate, 0.15–0.25)
-            3. Delta-skew convergence (hard gate, 0.15–0.20)
-            4. Skew extremity (soft, 0.10–0.15)
-            5. Volume alignment (soft, 0.05–0.10)
-            6. Net gamma strength (soft, 0.05–0.10)
+        5 components, simple average:
+            1. Skew acceleration (abs skew_roc, 0→0.2)
+            2. Volume stability (conviction_stability, 0→1)
+            3. Delta-skew convergence (inverted abs delta_roc, 0→0.2)
+            4. Skew extremity (current_skew, 0→10)
+            5. Net gamma (0→5M)
         """
-        # 1. Skew acceleration
-        skew_accel = self._skew_accel_confidence(skew_roc, direction)
-
-        # 2. Volume-weighted stability
-        vol_stability = self._vol_weighted_stability_confidence(conviction_stability)
-
-        # 3. Delta-skew convergence
-        delta_conv = self._delta_skew_convergence_confidence(delta_roc, direction)
-
-        # 4. Skew extremity
-        skew_ext = self._skew_extremity_confidence(current_skew, direction)
-
-        # 5. Volume alignment
-        vol_align = self._volume_alignment_confidence(volume_ratio)
-
-        # 6. Net gamma strength
-        gamma_str = self._gamma_strength_confidence(net_gamma)
-
-        confidence = skew_accel + vol_stability + delta_conv + skew_ext + vol_align + gamma_str
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        # 1. Skew acceleration: skew_roc from -0.2 to 0.2, use abs for magnitude
+        abs_roc = abs(skew_roc) if skew_roc is not None else 0.0
+        c1 = normalize(abs_roc, 0.0, 0.2)
+        # 2. Volume stability: conviction_stability 0→1, higher = more stable = higher
+        c2 = normalize(conviction_stability, 0.0, 1.0)
+        # 3. Delta-skew convergence: delta_roc from -0.2 to 0.2, invert for convergence
+        abs_d = abs(delta_roc) if delta_roc is not None else 0.0
+        c3 = 1.0 - normalize(abs_d, 0.0, 0.2)
+        # 4. Skew extremity: current_skew 0→10, higher = more extreme = higher
+        c4 = normalize(current_skew, 0.0, 10.0)
+        # 5. Net gamma: net_gamma 0→5M, higher = higher
+        c5 = normalize(net_gamma, 0.0, 5000000.0)
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+        return min(1.0, max(0.0, confidence))
 
     # ------------------------------------------------------------------
     # LONG: Panic overblown (negative skew extreme)

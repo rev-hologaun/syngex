@@ -44,6 +44,16 @@ from strategies.rolling_keys import (
 logger = logging.getLogger("Syngex.Strategies.ExtrinsicFlow")
 
 
+def normalize(val: float, vmin: float, vmax: float) -> float:
+    """Normalize a value to [0, 1] given a min/max range."""
+    if vmax == vmin:
+        return 0.5
+    return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
+
+
+MIN_CONFIDENCE = 0.30
+
+
 class ExtrinsicFlow(BaseStrategy):
     """
     Extrinsic Value Flow strategy — tracks Volume × Extrinsic Value
@@ -162,9 +172,9 @@ class ExtrinsicFlow(BaseStrategy):
             params,
         )
 
-        min_confidence = params.get("min_confidence", 0.35)
-        max_confidence = params.get("max_confidence", 0.85)
-        confidence = max(min_confidence, min(confidence, max_confidence))
+        min_confidence = MIN_CONFIDENCE
+        max_confidence = 1.0
+        confidence = max(min_confidence, confidence)
 
         if confidence < min_confidence:
             return []
@@ -269,81 +279,22 @@ class ExtrinsicFlow(BaseStrategy):
         regime: str,
         rolling_data: Dict[str, Any],
         params: Dict[str, Any],
+        depth_score=None,
     ) -> float:
         """
-        Compute 5-component confidence score.
+        Compute 5-component confidence score (Family A).
 
         Returns 0.0–1.0.
         """
-        phi_call_threshold = params.get("phi_call_threshold", 3.0)
-        phi_put_threshold = params.get("phi_put_threshold", 0.3)
-        phi_sigma_mult = params.get("phi_sigma_mult", 2.0)
-
-        # 1. RΦ magnitude (0.0–0.30)
-        # How extreme the ratio is relative to the threshold
-        conf_ratio_mag = 0.0
-        if direction == "LONG":
-            # RΦ above threshold — scale from 0 at threshold to 0.30 at 5x threshold
-            if phi_call_threshold > 0:
-                ratio_excess = (phi_ratio - phi_call_threshold) / phi_call_threshold
-                conf_ratio_mag = min(0.30, 0.15 + 0.15 * min(1.0, ratio_excess))
-        else:
-            # RΦ below threshold — scale from 0 at threshold to 0.30 at near-zero
-            if phi_put_threshold > 0:
-                ratio_excess = (phi_put_threshold - phi_ratio) / phi_put_threshold
-                conf_ratio_mag = min(0.30, 0.15 + 0.15 * min(1.0, ratio_excess))
-
-        # 2. Φ total momentum (0.0–0.20)
-        # How large the total Φ is relative to its σ
-        conf_momentum = 0.0
-        if phi_sigma > 0 and phi_total > 0:
-            # Total Φ above sigma_mult * σ = momentum confirmed
-            momentum_z = phi_total / phi_sigma
-            if momentum_z >= phi_sigma_mult:
-                conf_momentum = 0.10  # baseline
-                # Bonus for exceeding sigma threshold
-                conf_momentum += min(0.10, 0.10 * min(1.0, (momentum_z - phi_sigma_mult) / phi_sigma_mult))
-
-        # 3. Volume conviction (0.0–0.15)
-        # Absolute volume level — higher = more conviction
-        conf_volume = 0.0
-        if phi_total > 0:
-            # Scale: 0 at 0, max at very high values
-            # Use log scale for better distribution
-            conf_volume = min(0.15, 0.15 * min(1.0, math.log1p(phi_total) / 10.0))
-
-        # 4. Ratio purity (0.0–0.15)
-        # How cleanly one side dominates — higher ratio = purer signal
-        conf_purity = 0.0
-        if direction == "LONG":
-            # Purity = how much call side dominates put side
-            if phi_put > 0:
-                dominance = phi_call / phi_put
-                conf_purity = min(0.15, 0.15 * min(1.0, dominance / (phi_call_threshold * 2)))
-            else:
-                conf_purity = 0.15  # pure call signal
-        else:
-            # Purity = how much put side dominates call side
-            if phi_call > 0:
-                dominance = phi_put / phi_call
-                conf_purity = min(0.15, 0.15 * min(1.0, dominance / ((1.0 / phi_put_threshold) * 2)))
-            else:
-                conf_purity = 0.15  # pure put signal
-
-        # 5. GEX regime alignment (0.0–0.10)
-        # Signal direction matches GEX bias
-        conf_gex = 0.0
-        if regime:
-            if direction == "LONG" and regime == "POSITIVE":
-                conf_gex = 0.10
-            elif direction == "SHORT" and regime == "NEGATIVE":
-                conf_gex = 0.10
-            else:
-                conf_gex = 0.05  # partial alignment (regime exists but not matching)
-
-        # Sum all components
-        confidence = (
-            conf_ratio_mag + conf_momentum + conf_volume +
-            conf_purity + conf_gex
-        )
+        # 1. RΦ magnitude: phi_ratio from 0→5, higher = higher
+        c1 = normalize(phi_ratio, 0.0, 5.0)
+        # 2. Total phi: phi_total from 0→1, higher = higher
+        c2 = normalize(phi_total, 0.0, 1.0)
+        # 3. Phi sigma: phi_sigma from 0→5, higher = higher
+        c3 = normalize(phi_sigma, 0.0, 5.0)
+        # 4. Call bias: phi_call from 0→5, higher = higher
+        c4 = normalize(phi_call, 0.0, 5.0)
+        # 5. Put bias: phi_put from 0→5, higher = higher
+        c5 = normalize(phi_put, 0.0, 5.0)
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))

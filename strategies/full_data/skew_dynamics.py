@@ -40,6 +40,16 @@ from strategies.rolling_keys import (
 logger = logging.getLogger("Syngex.Strategies.SkewDynamics")
 
 
+def normalize(val: float, vmin: float, vmax: float) -> float:
+    """Normalize a value to [0, 1] given a min/max range."""
+    if vmax == vmin:
+        return 0.5
+    return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
+
+
+MIN_CONFIDENCE = 0.30
+
+
 class SkewDynamics(BaseStrategy):
     """
     IV Skew Dynamics strategy — tracks volatility smile changes via Ψ.
@@ -162,9 +172,9 @@ class SkewDynamics(BaseStrategy):
             regime,
         )
 
-        min_confidence = params.get("min_confidence", 0.35)
-        max_confidence = params.get("max_confidence", 0.85)
-        confidence = max(min_confidence, min(confidence, max_confidence))
+        min_confidence = MIN_CONFIDENCE
+        max_confidence = 1.0
+        confidence = max(min_confidence, confidence)
 
         if confidence < min_confidence:
             return []
@@ -289,55 +299,25 @@ class SkewDynamics(BaseStrategy):
         rolling_data: Dict[str, Any],
         params: Dict[str, Any],
         regime: str,
+        depth_score=None,
     ) -> float:
         """
-        Compute 5-component confidence score.
+        Compute 5-component confidence score (Family A).
 
         Returns 0.0–1.0.
         """
-        min_psi_sigma = params.get("min_psi_sigma", 2.0)
-
-        # 1. Ψ magnitude in σ units (0.0–0.30)
-        # How many σ the current Ψ ROC is from zero
-        conf_psi = 0.0
-        if current_psi_sigma > 0:
-            # Scale: at min_psi_sigma threshold = 0.15 baseline, above = bonus
-            conf_psi = min(0.30, 0.15 + 0.15 * min(1.0, (psi_zscore - min_psi_sigma) / min_psi_sigma))
-            # Minimum baseline for passing signal
-            conf_psi = max(0.10, conf_psi)
-
-        # 2. Ψ velocity (0.0–0.20)
-        # How fast the skew is changing (ROC magnitude)
-        conf_roc = 0.0
-        if direction == "LONG" and current_psi_roc < 0:
-            conf_roc = min(0.20, 0.20 * min(1.0, abs(current_psi_roc) / 0.10))
-        elif direction == "SHORT" and current_psi_roc > 0:
-            conf_roc = min(0.20, 0.20 * min(1.0, current_psi_roc / 0.10))
-
-        # 3. Liquidity conviction (0.0–0.15)
-        # Baseline conviction since Gate A already passed
-        conf_liquidity = 0.10  # baseline (gate A already passed)
-
-        # 4. IV divergence purity (0.0–0.15)
-        # How pure is the skew signal vs noise
-        conf_divergence = 0.075  # baseline (gate C already passed)
-        if current_psi_sigma > 0:
-            # Higher σ means cleaner signal
-            purity = min(1.0, psi_zscore / (min_psi_sigma * 2))
-            conf_divergence = 0.075 + 0.075 * purity
-
-        # 5. GEX regime alignment (0.0–0.10)
-        # Signal direction matches GEX bias
-        conf_gex = 0.05  # baseline (gate B already passed)
-        if regime:
-            if direction == "LONG" and regime == "POSITIVE":
-                conf_gex = 0.10
-            elif direction == "SHORT" and regime == "NEGATIVE":
-                conf_gex = 0.10
-
-        # Sum all components
-        confidence = (
-            conf_psi + conf_roc + conf_liquidity +
-            conf_divergence + conf_gex
-        )
+        # 1. Ψ magnitude: current_psi from 0→5, higher = higher
+        c1 = normalize(current_psi, 0.0, 5.0)
+        # 2. Ψ velocity: current_psi_roc from -0.1 to 0.1, use abs
+        abs_roc = abs(current_psi_roc)
+        c2 = normalize(abs_roc, 0.0, 0.1)
+        # 3. Ψ sigma significance: current_psi_sigma from 0→5, higher = higher
+        c3 = normalize(current_psi_sigma, 0.0, 5.0)
+        # 4. Put slope: direction-specific, normalize to [0,1]
+        put_slope = rolling_data.get("put_slope", 0.0)
+        c4 = normalize(abs(put_slope), 0.0, 0.5)
+        # 5. Call slope: direction-specific, normalize to [0,1]
+        call_slope = rolling_data.get("call_slope", 0.0)
+        c5 = normalize(abs(call_slope), 0.0, 0.5)
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))

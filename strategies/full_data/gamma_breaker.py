@@ -47,6 +47,16 @@ from strategies.rolling_keys import (
 logger = logging.getLogger("Syngex.Strategies.GammaBreaker")
 
 
+def normalize(val: float, vmin: float, vmax: float) -> float:
+    """Normalize a value to [0, 1] given a min/max range."""
+    if vmax == vmin:
+        return 0.5
+    return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
+
+
+MIN_CONFIDENCE = 0.30
+
+
 class GammaBreaker(BaseStrategy):
     """
     Gamma-Weighted Momentum (GAMMA-ALPHA) strategy.
@@ -184,9 +194,9 @@ class GammaBreaker(BaseStrategy):
             regime,
         )
 
-        min_confidence = params.get("min_confidence", 0.35)
-        max_confidence = params.get("max_confidence", 0.85)
-        confidence = max(min_confidence, min(confidence, max_confidence))
+        min_confidence = MIN_CONFIDENCE
+        max_confidence = 1.0
+        confidence = max(min_confidence, confidence)
 
         if confidence < min_confidence:
             return []
@@ -312,63 +322,22 @@ class GammaBreaker(BaseStrategy):
         rolling_data: Dict[str, Any],
         params: Dict[str, Any],
         regime: str,
+        depth_score=None,
     ) -> float:
         """
-        Compute 5-component confidence score.
+        Compute 5-component confidence score (Family A).
 
         Returns 0.0–1.0.
         """
-        min_gamma_break = params.get("min_gamma_break", 0.0005)
-        min_wall_gex_sigma = params.get("min_wall_gex_sigma", 2.0)
-
-        # 1. Γ_break magnitude (0.0–0.30)
-        # How extreme the gamma breakout signal is
-        conf_gamma_break = 0.0
-        if current_gamma_break > min_gamma_break:
-            # Scale from 0 at threshold to 0.30 at 5× threshold
-            conf_gamma_break = min(0.30, 0.10 + 0.20 * min(1.0, (current_gamma_break - min_gamma_break) / (min_gamma_break * 4)))
-            conf_gamma_break = max(0.05, conf_gamma_break)
-
-        # 2. Wall proximity (0.0–0.20)
-        # Closer to wall = higher conviction the breakout will succeed
-        conf_proximity = 0.0
-        if current_wall_dist > 0:
-            # Closer = higher confidence. At 0.5% distance = 0.10 baseline,
-            # at 0.05% distance = 0.20 max
-            conf_proximity = min(0.20, 0.20 * min(1.0, min_wall_distance_pct / max(current_wall_dist, 0.00001)))
-            conf_proximity = max(0.05, conf_proximity)
-
-        # 3. Wall strength (0.0–0.15)
-        # Higher σ means wall is more significant
-        conf_strength = 0.0
-        if current_wall_gex_sigma > 0:
-            # At min_sigma threshold = 0.075 baseline, above = bonus
-            conf_strength = min(0.15, 0.075 + 0.075 * min(1.0, (current_wall_gex_sigma - min_wall_gex_sigma) / min_wall_gex_sigma))
-            conf_strength = max(0.05, conf_strength)
-
-        # 4. Volume confirmation (0.0–0.15)
-        # Volume above average confirms genuine participation
-        conf_volume = 0.05  # baseline (gate C already passed)
-        volume_window = rolling_data.get(KEY_VOLUME_5M)
-        if volume_window and volume_window.count > 0:
-            current_vol = volume_window.latest
-            avg_vol = volume_window.mean
-            if current_vol is not None and avg_vol is not None and avg_vol > 0:
-                vol_ratio = current_vol / avg_vol
-                conf_volume = 0.05 + 0.10 * min(1.0, max(0, (vol_ratio - 1.0) / 1.0))
-
-        # 5. GEX regime alignment (0.0–0.10)
-        # Signal direction matches GEX bias
-        conf_gex = 0.05  # baseline (gate B already passed)
-        if regime:
-            if direction == "LONG" and regime == "POSITIVE":
-                conf_gex = 0.10
-            elif direction == "SHORT" and regime == "NEGATIVE":
-                conf_gex = 0.10
-
-        # Sum all components
-        confidence = (
-            conf_gamma_break + conf_proximity + conf_strength +
-            conf_volume + conf_gex
-        )
+        # 1. Γ_break magnitude: current_gamma_break from 0→0.01, higher = higher
+        c1 = normalize(current_gamma_break, 0.0, 0.01)
+        # 2. Wall proximity: current_wall_dist from 0→0.02, closer = higher, invert
+        c2 = 1.0 - normalize(current_wall_dist, 0.0, 0.02)
+        # 3. Wall GEX sigma: current_wall_gex_sigma from 0→5, higher = higher
+        c3 = normalize(current_wall_gex_sigma, 0.0, 5.0)
+        # 4. Velocity: current_velocity from 0→0.02, higher = higher
+        c4 = normalize(current_velocity, 0.0, 0.02)
+        # 5. Wall GEX: current_wall_gex from 0→1M, higher = higher
+        c5 = normalize(current_wall_gex, 0.0, 1000000.0)
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))

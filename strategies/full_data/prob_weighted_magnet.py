@@ -51,6 +51,13 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.ProbWeightedMagnet")
 
+
+def normalize(val: float, vmin: float, vmax: float) -> float:
+    """Normalize a value to [0, 1] given a min/max range."""
+    if vmax == vmin:
+        return 0.5
+    return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -72,8 +79,7 @@ STOP_PCT = 0.005                    # 0.5% stop
 TARGET_RISK_MULT = 1.5              # 1.5× risk for target (v1 fallback)
 
 # Min confidence — raised from 0.25 to 0.35 for v2 hard gates
-MIN_CONFIDENCE = 0.35
-MAX_CONFIDENCE = 0.80               # v2 cap
+MIN_CONFIDENCE = 0.30
 
 # Min data points
 MIN_DATA_POINTS = 3
@@ -354,73 +360,35 @@ class ProbWeightedMagnet(BaseStrategy):
         delta_roc: Optional[float],
         liquidity_vacuum: bool,
         skew_converging: bool,
+        depth_score=None,
     ) -> float:
         """
-        Compute confidence for a magnet signal (v2 — 7 components).
+        Compute confidence for a magnet signal (Family A — 5 components).
 
-        Hard gates (all must pass for signal to be valid):
-        - Delta acceleration
-        - Liquidity vacuum
-        - Skew convergence
-
-        Soft factors boost confidence:
-        - OI concentration
-        - Consolidation tightness
-        - Volume profile
-        - Distance to target
+        5 components, simple average:
+            1. OI concentration (total_oi/max_oi, 0→1)
+            2. Delta acceleration (abs delta_roc, 0→0.3)
+            3. Liquidity vacuum (bool → 0 or 1)
+            4. Consolidation tightness (consolidation_ratio, 0→1)
+            5. Distance to target (inverted, 0→0.05)
         """
+        # 1. OI concentration: total_oi/max_oi, 0→1
         total_oi = target["total_oi"]
-        net_delta = target["net_delta"]
-        distance_pct = target["distance_pct"]
         max_oi = max(s["total_oi"] for s in qualifying) if qualifying else total_oi
-
-        # 1. OI concentration (soft — 0.10–0.15)
-        oi_scaled = min(1.0, (total_oi - MIN_OI_CONCENTRATION) / (MIN_OI_CONCENTRATION * 9))
-        oi_component = 0.10 + 0.05 * oi_scaled
-
-        # 2. Delta acceleration (hard gate — 0.0 or 0.20–0.30)
-        if delta_roc is not None:
-            # Scale: |roc| = 0.05 → 0.20, |roc| = 0.50+ → 0.30
-            abs_roc = abs(delta_roc)
-            delta_scaled = min(1.0, (abs_roc - DELTA_ROC_THRESHOLD) / (0.50 - DELTA_ROC_THRESHOLD) + 0.0)
-            delta_scaled = max(0.0, min(1.0, delta_scaled))
-            delta_component = 0.20 + 0.10 * delta_scaled
-        else:
-            delta_component = 0.0  # Hard gate failed
-
-        # 3. Liquidity vacuum (hard gate — 0.0 or 0.15–0.20)
-        vacuum_component = 0.15 + 0.05 if liquidity_vacuum else 0.0
-
-        # 4. Skew convergence (hard gate — 0.0 or 0.15–0.20)
-        skew_component = 0.15 + 0.05 if skew_converging else 0.0
-
-        # 5. Consolidation tightness (soft — 0.10–0.15)
-        cons_scaled = 1.0 - (consolidation_ratio / CONSOLIDATION_RATIO)
-        cons_component = 0.10 + 0.05 * max(0, cons_scaled)
-
-        # 6. Volume profile (soft — 0.05–0.10)
-        if vol_trend == "DOWN":
-            vol_component = 0.10  # Strong accumulation signal
-        elif vol_trend == "FLAT":
-            vol_component = 0.07  # Moderate
-        else:
-            vol_component = 0.05  # Shouldn't reach here
-
-        # 7. Distance to target (soft — 0.05–0.10)
-        dist_scaled = 1.0 - min(1.0, distance_pct / 0.03)
-        dist_component = 0.05 + 0.05 * max(0, dist_scaled)
-
-        confidence = (
-            oi_component
-            + delta_component
-            + vacuum_component
-            + skew_component
-            + cons_component
-            + vol_component
-            + dist_component
-        )
-
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        oi_ratio = total_oi / max_oi if max_oi > 0 else 1.0
+        c1 = normalize(oi_ratio, 0.0, 1.0)
+        # 2. Delta acceleration: delta_roc from -0.3 to 0.3, use abs
+        abs_d = abs(delta_roc) if delta_roc is not None else 0.0
+        c2 = normalize(abs_d, 0.0, 0.3)
+        # 3. Liquidity vacuum: bool → 0 or 1
+        c3 = 1.0 if liquidity_vacuum else 0.0
+        # 4. Consolidation tightness: consolidation_ratio 0→1, higher = tighter = higher
+        c4 = normalize(consolidation_ratio, 0.0, 1.0)
+        # 5. Distance to target: distance_pct 0→0.05, closer = higher, invert
+        distance_pct = target["distance_pct"]
+        c5 = 1.0 - normalize(distance_pct, 0.0, 0.05)
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+        return min(1.0, max(0.0, confidence))
 
     # ------------------------------------------------------------------
     # LONG: Stealth accumulation below price

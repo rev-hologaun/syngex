@@ -62,6 +62,13 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.ExtrinsicIntrinsicFlow")
 
+
+def normalize(val: float, vmin: float, vmax: float) -> float:
+    """Normalize a value to [0, 1] given a min/max range."""
+    if vmax == vmin:
+        return 0.5
+    return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -81,8 +88,7 @@ VOLUME_SPIKE_RATIO = 1.30               # 130% of avg (1.3×)
 STOP_PCT = 0.005                        # 0.5% stop
 
 # Min confidence — raised from 0.25 to 0.35 (v2 Conviction-Master)
-MIN_CONFIDENCE = 0.35
-MAX_CONFIDENCE = 0.80                   # v2 cap
+MIN_CONFIDENCE = 0.30
 
 # Min data points — need more data for extrinsic tracking
 MIN_DATA_POINTS = 5
@@ -387,84 +393,31 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         extrinsic_accel: Optional[float],
         aggressor_ratio: Optional[float],
         skew_coupled: bool,
+        depth_score=None,
     ) -> float:
         """
-        Compute confidence using 7 unified components for all signal types.
+        Compute confidence using 5 unified components for all signal types (Family A).
 
-        1. Extrinsic magnitude: 0.05–0.10 (soft — how extreme is the change)
-        2. Extrinsic acceleration: 0.0 or 0.20–0.30 (hard gate)
-        3. Aggressor volume: 0.0 or 0.15–0.20 (hard gate, scaled by aggressor_ratio)
-        4. Delta-skew coupling: 0.0 or 0.15–0.20 (hard gate)
-        5. Volume spike: 0.05–0.10 (soft — unchanged)
-        6. Volume direction: 0.05–0.10 (soft — unchanged)
-        7. Net gamma: 0.05–0.10 (soft — unchanged)
+        5 components, simple average:
+            1. Extrinsic magnitude (abs change, 0→0.10)
+            2. Extrinsic acceleration (0→1)
+            3. Aggressor volume (0→1)
+            4. Volume spike (vol_ratio, 0→2)
+            5. Net gamma (0→5M)
         """
-        # 1. Extrinsic magnitude (0.05–0.10)
-        #    How extreme is the extrinsic change?
-        if signal_type == "expansion":
-            exp_scaled = min(1.0, (extrinsic_change_pct - EXTRINSIC_EXPANSION_THRESHOLD)
-                             / (EXTRINSIC_EXPANSION_THRESHOLD * 3))
-        else:
-            # Collapse: use absolute value
-            collapse_magnitude = abs(extrinsic_change_pct)
-            exp_scaled = min(1.0, (collapse_magnitude - EXTRINSIC_COLLAPSE_THRESHOLD)
-                             / (EXTRINSIC_COLLAPSE_THRESHOLD * 1.5))
-        extrinsic_component = 0.05 + 0.05 * exp_scaled
-
-        # 2. Extrinsic acceleration (0.0 or 0.20–0.30) — hard gate
-        if extrinsic_accel is not None:
-            # Scale from 0.10 (threshold) → 0.30 (max)
-            accel_scaled = min(1.0, (abs(extrinsic_accel) - 0.10) / 0.20)
-            accel_component = 0.20 + 0.10 * accel_scaled
-        else:
-            accel_component = 0.0
-
-        # 3. Aggressor volume (0.0 or 0.15–0.20) — hard gate, scaled by aggressor_ratio
-        if aggressor_ratio is not None and aggressor_ratio > 0:
-            # Scale by how far above threshold the aggressor ratio is
-            aggressor_scaled = min(1.0, (aggressor_ratio - 0.55) / 0.20)
-            aggressor_component = 0.15 + 0.05 * aggressor_scaled
-        else:
-            aggressor_component = 0.0
-
-        # 4. Delta-skew coupling (0.0 or 0.15–0.20) — hard gate
-        if skew_coupled:
-            skew_component = 0.15 + 0.05  # Base confidence when coupled
-        else:
-            skew_component = 0.0
-
-        # 5. Volume spike (0.05–0.10) — soft
-        vol_scaled = min(1.0, (vol_ratio - VOLUME_SPIKE_RATIO) / VOLUME_SPIKE_RATIO)
-        volume_spike_component = 0.05 + 0.05 * vol_scaled
-
-        # 6. Volume direction (0.05–0.10) — soft
-        if signal_type == "expansion":
-            if vol_trend == "UP" and "LONG" in str(signal_type):
-                vol_dir_component = 0.10
-            elif vol_trend == "DOWN" and "SHORT" in str(signal_type):
-                vol_dir_component = 0.10
-            else:
-                vol_dir_component = 0.05
-        elif signal_type == "collapse":
-            if vol_trend == "DOWN":
-                vol_dir_component = 0.10
-            elif vol_trend == "FLAT":
-                vol_dir_component = 0.08
-            else:
-                vol_dir_component = 0.05
-        else:
-            vol_dir_component = 0.05
-
-        # 7. Net gamma (0.05–0.10) — soft
-        gamma_scaled = min(1.0, net_gamma / (self._min_net_gamma * 4))
-        gamma_component = 0.05 + 0.05 * gamma_scaled
-
-        # Sum all components
-        confidence = (extrinsic_component + accel_component + aggressor_component +
-                      skew_component + volume_spike_component + vol_dir_component +
-                      gamma_component)
-
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        # 1. Extrinsic magnitude: extrinsic_change_pct from 0→0.10, use abs
+        abs_change = abs(extrinsic_change_pct)
+        c1 = normalize(abs_change, 0.0, 0.10)
+        # 2. Extrinsic acceleration: extrinsic_accel from 0→1, higher = higher
+        c2 = normalize(extrinsic_accel, 0.0, 1.0) if extrinsic_accel is not None else 0.5
+        # 3. Aggressor volume: aggressor_ratio from 0→1, higher = higher
+        c3 = normalize(aggressor_ratio, 0.0, 1.0) if aggressor_ratio is not None else 0.5
+        # 4. Volume spike: vol_ratio from 0→2, higher = higher
+        c4 = normalize(vol_ratio, 0.0, 2.0)
+        # 5. Net gamma: net_gamma from 0→5M, higher = higher
+        c5 = normalize(net_gamma, 0.0, 5000000.0)
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+        return min(1.0, max(0.0, confidence))
 
     # ------------------------------------------------------------------
     # LONG: Extrinsic expansion + bullish volume
@@ -920,7 +873,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         norm_gamma = (gamma_component - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
         confidence = (norm_exp + norm_vol + norm_vol_dir + norm_gamma) / 4.0
 
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        return max(0.0, confidence)
 
     def _compute_short_confidence(
         self,
@@ -958,7 +911,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         norm_gamma = (gamma_component - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
         confidence = (norm_exp + norm_vol + norm_vol_dir + norm_gamma) / 4.0
 
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        return max(0.0, confidence)
 
     def _compute_fade_confidence(
         self,
@@ -1001,7 +954,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         norm_gamma = (gamma_component - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
         confidence = (norm_collapse + norm_vol_decline + norm_vol_dir + norm_gamma) / 4.0
 
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        return max(0.0, confidence)
 
     # ------------------------------------------------------------------
     # Helpers

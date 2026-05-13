@@ -41,6 +41,16 @@ from strategies.rolling_keys import (
 logger = logging.getLogger("Syngex.Strategies.SmileDynamics")
 
 
+def normalize(val: float, vmin: float, vmax: float) -> float:
+    """Normalize a value to [0, 1] given a min/max range."""
+    if vmax == vmin:
+        return 0.5
+    return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
+
+
+MIN_CONFIDENCE = 0.30
+
+
 class SmileDynamics(BaseStrategy):
     """
     IV Smile Dynamics strategy — tracks curvature asymmetry via Ω.
@@ -167,9 +177,9 @@ class SmileDynamics(BaseStrategy):
             regime,
         )
 
-        min_confidence = params.get("min_confidence", 0.35)
-        max_confidence = params.get("max_confidence", 0.85)
-        confidence = max(min_confidence, min(confidence, max_confidence))
+        min_confidence = MIN_CONFIDENCE
+        max_confidence = 1.0
+        confidence = max(min_confidence, confidence)
 
         if confidence < min_confidence:
             return []
@@ -293,47 +303,23 @@ class SmileDynamics(BaseStrategy):
         rolling_data: Dict[str, Any],
         params: Dict[str, Any],
         regime: str,
+        depth_score=None,
     ) -> float:
         """
-        Compute 5-component confidence score.
+        Compute 5-component confidence score (Family A).
 
         Returns 0.0–1.0.
         """
-        min_omega_sigma = params.get("min_omega_sigma", 2.0)
-
-        # 1. Ω magnitude in σ units (0.0–0.30)
-        conf_omega = 0.0
-        if current_omega_sigma > 0:
-            conf_omega = min(0.30, 0.15 + 0.15 * min(1.0, (omega_zscore - min_omega_sigma) / min_omega_sigma))
-            conf_omega = max(0.10, conf_omega)
-
-        # 2. Ω velocity (0.0–0.20)
-        conf_roc = 0.0
-        if direction == "LONG" and current_omega_roc < 0:
-            conf_roc = min(0.20, 0.20 * min(1.0, abs(current_omega_roc) / 0.10))
-        elif direction == "SHORT" and current_omega_roc > 0:
-            conf_roc = min(0.20, 0.20 * min(1.0, current_omega_roc / 0.10))
-
-        # 3. Liquidity conviction (0.0–0.15)
-        conf_liquidity = 0.10  # baseline (gate A already passed)
-
-        # 4. Slope divergence purity (0.0–0.15)
-        conf_divergence = 0.075  # baseline (gate C already passed)
-        if current_omega_sigma > 0:
-            purity = min(1.0, omega_zscore / (min_omega_sigma * 2))
-            conf_divergence = 0.075 + 0.075 * purity
-
-        # 5. GEX regime alignment (0.0–0.10)
-        conf_gex = 0.05  # baseline (gate B already passed)
-        if regime:
-            if direction == "LONG" and regime == "POSITIVE":
-                conf_gex = 0.10
-            elif direction == "SHORT" and regime == "NEGATIVE":
-                conf_gex = 0.10
-
-        # Sum all components
-        confidence = (
-            conf_omega + conf_roc + conf_liquidity +
-            conf_divergence + conf_gex
-        )
+        # 1. Ω magnitude: current_omega from 0→5, higher = higher
+        c1 = normalize(current_omega, 0.0, 5.0)
+        # 2. Ω velocity: current_omega_roc from -0.1 to 0.1, use abs
+        abs_roc = abs(current_omega_roc)
+        c2 = normalize(abs_roc, 0.0, 0.1)
+        # 3. Ω sigma significance: current_omega_sigma from 0→5, higher = higher
+        c3 = normalize(current_omega_sigma, 0.0, 5.0)
+        # 4. Put slope: normalize to [0,1]
+        c4 = normalize(abs(current_put_slope), 0.0, 0.5)
+        # 5. Call slope: normalize to [0,1]
+        c5 = normalize(abs(current_call_slope), 0.0, 0.5)
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))

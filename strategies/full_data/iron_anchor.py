@@ -41,6 +41,16 @@ from strategies.rolling_keys import (
 logger = logging.getLogger("Syngex.Strategies.IronAnchor")
 
 
+def normalize(val: float, vmin: float, vmax: float) -> float:
+    """Normalize a value to [0, 1] given a min/max range."""
+    if vmax == vmin:
+        return 0.5
+    return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
+
+
+MIN_CONFIDENCE = 0.30
+
+
 class IronAnchor(BaseStrategy):
     """
     Iron Anchor strategy — detects Gamma/Liquidity wall confluence.
@@ -177,9 +187,9 @@ class IronAnchor(BaseStrategy):
             params,
         )
 
-        min_confidence = params.get("min_confidence", 0.35)
-        max_confidence = params.get("max_confidence", 0.85)
-        confidence = max(min_confidence, min(confidence, max_confidence))
+        min_confidence = MIN_CONFIDENCE
+        max_confidence = 1.0
+        confidence = max(min_confidence, confidence)
 
         if confidence < min_confidence:
             return []
@@ -325,63 +335,22 @@ class IronAnchor(BaseStrategy):
         regime: str,
         gex_calc: Any,
         params: Dict[str, Any],
+        depth_score=None,
     ) -> float:
         """
-        Compute 5-component confidence score.
+        Compute 5-component confidence score (Family A).
 
         Returns 0.0–1.0.
         """
-        max_confluence_distance = params.get("max_confluence_distance", 1.0)
-        min_liq_wall_sigma = params.get("min_liq_wall_sigma", 3.0)
-
-        # 1. Confluence proximity (0.0–0.30)
-        # Tighter Ω_conf = higher confidence
-        conf_prox = 0.0
-        if current_prox >= 0 and max_confluence_distance > 0:
-            # At threshold distance = 0.05 baseline, at 0 = max
-            proximity_ratio = 1.0 - (current_prox / max_confluence_distance)
-            proximity_ratio = max(0.0, min(1.0, proximity_ratio))
-            conf_prox = 0.05 + 0.25 * proximity_ratio
-
-        # 2. Liquidity weight (0.0–0.20)
-        # Heavier wall = more conviction
-        conf_liq = 0.05  # baseline (gate A already passed)
-        if current_liq_sigma > 0:
-            sigma_ratio = min(1.0, current_liq_sigma / (min_liq_wall_sigma * 2))
-            conf_liq = 0.05 + 0.15 * sigma_ratio
-
-        # 3. Gamma density (0.0–0.15)
-        # Thicker wall = more structural support
-        conf_gamma = 0.075  # baseline (gate B already passed)
-        if gex_calc and hasattr(gex_calc, "get_gamma_walls"):
-            walls = gex_calc.get_gamma_walls(threshold=params.get("min_gamma_wall_gex", 500000))
-            if walls:
-                # More walls in the vicinity = higher density
-                total_gex = sum(abs(w.get("gex", 0)) for w in walls)
-                if total_gex > 0:
-                    density_score = min(1.0, total_gex / 10000000)  # normalize
-                    conf_gamma = 0.075 + 0.075 * density_score
-
-        # 4. Exhaustion signal (0.0–0.15)
-        # Velocity dying = better entry
-        conf_exhaust = 0.05  # baseline (gate C already passed)
-        if avg_velocity > 0:
-            exhaustion_ratio = 1.0 - (current_velocity / avg_velocity)
-            exhaustion_ratio = max(0.0, min(1.0, exhaustion_ratio))
-            conf_exhaust = 0.05 + 0.10 * exhaustion_ratio
-
-        # 5. GEX regime alignment (0.0–0.10)
-        # Signal direction matches GEX bias
-        conf_gex = 0.05  # baseline (gate B already passed)
-        if regime:
-            if direction == "LONG" and regime == "POSITIVE":
-                conf_gex = 0.10
-            elif direction == "SHORT" and regime == "NEGATIVE":
-                conf_gex = 0.10
-
-        # Sum all components
-        confidence = (
-            conf_prox + conf_liq + conf_gamma +
-            conf_exhaust + conf_gex
-        )
+        # 1. Confluence proximity: current_prox from 0→2, closer = higher, invert
+        c1 = 1.0 - normalize(current_prox, 0.0, 2.0)
+        # 2. Liquidity weight: current_liq_size from 0→1M, higher = higher
+        c2 = normalize(current_liq_size, 0.0, 1000000.0)
+        # 3. Liquidity sigma: current_liq_sigma from 0→5, higher = higher
+        c3 = normalize(current_liq_sigma, 0.0, 5.0)
+        # 4. Velocity: current_velocity from 0→0.02, higher = higher
+        c4 = normalize(current_velocity, 0.0, 0.02)
+        # 5. Velocity ratio: avg_velocity from 0→0.02, higher = higher
+        c5 = normalize(avg_velocity, 0.0, 0.02)
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))

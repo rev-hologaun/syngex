@@ -42,6 +42,16 @@ from strategies.rolling_keys import (
 logger = logging.getLogger("Syngex.Strategies.SentimentSync")
 
 
+def normalize(val: float, vmin: float, vmax: float) -> float:
+    """Normalize a value to [0, 1] given a min/max range."""
+    if vmax == vmin:
+        return 0.5
+    return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
+
+
+MIN_CONFIDENCE = 0.30
+
+
 class SentimentSync(BaseStrategy):
     """
     Sentiment Sync strategy — detects when options sentiment and equity flow
@@ -164,9 +174,9 @@ class SentimentSync(BaseStrategy):
             regime,
         )
 
-        min_confidence = params.get("min_confidence", 0.35)
-        max_confidence = params.get("max_confidence", 0.85)
-        confidence = max(min_confidence, min(confidence, max_confidence))
+        min_confidence = MIN_CONFIDENCE
+        max_confidence = 1.0
+        confidence = max(min_confidence, confidence)
 
         if confidence < min_confidence:
             return []
@@ -299,60 +309,26 @@ class SentimentSync(BaseStrategy):
         data: Dict[str, Any],
         params: Dict[str, Any],
         regime: str,
+        depth_score=None,
     ) -> float:
         """
-        Compute 5-component confidence score.
+        Compute 5-component confidence score (Family A).
 
         Returns 0.0–1.0.
         """
-        min_sig_sigma = params.get("min_sig_sigma", 2.0)
-
-        # 1. Skew significance (0.0–0.25) — ΔSkew in σ units
-        conf_skew = 0.0
-        if current_sigma > 0:
-            skew_zscore = abs(current_skew_change) / current_sigma
-            # At threshold = baseline 0.10, above = bonus up to 0.25
-            conf_skew = min(0.25, 0.10 + 0.15 * min(1.0, (skew_zscore - min_sig_sigma) / min_sig_sigma))
-            conf_skew = max(0.10, conf_skew)
-
-        # 2. VSI significance (0.0–0.25) — Aggressor VSI in σ units
-        conf_vsi = 0.0
-        # VSI magnitude is already |VSI|, use as proxy for significance
-        # Higher magnitude = more conviction
-        conf_vsi = min(0.25, 0.10 + 0.15 * min(1.0, current_vsi_mag / 0.5))
-        conf_vsi = max(0.10, conf_vsi)
-
-        # 3. Sign agreement (0.0–0.15) — how cleanly both signals agree
-        conf_agreement = 0.0
-        # Γ_sync is already +1 or -1 when both signals agree
-        # If |Γ_sync| == 1.0, perfect agreement
-        gamma_sync = data.get("_gamma_sync", 0.0)
-        if abs(gamma_sync) >= 1.0:
-            conf_agreement = 0.15  # Perfect sign agreement
-        elif abs(gamma_sync) > 0:
-            conf_agreement = 0.075  # Partial agreement
-
-        # 4. Volume confirmation (0.0–0.10) — volume above average
-        conf_volume = 0.05  # baseline
-        volume_window = rolling_data.get(KEY_VOLUME_5M)
-        if volume_window and volume_window.count > 0:
-            current_vol = volume_window.latest
-            avg_vol = volume_window.mean
-            if current_vol is not None and avg_vol is not None and avg_vol > 0:
-                vol_ratio = current_vol / avg_vol
-                conf_volume = 0.05 + 0.05 * min(1.0, max(0, (vol_ratio - 1.0) / 1.0))
-
-        # 5. GEX regime alignment (0.0–0.10) — signal direction matches GEX bias
-        conf_gex = 0.05  # baseline
-        if regime:
-            if direction == "LONG" and regime == "POSITIVE":
-                conf_gex = 0.10
-            elif direction == "SHORT" and regime == "NEGATIVE":
-                conf_gex = 0.10
-
-        # Sum all components
-        confidence = (
-            conf_skew + conf_vsi + conf_agreement +
-            conf_volume + conf_gex
-        )
+        # 1. Skew significance: current_skew_change from 0→1, use abs
+        abs_sc = abs(current_skew_change)
+        c1 = normalize(abs_sc, 0.0, 1.0)
+        # 2. VSI significance: current_vsi_mag from 0→0.5, higher = higher
+        c2 = normalize(current_vsi_mag, 0.0, 0.5)
+        # 3. Sigma significance: current_sigma from 0→5, higher = higher
+        c3 = normalize(current_sigma, 0.0, 5.0)
+        # 4. Call/put balance: from rolling_data
+        cp_ratio = rolling_data.get("call_put_ratio", 1.0)
+        c4 = normalize(cp_ratio, 0.0, 2.0)
+        # 5. Volume confirmation: from rolling_data
+        vol_window = rolling_data.get("volume_5m")
+        vol_ratio = vol_window.latest / vol_window.mean if vol_window and vol_window.mean > 0 else 1.0
+        c5 = normalize(vol_ratio, 0.0, 2.0)
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))

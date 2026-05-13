@@ -61,8 +61,7 @@ STOP_PCT = 0.005  # 0.5% stop
 TARGET_PCT = 0.010  # 1.0% target
 
 # Min/max confidence
-MIN_CONFIDENCE = 0.35  # Raised from 0.25
-MAX_CONFIDENCE = 0.85  # Micro-signal cap
+MIN_CONFIDENCE = 0.30  # Raised from 0.25
 
 # Min data points
 MIN_DATA_POINTS = 5
@@ -609,7 +608,7 @@ class IVBandBreakout(BaseStrategy):
         vol_conf = self._volume_confidence(vol_trend)
 
         confidence = skew_conf + regime_conf + delta_conf + price_conf + iv_conf + vol_conf
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        return max(0.0, confidence)
 
     # ------------------------------------------------------------------
     # Soft confidence helpers

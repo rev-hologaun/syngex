@@ -60,6 +60,13 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.ProbDistributionShift")
 
+
+def normalize(val: float, vmin: float, vmax: float) -> float:
+    """Normalize a value to [0, 1] given a min/max range."""
+    if vmax == vmin:
+        return 0.5
+    return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -77,8 +84,7 @@ MIN_NET_GAMMA = 500000.0
 STOP_PCT = 0.005                    # 0.5% stop
 
 # Min confidence (raised from 0.25 → 0.35 for v2)
-MIN_CONFIDENCE = 0.35
-MAX_CONFIDENCE = 0.80               # v2 cap
+MIN_CONFIDENCE = 0.30
 
 # Min strikes with data
 MIN_STRIKES_WITH_DATA = 5           # Need at least 5 strikes for distribution
@@ -608,58 +614,30 @@ class ProbDistributionShift(BaseStrategy):
         skew_coupled: bool,
         momentum: float,
         greeks_summary: Dict[str, Any],
+        depth_score=None,
     ) -> float:
         """
-        Compute confidence for a distribution-shift signal (v2).
+        Compute confidence for a distribution-shift signal (Family A — 5 components).
 
-        7 components unified for LONG and SHORT:
-        1. Z-score magnitude: 0.10–0.15 (soft)
-        2. Momentum acceleration: 0.0 or 0.20–0.30 (hard gate)
-        3. Capital-weighted breadth: 0.0 or 0.15–0.20 (hard gate, scaled)
-        4. Delta-skew coupling: 0.0 or 0.15–0.20 (hard gate)
-        5. Duration: 0.05–0.10 (soft)
-        6. Volume confirmation: 0.05–0.10 (soft)
-        7. Net gamma: 0.05–0.10 (soft)
+        5 components, simple average:
+            1. Z-score magnitude (abs_z, 0→4)
+            2. Momentum acceleration (0→1)
+            3. Capital-weighted breadth (0→1)
+            4. Duration (consecutive_count, 0→10)
+            5. Net gamma (0→5M)
         """
-        # 1. Z-score magnitude (0.10–0.15) — soft
-        #    2σ = baseline, 4σ+ = max weight
-        z_scaled = min(1.0, (abs_z - Z_SCORE_THRESHOLD) / Z_SCORE_THRESHOLD)
-        z_component = 0.10 + 0.05 * z_scaled
-
-        # 2. Momentum acceleration (0.0 or 0.20–0.30) — hard gate
-        #    Must pass threshold; score scales with acceleration magnitude
-        abs_accel = abs(momentum_accel)
-        accel_scaled = min(1.0, abs_accel / 0.30)  # 30% accel = max weight
-        accel_component = 0.20 + 0.10 * accel_scaled
-
-        # 3. Capital-weighted breadth (0.0 or 0.15–0.20) — hard gate
-        #    Scaled by capital_weight
-        breadth_component = 0.15 + 0.05 * capital_weight
-
-        # 4. Delta-skew coupling (0.0 or 0.15–0.20) — hard gate
-        skew_component = 0.15 + 0.05 if skew_coupled else 0.0
-
-        # 5. Duration (0.05–0.10) — soft
-        dur_scaled = min(1.0, (consecutive_count - MIN_CONSECUTIVE_SIGNALS) / 4)
-        dur_component = 0.05 + 0.05 * max(0, dur_scaled)
-
-        # 6. Volume confirmation (0.05–0.10) — soft
-        if vol_trend == "UP":
-            vol_component = 0.10
-        elif vol_trend == "FLAT":
-            vol_component = 0.07
-        else:
-            vol_component = 0.05
-
-        # 7. Net gamma (0.05–0.10) — soft
-        gamma_scaled = min(1.0, net_gamma / (MIN_NET_GAMMA * 4))
-        gamma_component = 0.05 + 0.05 * gamma_scaled
-
-        # Average all components
-        confidence = (z_component + accel_component + breadth_component +
-                      skew_component + dur_component + vol_component + gamma_component) / 7.0
-
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        # 1. Z-score magnitude: abs_z from 0→4, higher = more extreme = higher
+        c1 = normalize(abs_z, 0.0, 4.0)
+        # 2. Momentum acceleration: momentum_accel from 0→1, higher = higher
+        c2 = normalize(momentum_accel, 0.0, 1.0)
+        # 3. Capital-weighted breadth: capital_weight from 0→1, higher = higher
+        c3 = normalize(capital_weight, 0.0, 1.0)
+        # 4. Duration: consecutive_count from 0→10, higher = more persistent = higher
+        c4 = normalize(consecutive_count, 0.0, 10.0)
+        # 5. Net gamma: net_gamma from 0→5M, higher = higher
+        c5 = normalize(net_gamma, 0.0, 5000000.0)
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+        return min(1.0, max(0.0, confidence))
 
     # ------------------------------------------------------------------
     # Helpers
