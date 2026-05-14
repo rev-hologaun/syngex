@@ -84,10 +84,12 @@ class ExtrinsicFlow(BaseStrategy):
         self._apply_params(data)
         rolling_data = data.get("rolling_data", {})
         params = self._params
+        self._regime_mismatch = False
+        regime_soft = params.get("regime_soft", True)
         regime = data.get("regime", "")
 
         # 1. Get Φ data from rolling windows
-        min_phi_data_points = params.get("min_phi_data_points", 10)
+        min_phi_data_points = params.get("min_phi_data_points", 5)
         phi_sigma_mult = params.get("phi_sigma_mult", 2.0)
 
         phi_call_window = rolling_data.get(KEY_PHI_CALL_5M)
@@ -266,7 +268,8 @@ class ExtrinsicFlow(BaseStrategy):
             return True
         if direction == "SHORT" and regime == "NEGATIVE":
             return True
-        return False
+        self._regime_mismatch = True
+        return True
 
     def _compute_confidence(
         self,
@@ -286,6 +289,9 @@ class ExtrinsicFlow(BaseStrategy):
 
         Returns 0.0–1.0.
         """
+        if getattr(self, '_regime_mismatch', False):
+            # Phase 1: regime-soft mode — 30% penalty for mismatch
+            confidence *= 0.7
         # 1. RΦ magnitude: phi_ratio from 0→5, higher = higher
         c1 = normalize(phi_ratio, 0.0, 5.0)
         # 2. Total phi: phi_total from 0→1, higher = higher

@@ -81,10 +81,12 @@ class SkewDynamics(BaseStrategy):
         self._apply_params(data)
         rolling_data = data.get("rolling_data", {})
         params = self._params
+        self._regime_mismatch = False
+        regime_soft = params.get("regime_soft", True)
         regime = data.get("regime", "")
 
         # 1. Get Ψ data from rolling windows
-        min_psi_data_points = params.get("min_psi_data_points", 10)
+        min_psi_data_points = params.get("min_psi_data_points", 5)
         min_psi_sigma = params.get("min_psi_sigma", 2.0)
 
         psi_window = rolling_data.get(KEY_SKEW_PSI_5M)
@@ -266,7 +268,8 @@ class SkewDynamics(BaseStrategy):
             return True
         if direction == "SHORT" and regime == "NEGATIVE":
             return True
-        return False
+        self._regime_mismatch = True
+        return True
 
     def _gate_c_iv_divergence(
         self,
@@ -306,6 +309,9 @@ class SkewDynamics(BaseStrategy):
 
         Returns 0.0–1.0.
         """
+        if getattr(self, '_regime_mismatch', False):
+            # Phase 1: regime-soft mode — 30% penalty for mismatch
+            confidence *= 0.7
         # 1. Ψ magnitude: current_psi from 0→5, higher = higher
         c1 = normalize(current_psi, 0.0, 5.0)
         # 2. Ψ velocity: current_psi_roc from -0.1 to 0.1, use abs

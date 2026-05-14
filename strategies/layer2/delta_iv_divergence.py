@@ -46,7 +46,7 @@ logger = logging.getLogger("Syngex.Strategies.DeltaIVDivergence")
 # ---------------------------------------------------------------------------
 
 # Min data points for both delta and IV windows
-MIN_DATA_POINTS = 5
+MIN_DATA_POINTS = 3
 
 # Minimum divergence strength (combined z-score magnitude)
 MIN_DIVERSION_STRENGTH = 0.3

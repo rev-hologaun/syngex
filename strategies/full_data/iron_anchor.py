@@ -82,11 +82,13 @@ class IronAnchor(BaseStrategy):
         self._apply_params(data)
         rolling_data = data.get("rolling_data", {})
         params = self._params
+        self._regime_mismatch = False
+        regime_soft = params.get("regime_soft", True)
         regime = data.get("regime", "")
         gex_calc = data.get("gex_calculator")
 
         # 1. Get confluence metrics from rolling windows
-        min_data_points = params.get("min_data_points", 10)
+        min_data_points = params.get("min_data_points", 5)
         max_confluence_distance = params.get("max_confluence_distance", 1.0)
         min_liq_wall_sigma = params.get("min_liq_wall_sigma", 3.0)
         min_gamma_wall_gex = params.get("min_gamma_wall_gex", 500000)
@@ -293,9 +295,11 @@ class IronAnchor(BaseStrategy):
 
         # GEX regime alignment — same pattern as other full_data strategies
         if direction == "LONG" and regime != "POSITIVE":
-            return False
+            self._regime_mismatch = True
+            return True
         if direction == "SHORT" and regime != "NEGATIVE":
-            return False
+            self._regime_mismatch = True
+            return True
 
         # Check that the gamma wall is significant
         if gex_calc and hasattr(gex_calc, "get_gamma_walls"):
@@ -342,6 +346,9 @@ class IronAnchor(BaseStrategy):
 
         Returns 0.0–1.0.
         """
+        if getattr(self, '_regime_mismatch', False):
+            # Phase 1: regime-soft mode — 30% penalty for mismatch
+            confidence *= 0.7
         # 1. Confluence proximity: current_prox from 0→2, closer = higher, invert
         c1 = 1.0 - normalize(current_prox, 0.0, 2.0)
         # 2. Liquidity weight: current_liq_size from 0→1M, higher = higher

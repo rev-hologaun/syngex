@@ -81,10 +81,12 @@ class SmileDynamics(BaseStrategy):
         self._apply_params(data)
         rolling_data = data.get("rolling_data", {})
         params = self._params
+        self._regime_mismatch = False
+        regime_soft = params.get("regime_soft", True)
         regime = data.get("regime", "")
 
         # 1. Get Ω data from rolling windows
-        min_omega_data_points = params.get("min_omega_data_points", 10)
+        min_omega_data_points = params.get("min_omega_data_points", 5)
         min_omega_sigma = params.get("min_omega_sigma", 2.0)
 
         omega_window = rolling_data.get(KEY_CURVE_OMEGA_5M)
@@ -268,7 +270,8 @@ class SmileDynamics(BaseStrategy):
             return True
         if direction == "SHORT" and regime == "NEGATIVE":
             return True
-        return False
+        self._regime_mismatch = True
+        return True
 
     def _gate_c_vol_divergence(
         self,
@@ -310,6 +313,9 @@ class SmileDynamics(BaseStrategy):
 
         Returns 0.0–1.0.
         """
+        if getattr(self, '_regime_mismatch', False):
+            # Phase 1: regime-soft mode — 30% penalty for mismatch
+            confidence *= 0.7
         # 1. Ω magnitude: current_omega from 0→5, higher = higher
         c1 = normalize(current_omega, 0.0, 5.0)
         # 2. Ω velocity: current_omega_roc from -0.1 to 0.1, use abs

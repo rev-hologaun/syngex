@@ -88,6 +88,8 @@ class GammaBreaker(BaseStrategy):
         self._apply_params(data)
         rolling_data = data.get("rolling_data", {})
         params = self._params
+        self._regime_mismatch = False
+        regime_soft = params.get("regime_soft", True)
         regime = data.get("regime", "")
         gex_calc = data.get("gex_calculator")
 
@@ -289,7 +291,8 @@ class GammaBreaker(BaseStrategy):
             return True
         if direction == "SHORT" and regime == "NEGATIVE":
             return True
-        return False
+        self._regime_mismatch = True
+        return True
 
     def _gate_c_volume_confirmation(
         self,
@@ -329,6 +332,9 @@ class GammaBreaker(BaseStrategy):
 
         Returns 0.0–1.0.
         """
+        if getattr(self, '_regime_mismatch', False):
+            # Phase 1: regime-soft mode — 30% penalty for mismatch
+            confidence *= 0.7
         # 1. Γ_break magnitude: current_gamma_break from 0→0.01, higher = higher
         c1 = normalize(current_gamma_break, 0.0, 0.01)
         # 2. Wall proximity: current_wall_dist from 0→0.02, closer = higher, invert

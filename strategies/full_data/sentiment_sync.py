@@ -92,7 +92,7 @@ class SentimentSync(BaseStrategy):
         regime = data.get("regime", "")
 
         # 1. Get rolling window data
-        min_data_points = params.get("min_data_points", 10)
+        min_data_points = params.get("min_data_points", 5)
         min_sig_sigma = params.get("min_sig_sigma", 2.0)
 
         corr_window = rolling_data.get(KEY_SYNC_CORR_5M)

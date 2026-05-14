@@ -84,11 +84,13 @@ class WhaleTracker(BaseStrategy):
         self._apply_params(data)
         rolling_data = data.get("rolling_data", {})
         params = self._params
+        self._regime_mismatch = False
+        regime_soft = params.get("regime_soft", True)
         gex_calc = data.get("gex_calculator")
         regime = data.get("regime", "")
 
         # 1. Get concentration data from rolling windows
-        min_conc_data_points = params.get("min_conc_sigma", 5.0)
+        min_conc_data_points = params.get("min_conc_sigma", 5)
         max_participants = params.get("max_participants", 2)
         min_biggest_size_sigma = params.get("min_biggest_size_sigma", 3.0)
 
@@ -99,11 +101,11 @@ class WhaleTracker(BaseStrategy):
         participants_window = rolling_data.get(KEY_NUM_PARTICIPANTS_5M)
 
         # Need enough data for meaningful statistics
-        if not conc_ratio_window or conc_ratio_window.count < 10:
+        if not conc_ratio_window or conc_ratio_window.count < 5:
             return []
-        if not conc_sigma_window or conc_sigma_window.count < 5:
+        if not conc_sigma_window or conc_sigma_window.count < 3:
             return []
-        if not biggest_window or biggest_window.count < 10:
+        if not biggest_window or biggest_window.count < 5:
             return []
 
         current_conc_ratio = conc_ratio_window.values[-1]
@@ -331,7 +333,8 @@ class WhaleTracker(BaseStrategy):
             return True
         if direction == "SHORT" and regime == "NEGATIVE":
             return True
-        return False
+        self._regime_mismatch = True
+        return True
 
     def _compute_confidence(
         self,
@@ -353,6 +356,9 @@ class WhaleTracker(BaseStrategy):
 
         Returns 0.0–1.0.
         """
+        if getattr(self, '_regime_mismatch', False):
+            # Phase 1: regime-soft mode — 30% penalty for mismatch
+            confidence *= 0.7
         # 1. Concentration magnitude: current_conc_ratio from 0→1, higher = higher
         c1 = normalize(current_conc_ratio, 0.0, 1.0)
         # 2. Concentration sigma: current_conc_sigma from 0→5, higher = higher

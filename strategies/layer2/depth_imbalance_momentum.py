@@ -151,7 +151,7 @@ class DepthImbalanceMomentum(BaseStrategy):
             return []
 
         # 4. VAMP validation (optional)
-        use_vamp_validation = params.get("use_vamp_validation", True)
+        use_vamp_validation = params.get("use_vamp_validation", False)
         vamp_validated = True
         if use_vamp_validation:
             vamp_validated = self._vamp_validation(rolling_data, direction)

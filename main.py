@@ -379,7 +379,7 @@ class SyngexOrchestrator:
         global_config = self._strategy_config.get("global", {})
         self._strategy_engine = StrategyEngine(
             config=EngineConfig(
-                min_confidence=global_config.get("min_confidence", 0.15),
+                min_confidence=global_config.get("min_confidence", 0.10),
                 max_signals_per_tick=global_config.get("max_signals_per_tick", 10),
                 dedup_window_seconds=global_config.get("dedup_window_seconds", 60.0),
             ),
@@ -566,7 +566,7 @@ class SyngexOrchestrator:
                 # Apply global config
                 global_cfg = strategy_config.get("global", {})
                 if global_cfg and self._strategy_engine:
-                    self._strategy_engine.config.min_confidence = global_cfg.get("min_confidence", 0.15)
+                    self._strategy_engine.config.min_confidence = global_cfg.get("min_confidence", 0.10)
                     self._strategy_engine.config.max_signals_per_tick = global_cfg.get("max_signals_per_tick", 10)
                     self._strategy_engine.config.dedup_window_seconds = global_cfg.get("dedup_window_seconds", 60.0)
 

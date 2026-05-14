@@ -84,7 +84,7 @@ class ParticipantDiversityConviction(BaseStrategy):
         regime = data.get("regime", "")
 
         # 1. Get participant/exchange data from rolling windows
-        min_data_points = params.get("min_data_points", 10)
+        min_data_points = params.get("min_data_points", 5)
         bid_participants_window = rolling_data.get(KEY_BID_PARTICIPANTS_5M)
         ask_participants_window = rolling_data.get(KEY_ASK_PARTICIPANTS_5M)
         bid_exchanges_window = rolling_data.get(KEY_BID_EXCHANGES_5M)
@@ -184,7 +184,7 @@ class ParticipantDiversityConviction(BaseStrategy):
             return []
 
         # 6. VAMP validation (optional)
-        use_vamp_validation = params.get("use_vamp_validation", True)
+        use_vamp_validation = params.get("use_vamp_validation", False)
         vamp_validated = True
         if use_vamp_validation:
             vamp_validated = self._vamp_validation(rolling_data, direction)
