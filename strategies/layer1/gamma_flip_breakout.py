@@ -60,6 +60,21 @@ NEGATIVE_GAMMA_STOP_MULT = 2.5   # Wider stops in negative gamma (more noise)
 POSITIVE_GAMMA_STOP_MULT = 0.75  # Tighter stops in positive gamma (less noise)
 
 
+def _extract_float(rolling_data: dict, key: str, default: float = 0.0) -> float:
+    """Extract a float value from rolling_data, handling RollingWindow objects."""
+    val = rolling_data.get(key)
+    if val is None:
+        return default
+    # RollingWindow has .latest property
+    latest = getattr(val, "latest", None)
+    if latest is None:
+        return default
+    try:
+        return float(latest)
+    except (TypeError, ValueError):
+        return default
+
+
 class GammaFlipBreakout(BaseStrategy):
     """
     Trade the gamma flip regime boundary.
@@ -325,10 +340,10 @@ class GammaFlipBreakout(BaseStrategy):
             target = price - (risk * TARGET_RR)
 
         # SI score computation from rolling data
-        delta_density = rolling_data.get(KEY_DELTA_DENSITY_5M, 0.0)
-        volume_zscore = rolling_data.get(KEY_VOLUME_ZSCORE_5M, 0.0)
-        order_book_depth = rolling_data.get(KEY_ORDER_BOOK_DEPTH_5M, 0.0)
-        net_gamma_5m = rolling_data.get(KEY_NET_GAMMA_5M, 0.0)
+        delta_density = _extract_float(rolling_data, KEY_DELTA_DENSITY_5M, 0.0)
+        volume_zscore = _extract_float(rolling_data, KEY_VOLUME_ZSCORE_5M, 0.0)
+        order_book_depth = _extract_float(rolling_data, KEY_ORDER_BOOK_DEPTH_5M, 0.0)
+        net_gamma_5m = _extract_float(rolling_data, KEY_NET_GAMMA_5M, 0.0)
 
         # Distance to wall from flip_mid
         distance_to_wall_pct = abs(price - flip_mid) / price if price > 0 else 0.0
@@ -416,10 +431,10 @@ class GammaFlipBreakout(BaseStrategy):
             target = price + (risk * TARGET_RR)
 
         # SI score computation from rolling data
-        delta_density = rolling_data.get(KEY_DELTA_DENSITY_5M, 0.0)
-        volume_zscore = rolling_data.get(KEY_VOLUME_ZSCORE_5M, 0.0)
-        order_book_depth = rolling_data.get(KEY_ORDER_BOOK_DEPTH_5M, 0.0)
-        net_gamma_5m = rolling_data.get(KEY_NET_GAMMA_5M, 0.0)
+        delta_density = _extract_float(rolling_data, KEY_DELTA_DENSITY_5M, 0.0)
+        volume_zscore = _extract_float(rolling_data, KEY_VOLUME_ZSCORE_5M, 0.0)
+        order_book_depth = _extract_float(rolling_data, KEY_ORDER_BOOK_DEPTH_5M, 0.0)
+        net_gamma_5m = _extract_float(rolling_data, KEY_NET_GAMMA_5M, 0.0)
 
         # Distance to wall from flip_mid
         distance_to_wall_pct = abs(price - flip_mid) / price if price > 0 else 0.0
@@ -555,10 +570,10 @@ class GammaFlipBreakout(BaseStrategy):
             target = price + (risk * TARGET_RR)
 
         # SI score computation from rolling data
-        delta_density = rolling_data.get(KEY_DELTA_DENSITY_5M, 0.0)
-        volume_zscore = rolling_data.get(KEY_VOLUME_ZSCORE_5M, 0.0)
-        order_book_depth = rolling_data.get(KEY_ORDER_BOOK_DEPTH_5M, 0.0)
-        net_gamma_5m = rolling_data.get(KEY_NET_GAMMA_5M, 0.0)
+        delta_density = _extract_float(rolling_data, KEY_DELTA_DENSITY_5M, 0.0)
+        volume_zscore = _extract_float(rolling_data, KEY_VOLUME_ZSCORE_5M, 0.0)
+        order_book_depth = _extract_float(rolling_data, KEY_ORDER_BOOK_DEPTH_5M, 0.0)
+        net_gamma_5m = _extract_float(rolling_data, KEY_NET_GAMMA_5M, 0.0)
 
         # Distance to wall from flip_mid
         distance_to_wall_pct = abs(price - flip_mid) / price if price > 0 else 0.0
@@ -645,10 +660,10 @@ class GammaFlipBreakout(BaseStrategy):
             target = price - (risk * TARGET_RR)
 
         # SI score computation from rolling data
-        delta_density = rolling_data.get(KEY_DELTA_DENSITY_5M, 0.0)
-        volume_zscore = rolling_data.get(KEY_VOLUME_ZSCORE_5M, 0.0)
-        order_book_depth = rolling_data.get(KEY_ORDER_BOOK_DEPTH_5M, 0.0)
-        net_gamma_5m = rolling_data.get(KEY_NET_GAMMA_5M, 0.0)
+        delta_density = _extract_float(rolling_data, KEY_DELTA_DENSITY_5M, 0.0)
+        volume_zscore = _extract_float(rolling_data, KEY_VOLUME_ZSCORE_5M, 0.0)
+        order_book_depth = _extract_float(rolling_data, KEY_ORDER_BOOK_DEPTH_5M, 0.0)
+        net_gamma_5m = _extract_float(rolling_data, KEY_NET_GAMMA_5M, 0.0)
 
         # Distance to wall from flip_mid
         distance_to_wall_pct = abs(price - flip_mid) / price if price > 0 else 0.0
