@@ -112,6 +112,14 @@ def analyze_strategy(signals):
                 "symbols": set(),
                 "pnl_list": [],
                 "hold_times": [],
+                # SI score tracking
+                "si_buckets": defaultdict(lambda: {"pnl": [], "win": []}),
+                "si_winners": [],
+                "si_losers": [],
+                # SI component breakdown
+                "si_mom_winners": [], "si_mom_losers": [],
+                "si_liq_winners": [], "si_liq_losers": [],
+                "si_reg_winners": [], "si_reg_losers": [],
             }
         
         r = results[sid]
@@ -196,6 +204,37 @@ def analyze_strategy(signals):
         elif outcome == "CLOSED": dp["closed"] += 1
         dp["pnl"] += pnl
         
+        # SI Score tracking
+        meta = sig.get("metadata", {})
+        si_score = meta.get("si_score")
+        if si_score is not None:
+            pnl = sig.get("pnl", 0.0)
+            if si_score < 0.3:
+                bucket = "0.0-0.3"
+            elif si_score < 0.6:
+                bucket = "0.3-0.6"
+            elif si_score < 0.9:
+                bucket = "0.6-0.9"
+            else:
+                bucket = "0.9-1.0"
+            r["si_buckets"][bucket]["pnl"].append(pnl)
+            r["si_buckets"][bucket]["win"].append(pnl > 0)
+            if pnl > 0:
+                r["si_winners"].append(si_score)
+            else:
+                r["si_losers"].append(si_score)
+
+            # SI component breakdown
+            si_mom = meta.get("si_momentum")
+            si_liq = meta.get("si_liquidity")
+            si_reg = meta.get("si_regime")
+            if si_mom is not None:
+                (r["si_mom_winners"] if pnl > 0 else r["si_mom_losers"]).append(si_mom)
+            if si_liq is not None:
+                (r["si_liq_winners"] if pnl > 0 else r["si_liq_losers"]).append(si_liq)
+            if si_reg is not None:
+                (r["si_reg_winners"] if pnl > 0 else r["si_reg_losers"]).append(si_reg)
+
         # Hold time buckets
         if hold < 60:
             ht_key = "Very Fast (<1 min)"
@@ -764,6 +803,105 @@ def table_row(values, widths):
     return "|" + "|".join(cells) + "|"
 
 
+def output_si_analysis(lines, r):
+    """Output SI score analysis section for a strategy."""
+    lines.append("#### SI Score Analysis")
+    lines.append("")
+
+    si_buckets = r["si_buckets"]
+    si_winners = r["si_winners"]
+    si_losers = r["si_losers"]
+
+    bucket_order = ["0.0-0.3", "0.3-0.6", "0.6-0.9", "0.9-1.0"]
+
+    # Check if we have any SI data at all
+    total_si = sum(len(si_buckets[b]["pnl"]) for b in bucket_order)
+    if total_si == 0:
+        lines.append("**No SI score data available for this strategy.**")
+        lines.append("")
+        return
+
+    # Print bucket stats
+    widths = [10, 5, 8, 14]
+    h = table_header(["Bucket", "N", "Win Rate", "Avg P&L"], widths)
+    lines.append(h)
+
+    for bucket in bucket_order:
+        entries = si_buckets[bucket]
+        pnls = entries["pnl"]
+        wins_list = entries["win"]
+        if not pnls:
+            lines.append(table_row([bucket, "0", "N/A", "N/A"], widths))
+            continue
+        wins = sum(1 for w in wins_list if w)
+        total = len(pnls)
+        avg_p = sum(pnls) / total
+        wr = win_rate(wins, total - wins, 0)
+        lines.append(table_row([bucket, str(total), f"{wr:.1f}%", f"${fmt_num(avg_p)}"], widths))
+
+    lines.append("")
+
+    # Average SI score for winners vs losers
+    if si_winners and si_losers:
+        avg_w = sum(si_winners) / len(si_winners)
+        avg_l = sum(si_losers) / len(si_losers)
+        lines.append(f"**Avg SI score (winners):** {avg_w:.3f}  |  **Avg SI score (losers):** {avg_l:.3f}")
+        lines.append("")
+    elif si_winners:
+        avg_w = sum(si_winners) / len(si_winners)
+        lines.append(f"**Avg SI score (winners):** {avg_w:.3f} (no losers with SI data)")
+        lines.append("")
+    elif si_losers:
+        avg_l = sum(si_losers) / len(si_losers)
+        lines.append(f"**Avg SI score (losers):** {avg_l:.3f} (no winners with SI data)")
+        lines.append("")
+
+    # SI Component Breakdown
+    lines.append("**SI Component Breakdown:**")
+    lines.append("")
+    widths = [12, 18, 18]
+    h = table_header(["Component", "Winners Avg", "Losers Avg"], widths)
+    lines.append(h)
+
+    # Momentum
+    mom_w = r["si_mom_winners"]
+    mom_l = r["si_mom_losers"]
+    if mom_w and mom_l:
+        lines.append(table_row(["Momentum", f"{sum(mom_w)/len(mom_w):.3f}", f"{sum(mom_l)/len(mom_l):.3f}"], widths))
+    elif mom_w:
+        lines.append(table_row(["Momentum", f"{sum(mom_w)/len(mom_w):.3f}", "N/A"], widths))
+    elif mom_l:
+        lines.append(table_row(["Momentum", "N/A", f"{sum(mom_l)/len(mom_l):.3f}"], widths))
+    else:
+        lines.append(table_row(["Momentum", "N/A", "N/A"], widths))
+
+    # Liquidity
+    liq_w = r["si_liq_winners"]
+    liq_l = r["si_liq_losers"]
+    if liq_w and liq_l:
+        lines.append(table_row(["Liquidity", f"{sum(liq_w)/len(liq_w):.3f}", f"{sum(liq_l)/len(liq_l):.3f}"], widths))
+    elif liq_w:
+        lines.append(table_row(["Liquidity", f"{sum(liq_w)/len(liq_w):.3f}", "N/A"], widths))
+    elif liq_l:
+        lines.append(table_row(["Liquidity", "N/A", f"{sum(liq_l)/len(liq_l):.3f}"], widths))
+    else:
+        lines.append(table_row(["Liquidity", "N/A", "N/A"], widths))
+
+    # Regime
+    reg_w = r["si_reg_winners"]
+    reg_l = r["si_reg_losers"]
+    if reg_w and reg_l:
+        lines.append(table_row(["Regime", f"{sum(reg_w)/len(reg_w):.3f}", f"{sum(reg_l)/len(reg_l):.3f}"], widths))
+    elif reg_w:
+        lines.append(table_row(["Regime", f"{sum(reg_w)/len(reg_w):.3f}", "N/A"], widths))
+    elif reg_l:
+        lines.append(table_row(["Regime", "N/A", f"{sum(reg_l)/len(reg_l):.3f}"], widths))
+    else:
+        lines.append(table_row(["Regime", "N/A", "N/A"], widths))
+
+    lines.append("")
+
+
 def generate_report(all_signals, strategy_results):
     """Generate the markdown report with fixed-width tables."""
     lines = []
@@ -846,6 +984,9 @@ def generate_report(all_signals, strategy_results):
                                        f"{cwr:.1f}%", f"${fmt_num(cap)}", f"{cpp:.1f}%"], widths))
 
         lines.append("")
+
+        # ── SI Score Analysis ────────────────────────────────────
+        output_si_analysis(lines, r)
 
         # ── 2. Market Type Performance ───────────────────────────
         lines.append("#### 2) Performance by Market Type")

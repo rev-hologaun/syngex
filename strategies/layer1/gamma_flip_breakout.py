@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_keys import KEY_PRICE_5M, KEY_IV_SKEW_5M
+from strategies.si_component import create_si, StructuralIntegrity
 
 logger = logging.getLogger("Syngex.Strategies.GammaFlipBreakout")
 
@@ -316,9 +317,38 @@ class GammaFlipBreakout(BaseStrategy):
         else:
             target = price - (risk * TARGET_RR)
 
+        # SI score computation from rolling data
+        delta_density = rolling_data.get(KEY_DELTA_DENSITY_5M, 0.0)
+        volume_zscore = rolling_data.get(KEY_VOLUME_ZSCORE_5M, 0.0)
+        order_book_depth = rolling_data.get(KEY_ORDER_BOOK_DEPTH_5M, 0.0)
+        net_gamma_5m = rolling_data.get(KEY_NET_GAMMA_5M, 0.0)
+
+        # Distance to wall from flip_mid
+        distance_to_wall_pct = abs(price - flip_mid) / price if price > 0 else 0.0
+
+        # Wall GEX and depth from gex_calc
+        wall_gex = gex_calc.get_wall_gex(flip_mid) if hasattr(gex_calc, 'get_wall_gex') else 0.0
+        wall_depth = gex_calc.get_wall_depth(flip_mid) if hasattr(gex_calc, 'get_wall_depth') else 0.0
+
+        # Regime string
+        regime_str = "POSITIVE" if net_gamma > 0 else "NEGATIVE"
+
+        # Compute SI score
+        si = create_si(
+            delta_density=delta_density,
+            volume_zscore=volume_zscore,
+            distance_to_wall_pct=distance_to_wall_pct,
+            wall_gex=wall_gex,
+            wall_depth=wall_depth,
+            net_gamma=net_gamma_5m,
+            signal_direction="short",
+            regime=regime_str,
+            flip_side="put",
+        )
+        si_score = si.compute()
+
         confidence = self._compute_confidence(
-            risk, price, net_gamma, regime, "short",
-            flip_mid, confirmation_score,
+            net_gamma, regime, "short", flip_mid, confirmation_score, si_score,
         )
         if confidence < MIN_CONFIDENCE:
             return None
@@ -344,6 +374,10 @@ class GammaFlipBreakout(BaseStrategy):
                 "risk_reward_ratio": round(abs(target - price) / risk, 2),
                 "confirmation_score": round(confirmation_score, 3),
                 "trend": price_window.trend if price_window else "UNKNOWN",
+                "si_score": round(si.compute(), 3),
+                "si_momentum": round(si.get_scores()["momentum"], 3),
+                "si_liquidity": round(si.get_scores()["liquidity"], 3),
+                "si_regime": round(si.get_scores()["regime"], 3),
             },
         )
 
@@ -374,9 +408,38 @@ class GammaFlipBreakout(BaseStrategy):
         else:
             target = price + (risk * TARGET_RR)
 
+        # SI score computation from rolling data
+        delta_density = rolling_data.get(KEY_DELTA_DENSITY_5M, 0.0)
+        volume_zscore = rolling_data.get(KEY_VOLUME_ZSCORE_5M, 0.0)
+        order_book_depth = rolling_data.get(KEY_ORDER_BOOK_DEPTH_5M, 0.0)
+        net_gamma_5m = rolling_data.get(KEY_NET_GAMMA_5M, 0.0)
+
+        # Distance to wall from flip_mid
+        distance_to_wall_pct = abs(price - flip_mid) / price if price > 0 else 0.0
+
+        # Wall GEX and depth from gex_calc
+        wall_gex = gex_calc.get_wall_gex(flip_mid) if hasattr(gex_calc, 'get_wall_gex') else 0.0
+        wall_depth = gex_calc.get_wall_depth(flip_mid) if hasattr(gex_calc, 'get_wall_depth') else 0.0
+
+        # Regime string
+        regime_str = "POSITIVE" if net_gamma > 0 else "NEGATIVE"
+
+        # Compute SI score
+        si = create_si(
+            delta_density=delta_density,
+            volume_zscore=volume_zscore,
+            distance_to_wall_pct=distance_to_wall_pct,
+            wall_gex=wall_gex,
+            wall_depth=wall_depth,
+            net_gamma=net_gamma_5m,
+            signal_direction="long",
+            regime=regime_str,
+            flip_side="call",
+        )
+        si_score = si.compute()
+
         confidence = self._compute_confidence(
-            risk, price, net_gamma, regime, "long",
-            flip_mid, confirmation_score,
+            net_gamma, regime, "long", flip_mid, confirmation_score, si_score,
         )
         if confidence < MIN_CONFIDENCE:
             return None
@@ -402,6 +465,10 @@ class GammaFlipBreakout(BaseStrategy):
                 "risk_reward_ratio": round(abs(target - price) / risk, 2),
                 "confirmation_score": round(confirmation_score, 3),
                 "trend": price_window.trend if price_window else "UNKNOWN",
+                "si_score": round(si.compute(), 3),
+                "si_momentum": round(si.get_scores()["momentum"], 3),
+                "si_liquidity": round(si.get_scores()["liquidity"], 3),
+                "si_regime": round(si.get_scores()["regime"], 3),
             },
         )
 
@@ -480,9 +547,38 @@ class GammaFlipBreakout(BaseStrategy):
         else:
             target = price + (risk * TARGET_RR)
 
+        # SI score computation from rolling data
+        delta_density = rolling_data.get(KEY_DELTA_DENSITY_5M, 0.0)
+        volume_zscore = rolling_data.get(KEY_VOLUME_ZSCORE_5M, 0.0)
+        order_book_depth = rolling_data.get(KEY_ORDER_BOOK_DEPTH_5M, 0.0)
+        net_gamma_5m = rolling_data.get(KEY_NET_GAMMA_5M, 0.0)
+
+        # Distance to wall from flip_mid
+        distance_to_wall_pct = abs(price - flip_mid) / price if price > 0 else 0.0
+
+        # Wall GEX and depth from gex_calc
+        wall_gex = gex_calc.get_wall_gex(flip_mid) if hasattr(gex_calc, 'get_wall_gex') else 0.0
+        wall_depth = gex_calc.get_wall_depth(flip_mid) if hasattr(gex_calc, 'get_wall_depth') else 0.0
+
+        # Regime string
+        regime_str = "POSITIVE" if net_gamma > 0 else "NEGATIVE"
+
+        # Compute SI score
+        si = create_si(
+            delta_density=delta_density,
+            volume_zscore=volume_zscore,
+            distance_to_wall_pct=distance_to_wall_pct,
+            wall_gex=wall_gex,
+            wall_depth=wall_depth,
+            net_gamma=net_gamma_5m,
+            signal_direction="long",
+            regime=regime_str,
+            flip_side="call",
+        )
+        si_score = si.compute()
+
         confidence = self._compute_confidence(
-            risk, price, net_gamma, regime, "long",
-            flip_mid, confirmation_score,
+            net_gamma, regime, "long", flip_mid, confirmation_score, si_score,
         )
         if confidence < MIN_CONFIDENCE:
             return None
@@ -508,6 +604,10 @@ class GammaFlipBreakout(BaseStrategy):
                 "risk_reward_ratio": round(abs(target - price) / risk, 2),
                 "confirmation_score": round(confirmation_score, 3),
                 "trend": price_window.trend if price_window else "UNKNOWN",
+                "si_score": round(si.compute(), 3),
+                "si_momentum": round(si.get_scores()["momentum"], 3),
+                "si_liquidity": round(si.get_scores()["liquidity"], 3),
+                "si_regime": round(si.get_scores()["regime"], 3),
             },
         )
 
@@ -537,9 +637,38 @@ class GammaFlipBreakout(BaseStrategy):
         else:
             target = price - (risk * TARGET_RR)
 
+        # SI score computation from rolling data
+        delta_density = rolling_data.get(KEY_DELTA_DENSITY_5M, 0.0)
+        volume_zscore = rolling_data.get(KEY_VOLUME_ZSCORE_5M, 0.0)
+        order_book_depth = rolling_data.get(KEY_ORDER_BOOK_DEPTH_5M, 0.0)
+        net_gamma_5m = rolling_data.get(KEY_NET_GAMMA_5M, 0.0)
+
+        # Distance to wall from flip_mid
+        distance_to_wall_pct = abs(price - flip_mid) / price if price > 0 else 0.0
+
+        # Wall GEX and depth from gex_calc
+        wall_gex = gex_calc.get_wall_gex(flip_mid) if hasattr(gex_calc, 'get_wall_gex') else 0.0
+        wall_depth = gex_calc.get_wall_depth(flip_mid) if hasattr(gex_calc, 'get_wall_depth') else 0.0
+
+        # Regime string
+        regime_str = "POSITIVE" if net_gamma > 0 else "NEGATIVE"
+
+        # Compute SI score
+        si = create_si(
+            delta_density=delta_density,
+            volume_zscore=volume_zscore,
+            distance_to_wall_pct=distance_to_wall_pct,
+            wall_gex=wall_gex,
+            wall_depth=wall_depth,
+            net_gamma=net_gamma_5m,
+            signal_direction="short",
+            regime=regime_str,
+            flip_side="put",
+        )
+        si_score = si.compute()
+
         confidence = self._compute_confidence(
-            risk, price, net_gamma, regime, "short",
-            flip_mid, confirmation_score,
+            net_gamma, regime, "short", flip_mid, confirmation_score, si_score,
         )
         if confidence < MIN_CONFIDENCE:
             return None
@@ -565,6 +694,10 @@ class GammaFlipBreakout(BaseStrategy):
                 "risk_reward_ratio": round(abs(target - price) / risk, 2),
                 "confirmation_score": round(confirmation_score, 3),
                 "trend": price_window.trend if price_window else "UNKNOWN",
+                "si_score": round(si.compute(), 3),
+                "si_momentum": round(si.get_scores()["momentum"], 3),
+                "si_liquidity": round(si.get_scores()["liquidity"], 3),
+                "si_regime": round(si.get_scores()["regime"], 3),
             },
         )
 
@@ -586,59 +719,28 @@ class GammaFlipBreakout(BaseStrategy):
 
     def _compute_confidence(
         self,
-        risk: float,
-        price: float,
         net_gamma: float,
         regime: str,
         side: str,
         flip_mid: float = 0.0,
         confirmation_score: float = 0.5,
-        depth_score: Optional[float] = None,
+        si_score: float = 1.0,
     ) -> float:
         """
         Compute confidence for fade and breakout signals.
 
-        Family A — simple average of 4 normalized components:
+        Components:
+            1. Gamma strength: abs(net_gamma) in [0, 1_000_000], higher = higher.
+            2. Regime alignment: 1.0 if aligned, 0.5 if not.
+            3. Wall proximity: abs(net_gamma) in [0, 500_000], higher = higher.
 
-            1. Risk/rward: for fade, tighter risk = higher (range [0, 0.005]);
-               for breakout, wider risk = higher (range [0.005, 0.02]).
-            2. Gamma strength: abs(net_gamma) in [0, 1_000_000], higher = higher.
-            3. Regime alignment: 1.0 if aligned, 0.5 if not.
-            4. Wall proximity: abs(net_gamma) in [0, 500_000], higher = higher.
-
-        Future (Phase 5):
-            depth_score: if provided, used as 5th component instead of wall proximity.
-
+        Final: average of 3 components × structural integrity score.
         Returns 0.0–1.0.
         """
-        risk_pct = risk / price if price > 0 else 0.0
-
-        # 1. Risk/rward — different normalization for fade vs breakout
-        if side in ("short", "long"):
-            # Determine if this is a fade (above flip, positive gamma) or breakout
-            # Heuristic: if regime is POSITIVE, it's a fade; if NEGATIVE, it's a breakout
-            is_breakout = regime == "NEGATIVE"
-            if is_breakout:
-                # Breakout: wider risk = higher confidence, range [0.005, 0.02]
-                risk_norm = (
-                    (risk_pct - 0.005) / (0.02 - 0.005)
-                    if 0.02 != 0.005
-                    else 1.0
-                )
-            else:
-                # Fade: tighter risk = higher confidence, range [0, 0.005]
-                risk_norm = (
-                    1.0 - (risk_pct / 0.005)
-                    if 0.005 > 0
-                    else 1.0
-                )
-        else:
-            risk_norm = 0.5  # unknown side — neutral
-
-        # 2. Gamma strength: abs(net_gamma) in [0, 1_000_000]
+        # 1. Gamma strength: abs(net_gamma) in [0, 1_000_000]
         gamma_norm = min(1.0, abs(net_gamma) / 1_000_000)
 
-        # 3. Regime alignment: 1.0 if aligned, 0.5 if not
+        # 2. Regime alignment: 1.0 if aligned, 0.5 if not
         if regime == "POSITIVE":
             regime_norm = 1.0 if side in ("short", "long") else 0.5
         elif regime == "NEGATIVE":
@@ -646,9 +748,9 @@ class GammaFlipBreakout(BaseStrategy):
         else:
             regime_norm = 0.5
 
-        # 4. Wall proximity: abs(net_gamma) in [0, 500_000]
+        # 3. Wall proximity: abs(net_gamma) in [0, 500_000]
         wall_norm = min(1.0, abs(net_gamma) / 500_000)
 
-        confidence = (risk_norm + gamma_norm + regime_norm + wall_norm) / 4.0
+        confidence = ((gamma_norm + regime_norm + wall_norm) / 3.0) * si_score
 
         return min(1.0, max(0.0, confidence))

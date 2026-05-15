@@ -210,6 +210,7 @@ from strategies.rolling_keys import (
     MSG_TYPE_MARKET_DEPTH_QUOTES,
     KEY_DELTA_DENSITY_5M,
     KEY_VOLUME_ZSCORE_5M,
+    KEY_ORDER_BOOK_DEPTH_5M,
 )
 from strategies.layer1 import (
     GammaWallBounce,
@@ -1686,6 +1687,12 @@ class SyngexOrchestrator:
                     # Aggregated: TotalSize field
                     total_bid_size = sum(int(b.get("TotalSize", 0)) for b in bids)
                     total_ask_size = sum(int(a.get("TotalSize", 0)) for a in asks)
+
+                # SI: order_book_depth — total depth (bid + ask) from L2 feed
+                if KEY_ORDER_BOOK_DEPTH_5M in self._rolling_data:
+                    self._rolling_data[KEY_ORDER_BOOK_DEPTH_5M].push(
+                        total_bid_size + total_ask_size, ts
+                    )
 
                 # ── Exchange Flow Concentration: parse per-exchange sizes (quotes only) ──
                 if msg_type == MSG_TYPE_MARKET_DEPTH_QUOTES:
