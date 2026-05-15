@@ -31,7 +31,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
-from strategies.rolling_keys import KEY_PRICE_5M, KEY_IV_SKEW_5M
+from strategies.rolling_keys import (
+    KEY_PRICE_5M,
+    KEY_IV_SKEW_5M,
+    KEY_DELTA_DENSITY_5M,
+    KEY_VOLUME_ZSCORE_5M,
+    KEY_ORDER_BOOK_DEPTH_5M,
+    KEY_NET_GAMMA_5M,
+)
 from strategies.si_component import create_si, StructuralIntegrity
 
 logger = logging.getLogger("Syngex.Strategies.GammaFlipBreakout")
