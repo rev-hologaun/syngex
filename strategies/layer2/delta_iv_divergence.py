@@ -58,16 +58,16 @@ STOP_PCT = 0.008  # 0.8%
 MIN_CONFIDENCE = 0.15
 
 # Skew divergence threshold
-SK_DIV_THRESHOLD = 0.10
+SK_DIV_THRESHOLD = 0.05
 
 # Decoupling history window (data points)
 DECOUPLE_HISTORY_WINDOW = 30
 
 # Decoupling correlation threshold
-DECOUPLE_THRESHOLD = 0.50
+DECOUPLE_THRESHOLD = 0.70
 
 # Gamma density decline threshold
-GAMMA_DECLINE_THRESHOLD = 0.70
+GAMMA_DECLINE_THRESHOLD = 0.80
 
 # IV expansion multiplier
 TARGET_IV_MULT = 2.0
@@ -303,9 +303,10 @@ class DeltaIVDivergence(BaseStrategy):
         Check if OTM Delta diverges from ATM Delta.
 
         Logic:
-        - Compute Delta ROC for both OTM and ATM over last 5 data points
+        - Compute Delta ROC for both OTM and ATM over last 3 data points
         - skew_divergence = |d(OTM_Delta)/dt - d(ATM_Delta)/dt| / max(|d(ATM_Delta)/dt|, 0.001)
-        - Hard gate: skew_divergence > 0.10
+        - Hard gate: skew_divergence > 0.05
+        - Requires ≥3 points in at least ONE window
 
         Returns True if skew divergence passes the threshold.
         """
@@ -314,27 +315,27 @@ class DeltaIVDivergence(BaseStrategy):
 
         if otm_delta_window is None or atm_delta_window is None:
             return False
-        if otm_delta_window.count < 6 or atm_delta_window.count < 6:
+        if otm_delta_window.count < 3 and atm_delta_window.count < 3:
             return False
 
         otm_vals = otm_delta_window.values
         atm_vals = atm_delta_window.values
 
-        # Get values 5 points ago
+        # Get values 3 points ago
         otm_current = otm_vals[-1]
-        otm_5_ago = otm_vals[-6] if len(otm_vals) >= 6 else otm_vals[0]
+        otm_3_ago = otm_vals[-4] if len(otm_vals) >= 4 else otm_vals[0]
         atm_current = atm_vals[-1]
-        atm_5_ago = atm_vals[-6] if len(atm_vals) >= 6 else atm_vals[0]
+        atm_3_ago = atm_vals[-4] if len(atm_vals) >= 4 else atm_vals[0]
 
         # Compute Delta ROC (rate of change)
-        otm_roc = (otm_current - otm_5_ago) / max(abs(otm_5_ago), 0.001)
-        atm_roc = (atm_current - atm_5_ago) / max(abs(atm_5_ago), 0.001)
+        otm_roc = (otm_current - otm_3_ago) / max(abs(otm_3_ago), 0.001)
+        atm_roc = (atm_current - atm_3_ago) / max(abs(atm_3_ago), 0.001)
 
         # Skew divergence: absolute difference in ROCs
         skew_div = abs(otm_roc - atm_roc) / max(abs(atm_roc), 0.001)
 
         # Hard gate
-        return skew_div > 0.10
+        return skew_div > 0.05
 
     def _get_skew_divergence_value(
         self, rolling_data: Dict[str, Any], direction: str,
@@ -345,19 +346,19 @@ class DeltaIVDivergence(BaseStrategy):
 
         if otm_delta_window is None or atm_delta_window is None:
             return 0.0
-        if otm_delta_window.count < 6 or atm_delta_window.count < 6:
+        if otm_delta_window.count < 3 and atm_delta_window.count < 3:
             return 0.0
 
         otm_vals = otm_delta_window.values
         atm_vals = atm_delta_window.values
 
         otm_current = otm_vals[-1]
-        otm_5_ago = otm_vals[-6] if len(otm_vals) >= 6 else otm_vals[0]
+        otm_3_ago = otm_vals[-4] if len(otm_vals) >= 4 else otm_vals[0]
         atm_current = atm_vals[-1]
-        atm_5_ago = atm_vals[-6] if len(atm_vals) >= 6 else atm_vals[0]
+        atm_3_ago = atm_vals[-4] if len(atm_vals) >= 4 else atm_vals[0]
 
-        otm_roc = (otm_current - otm_5_ago) / max(abs(otm_5_ago), 0.001)
-        atm_roc = (atm_current - atm_5_ago) / max(abs(atm_5_ago), 0.001)
+        otm_roc = (otm_current - otm_3_ago) / max(abs(otm_3_ago), 0.001)
+        atm_roc = (atm_current - atm_3_ago) / max(abs(atm_3_ago), 0.001)
 
         return abs(otm_roc - atm_roc) / max(abs(atm_roc), 0.001)
 
@@ -376,19 +377,21 @@ class DeltaIVDivergence(BaseStrategy):
         - Read KEY_DELTA_IV_CORR_5M rolling window
         - Compute rolling mean correlation over last `history_window` points
         - Hard gate: current correlation < rolling mean × threshold
-          (correlation collapsed by ≥50% when threshold=0.50)
+          (correlation collapsed by ≥30% when threshold=0.70)
+        - Requires ≥2 points; single-point fallback uses current vs 0
 
         Returns True if decoupling passes the threshold.
         """
         corr_window = rolling_data.get(KEY_DELTA_IV_CORR_5M)
-        if corr_window is None or corr_window.count < 2:
+        if corr_window is None:
             return False
 
         corr_vals = corr_window.values
         current_corr = corr_vals[-1]
 
         if corr_window.count < 2:
-            return False
+            # Single-point fallback: require current correlation < 0
+            return current_corr < 0
 
         # Rolling mean over last min(history_window, count) points
         history = min(history_window, len(corr_vals) - 1)
@@ -458,8 +461,8 @@ class DeltaIVDivergence(BaseStrategy):
         if mean_density <= 0:
             return False
 
-        # Hard gate: current < mean × 0.70
-        return current < mean_density * 0.70
+        # Hard gate: current < mean × 0.80
+        return current < mean_density * 0.80
 
     def _compute_gamma_density(self, gex_calc: Any, price: float) -> Optional[float]:
         """Compute gamma density: sum of gamma for strikes within ±1% of price."""

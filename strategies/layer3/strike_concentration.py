@@ -83,8 +83,8 @@ MIN_DATA_POINTS = 3
 
 # v2 Liquidity-Momentum params
 LIQUIDITY_VACUUM_RATIO = 3.0
-DELTA_ACCEL_THRESHOLD_LONG = 1.15  # delta accelerated ≥15%
-DELTA_ACCEL_THRESHOLD_SHORT = 0.85  # delta decelerated ≥15%
+DELTA_ACCEL_THRESHOLD_LONG = 1.08  # delta accelerated ≥8%
+DELTA_ACCEL_THRESHOLD_SHORT = 0.92  # delta decelerated ≥8%
 GAMMA_MAGNITUDE_THRESHOLD = 0.50
 BOUNCE_TARGET_MULT = 1.5
 SLICE_TARGET_MULT = 2.0
@@ -908,8 +908,8 @@ class StrikeConcentration(BaseStrategy):
         Get current net_delta at strike and compare to previous
         (from KEY_STRIKE_DELTA_5M rolling window).
 
-        For LONG slice: delta_accel > 1.15 (delta accelerated ≥15%)
-        For SHORT slice: delta_accel < 0.85 (delta decelerated ≥15%)
+        For LONG slice: delta_accel > 1.08 (delta accelerated ≥8%)
+        For SHORT slice: delta_accel < 0.92 (delta decelerated ≥8%)
 
         Returns delta_accel value or None if below threshold.
         """
@@ -922,6 +922,8 @@ class StrikeConcentration(BaseStrategy):
             delta_window = rolling_data.get(KEY_STRIKE_DELTA_5M)
             if delta_window is None or delta_window.count < 1:
                 return None
+
+            # Allow single-point comparison (current vs immediate previous)
 
             previous_delta = delta_window.values[-1] if delta_window.values else None
             if previous_delta is None or previous_delta == 0:

@@ -57,6 +57,12 @@ class _StrikeBucket:
     # IV sums (for per-strike IV averaging)
     call_iv_sum: float = 0.0
     put_iv_sum: float = 0.0
+    # Theta sums (for per-strike theta analysis)
+    call_theta: float = 0.0
+    put_theta: float = 0.0
+    # Vega sums (for per-strike vega analysis)
+    call_vega: float = 0.0
+    put_vega: float = 0.0
     # Message counts
     call_count: int = 0
     put_count: int = 0
@@ -262,6 +268,43 @@ class GEXCalculator:
             return 0.0
         return self.get_strike_net_gamma(strike) * 100 * self.underlying_price
 
+    def get_wall_gex(self, strike: float) -> float:
+        """Return the GEX magnitude at a specific strike.
+
+        Args:
+            strike: The strike price to look up.
+
+        Returns:
+            Normalized GEX (dollar terms) at the given strike, or 0.0 if not found.
+        """
+        if strike is None or strike not in self._ladder:
+            return 0.0
+        bucket = self._ladder[strike]
+        norm_net_gamma = bucket.normalized_gamma()
+        price = self.underlying_price
+        if price <= 0:
+            return 0.0
+        return norm_net_gamma * 100 * price
+
+    def get_wall_depth(self, strike: float) -> float:
+        """Return a proxy for wall depth at a specific strike.
+
+        Uses total contracts (call + put) as a proxy for wall depth,
+        normalized by message count for bounded values.
+
+        Args:
+            strike: The strike price to look up.
+
+        Returns:
+            Normalized total contracts at the given strike, or 0.0 if not found.
+        """
+        if strike is None or strike not in self._ladder:
+            return 0.0
+        bucket = self._ladder[strike]
+        # Use normalized contract count as wall depth proxy
+        msg_count = max(bucket.call_count + bucket.put_count, 1)
+        return (bucket.call_count + bucket.put_count) / msg_count
+
     def get_summary(self) -> Dict[str, Any]:
         """Return a summary of the current state.
 
@@ -418,6 +461,10 @@ class GEXCalculator:
                 "net_delta": bucket.net_delta,
                 "call_delta_sum": bucket.call_delta,
                 "put_delta_sum": bucket.put_delta,
+                "call_theta": bucket.call_theta,
+                "put_theta": bucket.put_theta,
+                "call_vega": bucket.call_vega,
+                "put_vega": bucket.put_vega,
             }
         return summary
 
@@ -585,6 +632,63 @@ class GEXCalculator:
         if bucket is None:
             return 0.0
         return bucket.net_delta_density
+
+    def get_net_delta_density(self) -> float:
+        """Return the sum of all net_delta_density across all strikes."""
+        if not self._ladder:
+            return 0.0
+        return sum(bucket.net_delta_density for bucket in self._ladder.values())
+
+    def get_theta_by_strike(self, strike: float) -> Dict[str, float]:
+        """Return theta data for a specific strike.
+
+        Returns dict with:
+            call_theta: sum of call theta at this strike
+            put_theta: sum of put theta at this strike
+            net_theta: call_theta - put_theta
+        """
+        bucket = self._ladder.get(strike)
+        if bucket is None:
+            return {"call_theta": 0.0, "put_theta": 0.0, "net_theta": 0.0}
+        return {
+            "call_theta": bucket.call_theta,
+            "put_theta": bucket.put_theta,
+            "net_theta": bucket.call_theta - bucket.put_theta,
+        }
+
+    def get_vega_by_strike(self, strike: float) -> Dict[str, float]:
+        """Return vega data for a specific strike.
+
+        Returns dict with:
+            call_vega: sum of call vega at this strike
+            put_vega: sum of put vega at this strike
+            net_vega: call_vega - put_vega
+        """
+        bucket = self._ladder.get(strike)
+        if bucket is None:
+            return {"call_vega": 0.0, "put_vega": 0.0, "net_vega": 0.0}
+        return {
+            "call_vega": bucket.call_vega,
+            "put_vega": bucket.put_vega,
+            "net_vega": bucket.call_vega - bucket.put_vega,
+        }
+
+    def get_total_delta_activity(self) -> float:
+        """Return total delta activity across all strikes (absolute, not net).
+
+        Sums |call_delta| + |put_delta| per strike, divided by total message count.
+        This captures total option activity regardless of direction — when calls
+        and puts have similar delta magnitudes, they no longer cancel out.
+        """
+        if not self._ladder:
+            return 0.0
+        total = 0.0
+        total_count = 0
+        for bucket in self._ladder.values():
+            if bucket.call_count + bucket.put_count > 0:
+                total += abs(bucket.call_delta) + abs(bucket.put_delta)
+                total_count += bucket.call_count + bucket.put_count
+        return total / total_count if total_count > 0 else 0.0
 
     def classify_wall(
         self, bucket: _StrikeBucket, gex: float, price: float,
@@ -897,8 +1001,10 @@ class GEXCalculator:
         # This means GEX values are relative, not absolute
         oi = 1.0
 
-        # Extract IV from stream greeks
+        # Extract IV, theta, vega from stream greeks
         iv = float(msg.get("ImpliedVolatility", 0))
+        theta = float(msg.get("Theta", 0))
+        vega = float(msg.get("Vega", 0))
 
         self._update_strike({
             "strike": strike,
@@ -907,6 +1013,8 @@ class GEXCalculator:
             "side": side,
             "delta": delta,
             "iv": iv,
+            "theta": theta,
+            "vega": vega,
         })
 
     def _update_strike_from_contract(self, msg: Dict[str, Any]) -> None:
@@ -993,6 +1101,8 @@ class GEXCalculator:
         side = data.get("side", "")
         delta = data.get("delta", 0.0)  # Optional from stream greeks
         iv = data.get("iv", 0.0)  # Optional IV from stream greeks
+        theta = data.get("theta", 0.0)  # Optional from stream greeks
+        vega = data.get("vega", 0.0)  # Optional from stream greeks
 
         # Determine sign: call = +1, put = -1
         is_call = side == "call"
@@ -1009,6 +1119,8 @@ class GEXCalculator:
             bucket.call_gamma += gamma
             bucket.call_oi += oi
             bucket.call_delta += delta
+            bucket.call_theta += theta
+            bucket.call_vega += vega
             bucket.call_iv_sum += iv
             bucket.call_count += 1
         else:
@@ -1016,6 +1128,8 @@ class GEXCalculator:
             bucket.put_gamma += gamma
             bucket.put_oi += oi
             bucket.put_delta += delta
+            bucket.put_theta += theta
+            bucket.put_vega += vega
             bucket.put_iv_sum += iv
             bucket.put_count += 1
 

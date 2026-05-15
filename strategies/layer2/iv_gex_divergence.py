@@ -53,6 +53,7 @@ from strategies.rolling_keys import (
     KEY_PRICE_30M,
     KEY_IV_SKEW_GRADIENT_5M,
     KEY_GAMMA_DENSITY_5M,
+    KEY_ATM_IV_5M,
 )
 
 logger = logging.getLogger("Syngex.Strategies.IVGEXDivergence")
@@ -334,6 +335,18 @@ class IVGEXDivergence(BaseStrategy):
         current_iv = gex_calc.get_iv_by_strike(atm_strike)
         if current_iv is None:
             return False, None, 0.0
+
+        # Fallback: use ATM IV window if per-strike windows not available
+        atm_iv_window = rolling_data.get(KEY_ATM_IV_5M)
+        if atm_iv_window and atm_iv_window.count >= 5:
+            atm_current = atm_iv_window.latest
+            if atm_current is not None and atm_iv_window.count >= 2:
+                atm_rolling_mean = atm_iv_window.mean
+                if atm_rolling_mean and atm_rolling_mean > 0:
+                    atm_change_pct = abs(atm_current - atm_rolling_mean) / atm_rolling_mean
+                    if atm_change_pct > 0.10:  # 10% change
+                        return True, current_iv, atm_change_pct
+
         iv_window = rolling_data.get(f"iv_{atm_strike}_5m")
         if iv_window is None or iv_window.count < MIN_IV_POINTS:
             return False, None, 0.0
@@ -358,6 +371,18 @@ class IVGEXDivergence(BaseStrategy):
         current_iv = gex_calc.get_iv_by_strike(atm_strike)
         if current_iv is None:
             return False, None, 0.0
+
+        # Fallback: use ATM IV window if per-strike windows not available
+        atm_iv_window = rolling_data.get(KEY_ATM_IV_5M)
+        if atm_iv_window and atm_iv_window.count >= 5:
+            atm_current = atm_iv_window.latest
+            if atm_current is not None and atm_iv_window.count >= 2:
+                atm_rolling_mean = atm_iv_window.mean
+                if atm_rolling_mean and atm_rolling_mean > 0:
+                    atm_change_pct = abs(atm_current - atm_rolling_mean) / atm_rolling_mean
+                    if atm_change_pct > 0.15:  # 15% change
+                        return True, current_iv, atm_change_pct
+
         iv_window = rolling_data.get(f"iv_{atm_strike}_5m")
         if iv_window is None or iv_window.count < MIN_IV_POINTS:
             return False, None, 0.0

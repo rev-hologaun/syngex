@@ -262,6 +262,7 @@ from strategies.full_data import (
     WhaleTracker,
 )
 from strategies.signal_tracker import SignalTracker
+from strategies.si_monitor import SIMonitor
 
 
 # ---------------------------------------------------------------------------
@@ -853,7 +854,7 @@ class SyngexOrchestrator:
 
                     # SI: delta_density — from GEXCalculator
                     try:
-                        delta_density = self._calculator.get_delta_density()
+                        delta_density = self._calculator.get_total_delta_activity()
                         if delta_density is not None and KEY_DELTA_DENSITY_5M in self._rolling_data:
                             self._rolling_data[KEY_DELTA_DENSITY_5M].push(delta_density, ts)
                     except Exception:
@@ -925,6 +926,9 @@ class SyngexOrchestrator:
                         std_v = math.sqrt(var_v) if var_v > 0 else 1.0
                         zscore = (total_vol - mean_v) / std_v
                         zscore_window.push(zscore, ts)
+                    else:
+                        # Push placeholder so SI monitor has data
+                        zscore_window.push(0.0, ts)
                 # Track total_delta_5m for delta_volume_exhaustion
                 if KEY_TOTAL_DELTA_5M in self._rolling_data:
                     self._rolling_data[KEY_TOTAL_DELTA_5M].push(net_delta)
@@ -2491,6 +2495,76 @@ class SyngexOrchestrator:
                     params = strat_cfg.get("params", {})
                     strategy_params[strat_name] = params
         data["params"] = strategy_params
+
+        # ── SI Monitor (opt-in sidecar) ──
+        _si_enabled = Path(__file__).parent / "logs" / "si_monitor_enabled"
+        if _si_enabled.exists():
+            try:
+                # Find nearest gamma wall for liquidity scoring
+                walls = self._calculator.get_gamma_walls(threshold=1e6)
+                nearest_wall = None
+                nearest_dist = float('inf')
+                for w in walls:
+                    dist = abs(w['strike'] - price) / price if price > 0 else float('inf')
+                    if dist < nearest_dist:
+                        nearest_dist = dist
+                        nearest_wall = w
+
+                # Use nearest wall for liquidity scoring
+                # wall_depth = raw GEX (passed to SIMonitor for depth_score calculation)
+                # wall_strength = GEX normalized to % of notional (for log record)
+                if nearest_wall:
+                    wall_gex_out = abs(nearest_wall.get('gex', 0.0))
+                    wall_strength = wall_gex_out / (price * 100 * price) if price and price > 0 else 0.0
+                    distance_to_wall_pct = nearest_dist
+                    wall_depth = wall_gex_out  # raw GEX for LiquidityAnchor depth_score
+                else:
+                    distance_to_wall_pct = 0.0
+                    wall_depth = 0.0
+                    wall_gex_out = 0.0
+                    wall_strength = 0.0
+                delta_density = self._calculator.get_total_delta_activity()
+
+                vol_window = self._rolling_data.get(KEY_VOLUME_5M, None)
+                if vol_window and vol_window.count >= 5:
+                    vals = list(vol_window.values)
+                    mean_v = sum(vals) / len(vals)
+                    var_v = sum((x - mean_v) ** 2 for x in vals) / len(vals)
+                    std_v = math.sqrt(var_v) if var_v > 0 else 1.0
+                    volume_zscore = (vol_window.latest - mean_v) / std_v if vol_window.latest is not None else 0.0
+                else:
+                    volume_zscore = 0.0
+                bd = self._rolling_data.get(KEY_ORDER_BOOK_DEPTH_5M, None)
+                book_depth = bd.latest if bd is not None and bd.latest is not None else 0.0
+
+                signal_dir = "long" if self._gamma_filter.regime == "POSITIVE" else "short"
+                monitor = SIMonitor(
+                    net_gamma=net_gamma,
+                    regime=self._gamma_filter.regime,
+                    delta_density=delta_density,
+                    volume_zscore=volume_zscore,
+                    distance_to_wall_pct=distance_to_wall_pct,
+                    wall_depth=wall_depth,
+                    book_depth=book_depth,
+                    signal_direction=signal_dir,
+                )
+                si_record = monitor.compute()
+                si_record["symbol"] = self.symbol
+                si_record["volume_zscore"] = round(volume_zscore, 4)
+                si_record["delta_density"] = round(delta_density, 4)
+                si_record["distance_to_wall_pct"] = round(distance_to_wall_pct, 4)
+                si_record["wall_depth"] = round(wall_depth, 4)
+                si_record["wall_gex"] = round(wall_gex_out, 4)
+                si_record["book_depth"] = round(book_depth, 4)
+                si_record["net_gamma_raw"] = round(net_gamma, 2)
+
+                _logs_dir = Path(__file__).parent / "logs"
+                _logs_dir.mkdir(parents=True, exist_ok=True)
+                log_path = _logs_dir / "si_monitor.jsonl"
+                with open(log_path, "a") as f:
+                    f.write(json.dumps(si_record) + "\n")
+            except Exception as exc:
+                logger.warning("SI monitor error: %s", exc)
 
         # Run evaluation
         signals = self._strategy_engine.process(data)

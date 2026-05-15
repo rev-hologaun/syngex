@@ -110,7 +110,7 @@ class GammaFlipBreakout(BaseStrategy):
         regime = data.get("regime", "")
 
         # Require sufficient gamma strength for meaningful regime
-        if abs(net_gamma) < 200000:
+        if abs(net_gamma) < MIN_GAMMA_STRENGTH:
             return []
 
         # Get the flip zone (v2: zone instead of single point)
@@ -357,8 +357,8 @@ class GammaFlipBreakout(BaseStrategy):
 
         # Compute SI score
         si = create_si(
-            delta_density=delta_density,
             volume_zscore=volume_zscore,
+            delta_density=delta_density,
             distance_to_wall_pct=distance_to_wall_pct,
             wall_gex=wall_gex,
             wall_depth=wall_depth,
@@ -448,8 +448,8 @@ class GammaFlipBreakout(BaseStrategy):
 
         # Compute SI score
         si = create_si(
-            delta_density=delta_density,
             volume_zscore=volume_zscore,
+            delta_density=delta_density,
             distance_to_wall_pct=distance_to_wall_pct,
             wall_gex=wall_gex,
             wall_depth=wall_depth,
@@ -587,8 +587,8 @@ class GammaFlipBreakout(BaseStrategy):
 
         # Compute SI score
         si = create_si(
-            delta_density=delta_density,
             volume_zscore=volume_zscore,
+            delta_density=delta_density,
             distance_to_wall_pct=distance_to_wall_pct,
             wall_gex=wall_gex,
             wall_depth=wall_depth,
@@ -677,8 +677,8 @@ class GammaFlipBreakout(BaseStrategy):
 
         # Compute SI score
         si = create_si(
-            delta_density=delta_density,
             volume_zscore=volume_zscore,
+            delta_density=delta_density,
             distance_to_wall_pct=distance_to_wall_pct,
             wall_gex=wall_gex,
             wall_depth=wall_depth,
@@ -773,6 +773,6 @@ class GammaFlipBreakout(BaseStrategy):
         # 3. Wall proximity: abs(net_gamma) in [0, 500_000]
         wall_norm = min(1.0, abs(net_gamma) / 500_000)
 
-        confidence = ((gamma_norm + regime_norm + wall_norm) / 3.0) * si_score
+        confidence = (gamma_norm + regime_norm + wall_norm) / 3.0
 
         return min(1.0, max(0.0, confidence))
