@@ -51,7 +51,7 @@ WALL_PROXIMITY_PCT = 0.05             # 5% (was 3%) — wider wall proximity
 DELTA_ACCEL_RATIO = 1.05              # 5% above rolling avg (was 10%)
 
 # Volume spike threshold: current volume must exceed rolling avg by this
-VOLUME_SPIKE_RATIO = 1.20             # 20% above rolling avg
+VOLUME_SPIKE_RATIO = 1.10             # 10% above rolling avg
 
 # Minimum wall GEX to consider
 MIN_WALL_GEX = 500000
@@ -63,7 +63,7 @@ PRICE_ABOVE_MEAN_CONFIDENCE = 0.55    # Price in upper half of 5m window
 MIN_DATA_POINTS = 2                   # Fewer points needed (was 3)
 
 # Minimum confidence threshold
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 # Stop and target parameters
 STOP_BELOW_WALL_PCT = 0.008           # 0.8% below entry
@@ -73,7 +73,7 @@ TARGET_RISK_MULT = 2.0                # 2× risk for target
 GEX_ACCEL_RATIO = 1.10
 DELTA_ACCEL_MIN = 1.05
 GEX_ACCEL_MIN = 1.03
-LIQUIDITY_VACUUM_DEPTH_RATIO = 0.8
+LIQUIDITY_VACUUM_DEPTH_RATIO = 0.9
 IV_ROC_THRESHOLD = 0.02
 IV_CONF_BONUS = 0.08
 ACCEL_STOP_WIDEN_MULT = 1.5
@@ -208,14 +208,9 @@ class DeltaGammaSqueeze(BaseStrategy):
             )
             return None
 
-        # === v2: GEX acceleration hard gate ===
+        # === v2: GEX acceleration (soft gate — confidence bonus only) ===
         gex_accel = self._check_gex_acceleration(rolling_data)
-        if gex_accel is None or gex_accel < GEX_ACCEL_MIN:
-            logger.debug(
-                "Squeeze v2: no GEX acceleration at %.2f (ratio=%.2f)",
-                wall_strike, gex_accel or 0,
-            )
-            return None
+        # Don't block on GEX acceleration — just use it for confidence bonus
 
         # Volume spike and price momentum checks are direction-agnostic
         vol_spike = self._check_volume_spike(rolling_data)
@@ -271,7 +266,7 @@ class DeltaGammaSqueeze(BaseStrategy):
             reason=(
                 f"Gamma squeeze: price approaching {'call' if direction == 'LONG' else 'put'} "
                 f"wall at {wall_strike} with accelerating delta (x{accel_ratio:.1f}) and "
-                f"{'volume spike' if vol_spike else 'strong momentum'}"
+                f"{'volume spike' if vol_spike > 0.5 else 'strong momentum'}"
             ),
             metadata={
                 "wall_strike": wall_strike,
@@ -280,7 +275,7 @@ class DeltaGammaSqueeze(BaseStrategy):
                 "delta_acceleration_ratio": round(accel_ratio, 3),
                 "direction": direction,
                 "current_delta": round(wall_delta, 2),
-                "volume_spike": vol_spike,
+                "volume_spike": round(vol_spike, 3),
                 "price_momentum": price_trend,
                 "regime": regime,
                 "net_gamma": round(net_gamma, 2),
@@ -326,18 +321,23 @@ class DeltaGammaSqueeze(BaseStrategy):
         delta_data = gex_calc.get_delta_by_strike(nearest["strike"])
         return abs(delta_data.get("net_delta", 0.0))
 
-    def _check_volume_spike(self, rolling_data: Dict[str, Any]) -> bool:
-        """Check if volume is spiking above rolling average."""
+    def _check_volume_spike(self, rolling_data: Dict[str, Any]) -> float:
+        """Return a volume-spike score 0.0–1.0 based on current/rolling-average ratio.
+
+        Score: 0.0 at ratio ≤ 1.0 (no spike), 1.0 at ratio ≥ 2.0 (double volume).
+        Linear interpolation between — e.g. 50% above avg → 0.50.
+        """
         window = rolling_data.get(KEY_VOLUME_5M)
         if window is None or window.count < 3:
-            return False
+            return 0.0
 
         current = window.latest
         avg = window.mean
         if current is None or avg is None or avg == 0:
-            return False
+            return 0.0
 
-        return current > avg * VOLUME_SPIKE_RATIO
+        ratio = current / avg
+        return max(0.0, min(1.0, (ratio - 1.0) / 1.0))
 
     def _check_price_momentum(self, rolling_data: Dict[str, Any]) -> str:
         """Check price momentum from rolling window."""
@@ -419,7 +419,7 @@ class DeltaGammaSqueeze(BaseStrategy):
         self,
         distance_pct: float,
         accel_ratio: float,
-        vol_spike: bool,
+        vol_spike: float,  # 0.0–1.0 score
         price_trend: str,
         wall_gex: float,
         regime: str,
@@ -443,8 +443,8 @@ class DeltaGammaSqueeze(BaseStrategy):
         # 2. Delta acceleration: accel_ratio from 1.0→3.0, higher = higher
         c2 = normalize(accel_ratio, 1.0, 3.0)
 
-        # 3. Volume spike: bool → 0 or 1
-        c3 = 1.0 if vol_spike else 0.0
+        # 3. Volume spike: float 0.0–1.0 (proportional to current/avg ratio)
+        c3 = vol_spike
 
         # 4. Price momentum: direction matches trend = 1.0, else 0.5
         momentum = 1.0 if ((direction == "LONG" and price_trend == "UP") or (direction == "SHORT" and price_trend == "DOWN")) else 0.5

@@ -63,7 +63,7 @@ logger = logging.getLogger("Syngex.Strategies.IVGEXDivergence")
 # ---------------------------------------------------------------------------
 
 # Price must be at or above this percentile of 30m window
-PRICE_PERCENTILE_THRESHOLD = 0.70     # p70 — price in top 30% of range
+PRICE_PERCENTILE_THRESHOLD = 0.60     # p60 — price in top 40% of range
 
 # Min data points for price window
 MIN_PRICE_POINTS = 10
@@ -72,7 +72,7 @@ MIN_PRICE_POINTS = 10
 MIN_IV_POINTS = 5
 
 # Min positive net gamma threshold
-MIN_POSITIVE_GAMMA = 200000           # $200k net gamma
+MIN_POSITIVE_GAMMA = 100000           # $100k net gamma
 
 # IV decline threshold: IV at ATM must be below rolling avg by this ratio
 IV_DECLINE_RATIO = 0.95             # IV below 95% of rolling avg
@@ -82,15 +82,15 @@ STOP_PCT = 0.006                      # 0.6% fallback stop
 TARGET_RISK_MULT = 1.5                # 1.5× risk toward mean
 
 # Min confidence threshold for signal emission (raised to 0.35 for v2)
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 # v2 Volatility-Snap parameters
 IV_SKEW_OTM_PCT = 0.05              # 5% OTM for skew calculation
 IV_SKEW_ROC_WINDOW = 5              # ticks for skew ROC
-IV_SKEW_ROC_THRESHOLD = 0.15        # skew must have risen ≥15%
+IV_SKEW_ROC_THRESHOLD = 0.10        # skew must have risen ≥10%
 
 GAMMA_DENSITY_WINDOW_PCT = 0.01     # ±1% window for gamma density
-GAMMA_DENSITY_DECLINE_THRESHOLD = 0.70  # density must decline ≥30%
+GAMMA_DENSITY_DECLINE_THRESHOLD = 0.80  # density must decline ≥20%
 
 IV_VOLUME_MIN = 100                   # min volume to consider IV meaningful
 

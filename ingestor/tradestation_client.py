@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -67,6 +68,11 @@ class TradeStationClient:
         self._option_chain_symbols: List[str] = []
         self._depth_quote_symbols: List[str] = []
         self._depth_agg_symbols: List[str] = []
+        # L2 depth throttle: sample at ~_depth_hz instead of every tick
+        self._depth_quotes_last_ts: float = 0.0
+        self._depth_agg_last_ts: float = 0.0
+        self._depth_hz: int = int(os.environ.get("SYNGEX_DEPTH_HZ", "200"))
+        self._depth_window: float = 1.0 / self._depth_hz if self._depth_hz > 0 else 0.05
         self._option_chain_failed = False
         self._watched_symbol: str = ""  # Symbol whose quotes feed the underlying price
         self._stream_tasks: list[asyncio.Task] = []
@@ -420,6 +426,10 @@ class TradeStationClient:
                         try:
                             data = json.loads(line_str)
                             msg = self._normalize_depth_quotes(data)
+                            now = time.time()
+                            if now - self._depth_quotes_last_ts < self._depth_window:
+                                continue  # skip this tick, keep streaming
+                            self._depth_quotes_last_ts = now
                             self._dispatch(msg)
                         except json.JSONDecodeError:
                             pass
@@ -559,6 +569,10 @@ class TradeStationClient:
                         try:
                             data = json.loads(line_str)
                             msg = self._normalize_depth_agg(data)
+                            now = time.time()
+                            if now - self._depth_agg_last_ts < self._depth_window:
+                                continue
+                            self._depth_agg_last_ts = now
                             self._dispatch(msg)
                         except json.JSONDecodeError:
                             pass

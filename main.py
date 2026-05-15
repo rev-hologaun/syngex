@@ -441,10 +441,9 @@ class SyngexOrchestrator:
         # Register subscriptions — quotes feed underlying price, option chain feeds contracts
         self._client.subscribe_to_quotes(self.symbol)
         self._client.subscribe_to_option_chain(self.symbol)
-        # L2 market depth streams
+        # L2 market depth streams (throttled to ~20Hz via SYNGEX_DEPTH_HZ)
         self._client.subscribe_to_market_depth_quotes(self.symbol)
         self._client.subscribe_to_market_depth_aggregates(self.symbol)
-
         logger.info("Components initialized. Symbol: %s", self.symbol)
 
     async def connect(self) -> None:
@@ -1673,6 +1672,51 @@ class SyngexOrchestrator:
                 except Exception:
                     pass
 
+
+
+            # Aggression Flow from quotes stream — detect aggressive trades
+            if data.get("type") == MSG_TYPE_QUOTE_UPDATE:
+                last = data.get("last", 0)
+                bid = data.get("bid", 0)
+                ask = data.get("ask", 0)
+                last_size = data.get("last_size", 0)
+                if isinstance(last_size, str):
+                    try:
+                        last_size = int(last_size)
+                    except (ValueError, TypeError):
+                        last_size = 0
+
+                if last_size > 0:
+                    if last >= ask and ask > 0:
+                        # Aggressive buy — hit the ask
+                        if KEY_AGGRESSIVE_BUY_VOL_5M in self._rolling_data:
+                            self._rolling_data[KEY_AGGRESSIVE_BUY_VOL_5M].push(last_size, ts)
+                    elif last <= bid and bid > 0:
+                        # Aggressive sell — hit the bid
+                        if KEY_AGGRESSIVE_SELL_VOL_5M in self._rolling_data:
+                            self._rolling_data[KEY_AGGRESSIVE_SELL_VOL_5M].push(last_size, ts)
+
+                    # Track individual trade size for volume gate
+                    if KEY_TRADE_SIZE_5M in self._rolling_data:
+                        self._rolling_data[KEY_TRADE_SIZE_5M].push(last_size, ts)
+
+                # Compute AF from rolling aggressive volumes
+                buy_vol_window = self._rolling_data.get(KEY_AGGRESSIVE_BUY_VOL_5M)
+                sell_vol_window = self._rolling_data.get(KEY_AGGRESSIVE_SELL_VOL_5M)
+                if buy_vol_window and sell_vol_window and buy_vol_window.count > 0 and sell_vol_window.count > 0:
+                    total_buy = sum(buy_vol_window.values)
+                    total_sell = sum(sell_vol_window.values)
+                    total_aggressive = total_buy + total_sell
+                    if total_aggressive > 0:
+                        af = (total_buy - total_sell) / total_aggressive
+                    else:
+                        af = 0.0
+                else:
+                    af = 0.0
+
+                if KEY_AF_5M in self._rolling_data:
+                    self._rolling_data[KEY_AF_5M].push(af, ts)
+
             # ── Depth data capture (L2/TotalView) ──
             msg_type = data.get("type", "")
             if msg_type in (MSG_TYPE_MARKET_DEPTH_QUOTES, KEY_MARKET_DEPTH_AGG):
@@ -2396,48 +2440,6 @@ class SyngexOrchestrator:
                     except Exception:
                         pass
 
-            # Aggression Flow from quotes stream — detect aggressive trades
-            if data.get("type") == MSG_TYPE_QUOTE_UPDATE:
-                last = data.get("last", 0)
-                bid = data.get("bid", 0)
-                ask = data.get("ask", 0)
-                last_size = data.get("last_size", 0)
-                if isinstance(last_size, str):
-                    try:
-                        last_size = int(last_size)
-                    except (ValueError, TypeError):
-                        last_size = 0
-
-                if last_size > 0:
-                    if last >= ask and ask > 0:
-                        # Aggressive buy — hit the ask
-                        if KEY_AGGRESSIVE_BUY_VOL_5M in self._rolling_data:
-                            self._rolling_data[KEY_AGGRESSIVE_BUY_VOL_5M].push(last_size, ts)
-                    elif last <= bid and bid > 0:
-                        # Aggressive sell — hit the bid
-                        if KEY_AGGRESSIVE_SELL_VOL_5M in self._rolling_data:
-                            self._rolling_data[KEY_AGGRESSIVE_SELL_VOL_5M].push(last_size, ts)
-
-                    # Track individual trade size for volume gate
-                    if KEY_TRADE_SIZE_5M in self._rolling_data:
-                        self._rolling_data[KEY_TRADE_SIZE_5M].push(last_size, ts)
-
-                # Compute AF from rolling aggressive volumes
-                buy_vol_window = self._rolling_data.get(KEY_AGGRESSIVE_BUY_VOL_5M)
-                sell_vol_window = self._rolling_data.get(KEY_AGGRESSIVE_SELL_VOL_5M)
-                if buy_vol_window and sell_vol_window and buy_vol_window.count > 0 and sell_vol_window.count > 0:
-                    total_buy = sum(buy_vol_window.values)
-                    total_sell = sum(sell_vol_window.values)
-                    total_aggressive = total_buy + total_sell
-                    if total_aggressive > 0:
-                        af = (total_buy - total_sell) / total_aggressive
-                    else:
-                        af = 0.0
-                else:
-                    af = 0.0
-
-                if KEY_AF_5M in self._rolling_data:
-                    self._rolling_data[KEY_AF_5M].push(af, ts)
 
 
         except Exception as exc:

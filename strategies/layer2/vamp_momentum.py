@@ -13,7 +13,9 @@ SHORT: Δ_VAMP < -threshold AND ROC(VAMP) < 0
 Hard gates (all must pass):
     Gate A: Avg participants over top 10 >= min_avg_participants
     Gate B: Σ size(top 10) > MA(total depth, 60s) × 1.2
-    Gate C: Current spread < MA(spread, 5m)
+
+Spread stability (Gate C) is no longer a hard gate — it contributes
+as component 5 (spread stability, 0.0–0.10) in the confidence model.
 
 Confidence model (7 components):
     1. VAMP deviation magnitude     (0.0–0.25)
@@ -44,7 +46,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.VampMomentum")
 
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 
 class VampMomentum(BaseStrategy):
@@ -138,13 +140,13 @@ class VampMomentum(BaseStrategy):
             n_levels = len(bid_levels) + len(ask_levels)
             avg_participants = total_participants / n_levels if n_levels > 0 else 0.0
 
-        # 4. Apply 3 HARD GATES
+        # 4. Apply 2 HARD GATES
         # Gate A: Participant conviction
         min_avg_participants = params.get("min_avg_participants", 1.5)
         gate_a = avg_participants >= min_avg_participants
 
         # Gate B: Liquidity density
-        liquidity_density_min_mult = params.get("liquidity_density_min_mult", 1.2)
+        liquidity_density_min_mult = params.get("liquidity_density_min_mult", 1.0)
         depth_ma_window = params.get("depth_ma_window_seconds", 60)
         gate_b = True
         if depth_density_history and depth_density_history.count > 0:
@@ -152,21 +154,13 @@ class VampMomentum(BaseStrategy):
             if ma_depth > 0:
                 gate_b = current_total_size > ma_depth * liquidity_density_min_mult
 
-        # Gate C: Spread stability
-        spread_stability_ma_seconds = params.get("spread_stability_ma_seconds", 300)
-        gate_c = True
-        spread_ma_window = rolling_data.get(KEY_DEPTH_SPREAD_5M)
-        if spread_ma_window and spread_ma_window.count > 0:
-            ma_spread = spread_ma_window.mean or 0
-            if ma_spread > 0:
-                gate_c = current_spread < ma_spread
-
-        all_gates_pass = gate_a and gate_b and gate_c
+        # Gate C: Spread stability — REMOVED as hard gate, already in confidence model
+        all_gates_pass = gate_a and gate_b
         if not all_gates_pass:
             return []
 
         # 5. Signal direction check
-        vamp_mid_dev_threshold = params.get("vamp_mid_dev_threshold", 0.0005)
+        vamp_mid_dev_threshold = params.get("vamp_mid_dev_threshold", 0.001)
         vamp_roc_threshold = params.get("vamp_roc_threshold", 0.0)
 
         direction = None
@@ -234,7 +228,6 @@ class VampMomentum(BaseStrategy):
                 "gates": {
                     "A_participants": gate_a,
                     "B_liquidity_density": gate_b,
-                    "C_spread_stability": gate_c,
                 },
                 "bid_levels_count": len(bid_levels),
                 "ask_levels_count": len(ask_levels),
@@ -270,7 +263,7 @@ class VampMomentum(BaseStrategy):
         params = self._params
 
         # 1. VAMP deviation: abs(vamp_mid_dev) from 0→0.0025 (threshold=0.0005, 5x=0.0025), higher = higher
-        dev_threshold = params.get("vamp_mid_dev_threshold", 0.0005)
+        dev_threshold = params.get("vamp_mid_dev_threshold", 0.001)
         c1 = normalize(abs(vamp_mid_dev), 0.0, dev_threshold * 5.0)
 
         # 2. VAMP ROC: abs(vamp_roc) from 0→0.01, aligned = 1.0, misaligned = 0.25

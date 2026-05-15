@@ -49,16 +49,16 @@ logger = logging.getLogger("Syngex.Strategies.CallPutFlowAsymmetry")
 # ---------------------------------------------------------------------------
 
 # Flow score threshold: call score must exceed put score by this ratio
-FLOW_THRESHOLD = 1.5                # Call Score > 1.5× Put Score
+FLOW_THRESHOLD = 1.2                # Call Score > 1.2× Put Score
 
 # Minimum greeks data points for aggregation
 MIN_GREEKS_POINTS = 3
 
 # IV skew threshold: call IV must be below put IV by this amount
-IV_SKEW_THRESHOLD = 0.03            # 3% IV difference
+IV_SKEW_THRESHOLD = 0.02            # 2% IV difference
 
 # Minimum confidence to emit (v2: raised from 0.35)
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 # Stop and target
 STOP_PCT = 0.006                    # 0.6% stop
@@ -249,13 +249,13 @@ class CallPutFlowAsymmetry(BaseStrategy):
         """
         Check if flow is broad-based across strikes.
 
-        Hard gate: breadth > 0.30 (at least 30% of strikes participating)
+        Hard gate: breadth > 0.15 (at least 15% of strikes participating)
 
         Returns True if breadth gate passes, False otherwise.
         """
         if flow_breadth is None:
             return False
-        return flow_breadth > 0.30
+        return flow_breadth > 0.15
 
     def _compute_regime_intensity(self, net_gamma: float) -> float:
         """
@@ -430,13 +430,13 @@ class CallPutFlowAsymmetry(BaseStrategy):
         # Check volume dominance
         vol_up = self._check_volume_up(rolling_data)
 
-        # Flow acceleration hard gate
+        # Flow acceleration (soft gate — compute for confidence bonus)
         flow_roc = self._check_flow_acceleration(rolling_data, flow_ratio, "LONG")
 
         # Flow breadth hard gate
         breadth_pass = self._check_flow_breadth(flow_breadth)
 
-        if not flow_roc or not breadth_pass:
+        if not breadth_pass:
             return []
 
         confidence = self._compute_confidence(
@@ -524,13 +524,13 @@ class CallPutFlowAsymmetry(BaseStrategy):
         # Check volume down (volume spike on selling)
         vol_down = self._check_volume_down(rolling_data)
 
-        # Flow acceleration hard gate
+        # Flow acceleration (soft gate — compute for confidence bonus)
         flow_roc = self._check_flow_acceleration(rolling_data, flow_ratio, "SHORT")
 
         # Flow breadth hard gate
         breadth_pass = self._check_flow_breadth(flow_breadth)
 
-        if not flow_roc or not breadth_pass:
+        if not breadth_pass:
             return []
 
         confidence = self._compute_confidence(

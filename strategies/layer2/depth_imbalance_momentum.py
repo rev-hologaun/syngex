@@ -41,7 +41,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.DepthImbalanceMomentum")
 
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 
 class DepthImbalanceMomentum(BaseStrategy):
@@ -91,8 +91,8 @@ class DepthImbalanceMomentum(BaseStrategy):
         current_ir_roc = ir_roc_window.values[-1]
 
         # 2. Determine signal direction
-        ir_threshold_long = params.get("ir_threshold_long", 3.0)
-        ir_threshold_short = params.get("ir_threshold_short", 0.6)
+        ir_threshold_long = params.get("ir_threshold_long", 2.0)
+        ir_threshold_short = params.get("ir_threshold_short", 0.7)
         ir_roc_threshold_long = params.get("ir_roc_threshold_long", 0.0)
         ir_roc_threshold_short = params.get("ir_roc_threshold_short", 0.0)
 
@@ -118,7 +118,7 @@ class DepthImbalanceMomentum(BaseStrategy):
 
         # 3. Apply 3 HARD GATES
         # Gate A: Participant conviction
-        min_avg_participants = params.get("min_avg_participants", 2.0)
+        min_avg_participants = params.get("min_avg_participants", 1.5)
         gate_a = self._gate_a_participants(data, min_avg_participants, direction)
 
         if not gate_a:
@@ -129,7 +129,7 @@ class DepthImbalanceMomentum(BaseStrategy):
             return []
 
         # Gate B: Depth decay check — total depth shouldn't be evaporating
-        max_total_depth_decay = params.get("max_total_depth_decay", 0.05)
+        max_total_depth_decay = params.get("max_total_depth_decay", 0.10)
         gate_b = self._gate_b_depth_decay(rolling_data, max_total_depth_decay)
 
         if not gate_b:
@@ -140,7 +140,7 @@ class DepthImbalanceMomentum(BaseStrategy):
             return []
 
         # Gate C: Volume confirmation — volume >= MA(volume)
-        volume_min_mult = params.get("volume_min_mult", 1.0)
+        volume_min_mult = params.get("volume_min_mult", 0.85)
         gate_c = self._gate_c_volume(rolling_data, volume_min_mult)
 
         if not gate_c:
@@ -352,7 +352,7 @@ class DepthImbalanceMomentum(BaseStrategy):
 
         # 3. Participant conviction: avg_participants from threshold→2×threshold, higher = higher
         depth_snapshot = data.get("depth_snapshot")
-        min_avg_participants = params.get("min_avg_participants", 2.0)
+        min_avg_participants = params.get("min_avg_participants", 1.5)
         avg_participants = 0
         if depth_snapshot:
             avg_participants = depth_snapshot.get("bid_avg_participants", 0) if direction == "LONG" else depth_snapshot.get("ask_avg_participants", 0)

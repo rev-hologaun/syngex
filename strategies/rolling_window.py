@@ -47,6 +47,7 @@ class RollingWindow:
     _trend: str = "FLAT"
     _trend_z_threshold: float = 0.8       # z-score needed to ENTER a trend
     _trend_exit_threshold: float = 0.3    # z-score below which we EXIT
+    max_entries: int = 10000              # hard cap on entries to prevent memory explosion
 
     # ------------------------------------------------------------------
     # Core
@@ -63,13 +64,19 @@ class RollingWindow:
                 self._values.popleft()
                 self._timestamps.popleft()
         else:
-            # Count-based: enforce max size
-            if len(self._values) >= self.window_size:
+            # Count-based: enforce max size (whichever is smaller: window_size or max_entries)
+            cap = min(self.window_size, self.max_entries)
+            if len(self._values) >= cap:
                 self._values.popleft()
                 self._timestamps.popleft()
 
         self._values.append(value)
         self._timestamps.append(now)
+
+        # Hard cap on entries to prevent memory explosion
+        if len(self._values) > self.max_entries:
+            self._values = deque(list(self._values)[-self.max_entries:])
+            self._timestamps = deque(list(self._timestamps)[-self.max_entries:])
 
     # ------------------------------------------------------------------
     # Statistics
@@ -77,6 +84,210 @@ class RollingWindow:
 
     @property
     def values(self) -> List[float]:
+        """Current window values as a list."""
+        return list(self._values)
+
+    @property
+    def count(self) -> int:
+        """Number of values in the window."""
+        return len(self._values)
+
+    @property
+    def mean(self) -> Optional[float]:
+        """Rolling mean."""
+        if not self._values:
+            return None
+        return statistics.mean(self._values)
+
+    @property
+    def median(self) -> Optional[float]:
+        """Rolling median."""
+        if not self._values:
+            return None
+        return statistics.median(self._values)
+
+    @property
+    def std(self) -> Optional[float]:
+        """Rolling standard deviation (sample). Returns None if < 2 values."""
+        if len(self._values) < 2:
+            return None
+        return statistics.stdev(self._values)
+
+    @property
+    def min(self) -> Optional[float]:
+        if not self._values:
+            return None
+        return min(self._values)
+
+    @property
+    def max(self) -> Optional[float]:
+        if not self._values:
+            return None
+        return max(self._values)
+
+    @property
+    def range(self) -> Optional[float]:
+        """Current range (max - min)."""
+        if not self._values:
+            return None
+        return self.max - self.min
+
+    @property
+    def p25(self) -> Optional[float]:
+        if len(self._values) < 2:
+            return None
+        sorted_vals = sorted(self._values)
+        n = len(sorted_vals)
+        q1_idx = n / 4
+        if q1_idx == int(q1_idx):
+            return (sorted_vals[int(q1_idx) - 1] + sorted_vals[int(q1_idx)]) / 2
+        return sorted_vals[int(q1_idx)]
+
+    @property
+    def p75(self) -> Optional[float]:
+        if len(self._values) < 2:
+            return None
+        sorted_vals = sorted(self._values)
+        n = len(sorted_vals)
+        q3_idx = 3 * n / 4
+        if q3_idx == int(q3_idx):
+            return (sorted_vals[int(q3_idx) - 1] + sorted_vals[int(q3_idx)]) / 2
+        return sorted_vals[int(q3_idx)]
+
+    @property
+    def trend(self) -> str:
+        """
+        Trend direction with hysteresis to prevent flip-flopping.
+
+        Returns: "UP", "DOWN", or "FLAT"
+        """
+        if len(self._values) < 4:
+            self._trend = "FLAT"
+            return "FLAT"
+
+        vals = list(self._values)
+        half = len(vals) // 2
+        first_half = statistics.mean(vals[:half])
+        second_half = statistics.mean(vals[half:])
+
+        diff = second_half - first_half
+        std = self.std
+        if std is None or std == 0:
+            self._trend = "FLAT"
+            return "FLAT"
+
+        z = diff / std
+
+        # Hysteresis: different thresholds for entering vs exiting trends
+        if self._trend in ("UP", "FLAT"):
+            # Need strong signal to go UP, weak signal to stay UP
+            if z > self._trend_z_threshold:
+                self._trend = "UP"
+            elif self._trend == "UP" and z < self._trend_exit_threshold:
+                self._trend = "FLAT"
+        elif self._trend == "DOWN":
+            # Need strong negative signal to go DOWN, weak signal to stay DOWN
+            if z < -self._trend_z_threshold:
+                self._trend = "DOWN"
+            elif z > -self._trend_exit_threshold:
+                self._trend = "FLAT"
+
+        return self._trend
+
+    @property
+    def latest(self) -> Optional[float]:
+        """Most recent value."""
+        return self._values[-1] if self._values else None
+
+    @property
+    def change(self) -> Optional[float]:
+        """Change from first to latest value in window."""
+        if len(self._values) < 2:
+            return None
+        return self._values[-1] - self._values[0]
+
+    @property
+    def change_pct(self) -> Optional[float]:
+        """Percent change from first to latest value."""
+        if len(self._values) < 2 or self._values[0] == 0:
+            return None
+        return (self._values[-1] - self._values[0]) / abs(self._values[0])
+
+    # ------------------------------------------------------------------
+    # Percentile rank of a value within the window
+    # ------------------------------------------------------------------
+
+    def percentile_rank(self, value: float) -> Optional[float]:
+        """
+        Where does `value` sit within the current window?
+        Returns 0.0 (lowest) to 1.0 (highest).
+        """
+        if not self._values:
+            return None
+        count_below = sum(1 for v in self._values if v < value)
+        return count_below / len(self._values)
+
+    def is_in_bottom_quartile(self) -> bool:
+        """Is the latest value in the bottom 25% of the window?"""
+        if self.p25 is None or self.latest is None:
+            return False
+        return self.latest <= self.p25
+
+    def is_in_top_quartile(self) -> bool:
+        """Is the latest value in the top 25% of the window?"""
+        if self.p75 is None or self.latest is None:
+            return False
+        return self.latest >= self.p75
+
+    # ------------------------------------------------------------------
+    # Z-score of latest value
+    # ------------------------------------------------------------------
+
+    @property
+    def z_score(self) -> Optional[float]:
+        """Z-score of the latest value relative to window mean/std."""
+        if self.mean is None or self.std is None or self.std == 0:
+            return None
+        if self.latest is None:
+            return None
+        return (self.latest - self.mean) / self.std
+
+    # ------------------------------------------------------------------
+    # Utilities
+    # ------------------------------------------------------------------
+
+    def clear(self) -> None:
+        """Reset the window."""
+        self._values.clear()
+        self._timestamps.clear()
+
+    def snapshot(self) -> Dict[str, Any]:
+        """Export current state for logging/dashboard."""
+        return {
+            "count": self.count,
+            "mean": self.mean,
+            "median": self.median,
+            "std": self.std,
+            "min": self.min,
+            "max": self.max,
+            "range": self.range,
+            "p25": self.p25,
+            "p75": self.p75,
+            "trend": self.trend,
+            "latest": self.latest,
+            "change": self.change,
+            "change_pct": self.change_pct,
+            "z_score": self.z_score,
+        }
+
+    def __len__(self) -> int:
+        return len(self._values)
+
+    def __bool__(self) -> bool:
+        return bool(self._values)
+
+    @property
+    def values(self) -> list:
         """Current window values as a list."""
         return list(self._values)
 

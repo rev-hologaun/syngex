@@ -65,7 +65,7 @@ MIN_TREND_DURATION = 2                # At least 2 candles in trend (was 3)
 STOP_PCT = 0.008                      # 0.8% beyond swing
 
 # Minimum confidence to emit a signal
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 # Target: mean reversion to rolling average
 MEAN_REVERSION_MULT = 1.0             # 1.0× distance — target is the rolling mean
@@ -73,7 +73,7 @@ MEAN_REVERSION_MULT = 1.0             # 1.0× distance — target is the rolling
 # --- v2 Exhaustion-Master params ---
 # Liquidity vacuum
 LIQUIDITY_VACUUM_RATIO_STABILITY = 0.15   # ratio must be within 15% of rolling mean
-LIQUIDITY_VACUUM_SPREAD_WIDEN_MULT = 1.2  # spread must be > 1.2× rolling mean
+LIQUIDITY_VACUUM_SPREAD_WIDEN_MULT = 1.10  # spread must be > 1.10× rolling mean
 
 # IV acceleration
 IV_ACCEL_WINDOW = 5                         # window for IV ROC calculation

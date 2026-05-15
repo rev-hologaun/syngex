@@ -43,7 +43,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.ObiAggressionFlow")
 
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 
 class ObiAggressionFlow(BaseStrategy):
@@ -88,8 +88,8 @@ class ObiAggressionFlow(BaseStrategy):
         current_af = af_window.values[-1]
 
         # --- 3. Master trigger: OBI × AF ---
-        obi_threshold = params.get("obi_threshold", 0.75)
-        af_threshold = params.get("af_threshold", 0.5)
+        obi_threshold = params.get("obi_threshold", 0.50)
+        af_threshold = params.get("af_threshold", 0.30)
         min_obi_points = params.get("min_obi_data_points", 10)
         min_af_points = params.get("min_af_data_points", 5)
 
@@ -194,7 +194,7 @@ class ObiAggressionFlow(BaseStrategy):
         Gate C: Current spread < max_spread_multiplier × MA(spread)
         """
         # --- Gate A: Volume threshold ---
-        trade_size_mult = params.get("volume_spike_mult", 2.0)
+        trade_size_mult = params.get("volume_spike_mult", 1.3)
         trade_size_window = rolling_data.get(KEY_TRADE_SIZE_5M)
         gate_a = True
         if trade_size_window and trade_size_window.count > 0:
@@ -218,7 +218,7 @@ class ObiAggressionFlow(BaseStrategy):
             gate_b = avg_participants >= min_avg_participants
 
         # --- Gate C: Spread stability ---
-        max_spread_mult = params.get("max_spread_multiplier", 1.5)
+        max_spread_mult = params.get("max_spread_multiplier", 2.0)
         gate_c = True
         spread_window = rolling_data.get(KEY_DEPTH_SPREAD_5M)
         if spread_window and spread_window.count > 0:

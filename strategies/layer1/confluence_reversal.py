@@ -57,15 +57,15 @@ logger = logging.getLogger("Syngex.Strategies.ConfluenceReversal")
 # Constants
 # ---------------------------------------------------------------------------
 
-CONFLUENCE_DISTANCE_PCT = 0.003  # 0.3% — max distance for confluence
+CONFLUENCE_DISTANCE_PCT = 0.005  # 0.5% — max distance for confluence
 MIN_STRUCTURAL_SIGNALS = 1        # Wall-level confluence alone is valid
-MIN_CONFIDENCE = 0.15             # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.10             # Minimum confidence to emit signal
 STOP_PCT = 0.008                  # 0.8% stop
 TARGET_RISK_MULT = 2.0            # 2× risk for target
 
 # Confluence Velocity (Phase 1)
-VELOCITY_MIN_ZSCORE = 1.0         # Minimum |z-score| for approach velocity
-VELOCITY_MIN_VOLUME_MULT = 1.2    # Volume must be >= 1.2x rolling average
+VELOCITY_MIN_ZSCORE = 0.5         # Minimum |z-score| for approach velocity
+VELOCITY_MIN_VOLUME_MULT = 1.05    # Volume must be >= 1.05x rolling average
 
 # IV-Skew Wall Quality (Phase 2)
 IV_WEIGHT_BASE = 1.0
@@ -73,7 +73,7 @@ IV_WEIGHT_MAX = 1.5
 IV_WEIGHT_SKEW_THRESHOLD = 0.05
 
 # Liquidity Absorption (Phase 3)
-DEPTH_SPIKE_THRESHOLD = 1.5       # Current depth >= 1.5x rolling average
+DEPTH_SPIKE_THRESHOLD = 1.3       # Current depth >= 1.3x rolling average
 
 # Regime-Adaptive Stops (Phase 4)
 NEGATIVE_GAMMA_STOP_MULT = 1.5    # Wider stops in negative gamma (more noise)
@@ -242,7 +242,7 @@ class ConfluenceReversal(BaseStrategy):
 
             # Check if VWAP is near (independent structural signal)
             vw = self._get_price_window(rolling_data)
-            if vw is not None and vw.count >= 10 and vw.mean is not None:
+            if vw is not None and vw.count >= 5 and vw.mean is not None:
                 vw_distance = abs(vw.mean - wall["strike"]) / vw.mean
                 if vw_distance <= CONFLUENCE_DISTANCE_PCT:
                     structural_count += 1
@@ -256,7 +256,7 @@ class ConfluenceReversal(BaseStrategy):
 
         # Also check VWAP as standalone confluence level
         vw = self._get_price_window(rolling_data)
-        if vw is not None and vw.count >= 10:
+        if vw is not None and vw.count >= 5:
             mean = vw.mean
             if mean is not None and mean > 0:
                 vw_distance = abs(mean - price) / price
@@ -315,17 +315,13 @@ class ConfluenceReversal(BaseStrategy):
         gex = level.get("gex", 0)
         wall_side = level.get("side", "call")
 
-        # === Velocity check (hard gate) ===
+        # === Velocity check (soft gate — partial scores allowed) ===
         velocity_score = self._check_confluence_velocity(price, rolling_data)
-        if velocity_score is None:
-            return None
 
-        # === Liquidity absorption check (hard gate) ===
+        # === Liquidity absorption check (soft gate — partial scores allowed) ===
         absorption_score = self._check_liquidity_absorption(
             wall_side, depth_snapshot, rolling_data
         )
-        if absorption_score is None:
-            return None
 
         # === Regime-adaptive stop ===
         regime_mult = (
@@ -373,7 +369,7 @@ class ConfluenceReversal(BaseStrategy):
                    f"{structural_count} structural signals, type={level.get('type', 'unknown')}, "
                    f"has_flip={level.get('has_flip', False)}, "
                    f"velocity={velocity_score:.3f}, absorption={absorption_score:.3f}, "
-                   f"regime={regime}, trend={trend}",
+                   f"regime={regime}, trend={price_window.trend if price_window else 'UNKNOWN'}",
             metadata={
                 "structural_count": structural_count,
                 "level_type": level.get("type", "unknown"),
@@ -386,7 +382,7 @@ class ConfluenceReversal(BaseStrategy):
                 "technical_type": level.get("technical_type"),
                 "distance_pct": round(level["distance_pct"], 4),
                 "regime": regime,
-                "trend": trend,
+                "trend": price_window.trend if price_window else 'UNKNOWN',
                 "velocity_score": velocity_score,
                 "absorption_score": absorption_score,
                 "regime_stop_mult": regime_mult,
@@ -410,17 +406,13 @@ class ConfluenceReversal(BaseStrategy):
         gex = level.get("gex", 0)
         wall_side = level.get("side", "put")
 
-        # === Velocity check (hard gate) ===
+        # === Velocity check (soft gate — partial scores allowed) ===
         velocity_score = self._check_confluence_velocity(price, rolling_data)
-        if velocity_score is None:
-            return None
 
-        # === Liquidity absorption check (hard gate) ===
+        # === Liquidity absorption check (soft gate — partial scores allowed) ===
         absorption_score = self._check_liquidity_absorption(
             wall_side, depth_snapshot, rolling_data
         )
-        if absorption_score is None:
-            return None
 
         # === Regime-adaptive stop ===
         regime_mult = (
@@ -468,7 +460,7 @@ class ConfluenceReversal(BaseStrategy):
                    f"{structural_count} structural signals, type={level.get('type', 'unknown')}, "
                    f"has_flip={level.get('has_flip', False)}, "
                    f"velocity={velocity_score:.3f}, absorption={absorption_score:.3f}, "
-                   f"regime={regime}, trend={trend}",
+                   f"regime={regime}, trend={price_window.trend if price_window else 'UNKNOWN'}",
             metadata={
                 "structural_count": structural_count,
                 "level_type": level.get("type", "unknown"),
@@ -481,7 +473,7 @@ class ConfluenceReversal(BaseStrategy):
                 "technical_type": level.get("technical_type"),
                 "distance_pct": round(level["distance_pct"], 4),
                 "regime": regime,
-                "trend": trend,
+                "trend": price_window.trend if price_window else 'UNKNOWN',
                 "velocity_score": velocity_score,
                 "absorption_score": absorption_score,
                 "regime_stop_mult": regime_mult,
@@ -500,30 +492,31 @@ class ConfluenceReversal(BaseStrategy):
 
     def _check_confluence_velocity(
         self, price: float, rolling_data: Dict[str, Any]
-    ) -> Optional[float]:
+    ) -> float:
         """Check if price is approaching with sufficient velocity.
 
-        Returns velocity score 0.0-1.0, or None if insufficient data.
-        Hard gate: None means skip signal.
+        Returns velocity score 0.0-1.0. Always returns a value — partial
+        scores are allowed when conditions are sub-threshold.
         """
         price_window = self._get_price_window(rolling_data)
         if price_window is None or price_window.count < 5:
-            return None
+            return 0.0
         if price_window.std is None or price_window.std <= 0:
-            return None
+            return 0.0
         if price_window.mean is None:
-            return None
+            return 0.0
 
-        z_score = (price - price_window.mean) / price_window.std
+        zscore = (price - price_window.mean) / price_window.std
 
         vol_filter = VolumeFilter.evaluate(rolling_data, 0.0)
-        vol_mult = vol_filter.get("volume_multiplier", 1.0)
+        volume_mult = vol_filter.get("volume_multiplier", 1.0)
 
-        if vol_mult < VELOCITY_MIN_VOLUME_MULT:
-            return None
-
-        velocity_score = min(1.0, abs(z_score) / 3.0)
-        return round(velocity_score, 3)
+        velocity_score = 0.0
+        if zscore is not None and abs(zscore) >= VELOCITY_MIN_ZSCORE * 0.5:
+            velocity_score = min(1.0, abs(zscore) / 2.0)
+        if volume_mult is not None and volume_mult >= VELOCITY_MIN_VOLUME_MULT * 0.8:
+            velocity_score = max(velocity_score, min(1.0, volume_mult / 2.0))
+        return velocity_score  # Always returns 0.0–1.0 instead of None
 
     # ------------------------------------------------------------------
     # IV-Skew Wall Quality
@@ -573,38 +566,39 @@ class ConfluenceReversal(BaseStrategy):
         level_side: str,
         depth_snapshot: Optional[Dict[str, Any]],
         rolling_data: Dict[str, Any],
-    ) -> Optional[float]:
+    ) -> float:
         """Check if order book depth shows absorption at the level.
 
-        Returns absorption score 0.0-1.0, or None if insufficient depth data.
-        Hard gate: None means skip signal.
+        Returns absorption score 0.0-1.0. Always returns a value — partial
+        scores are allowed when conditions are sub-threshold.
         """
-        if not depth_snapshot:
-            return None
+        bid_ratio = None
+        ask_ratio = None
 
-        if level_side == "call":
-            current_depth = depth_snapshot.get("total_ask_size", 0)
-            key = KEY_DEPTH_ASK_SIZE_5M
-        else:
-            current_depth = depth_snapshot.get("total_bid_size", 0)
-            key = KEY_DEPTH_BID_SIZE_5M
+        if depth_snapshot:
+            if level_side == "call":
+                current_depth = depth_snapshot.get("total_ask_size", 0)
+                key = KEY_DEPTH_ASK_SIZE_5M
+            else:
+                current_depth = depth_snapshot.get("total_bid_size", 0)
+                key = KEY_DEPTH_BID_SIZE_5M
 
-        depth_rw = rolling_data.get(key)
-        if depth_rw is None or depth_rw.count < 10 or depth_rw.mean is None:
-            return None
+            depth_rw = rolling_data.get(key)
+            if depth_rw is not None and depth_rw.count >= 10 and depth_rw.mean is not None:
+                avg_depth = depth_rw.mean
+                if avg_depth > 0:
+                    spike_ratio = current_depth / avg_depth
+                    if level_side == "call":
+                        ask_ratio = spike_ratio
+                    else:
+                        bid_ratio = spike_ratio
 
-        avg_depth = depth_rw.mean
-        if avg_depth <= 0:
-            return None
-
-        spike_ratio = current_depth / avg_depth
-
-        if spike_ratio >= DEPTH_SPIKE_THRESHOLD:
-            return min(1.0, spike_ratio / 3.0)
-        elif spike_ratio >= 1.0:
-            return spike_ratio / DEPTH_SPIKE_THRESHOLD * 0.5
-        else:
-            return None
+        absorption_score = 0.0
+        if bid_ratio is not None and bid_ratio >= DEPTH_SPIKE_THRESHOLD * 0.8:
+            absorption_score = min(1.0, bid_ratio / 2.0)
+        if ask_ratio is not None and ask_ratio >= DEPTH_SPIKE_THRESHOLD * 0.8:
+            absorption_score = max(absorption_score, min(1.0, ask_ratio / 2.0))
+        return absorption_score  # Always returns 0.0–1.0 instead of None
 
     # ------------------------------------------------------------------
     # Helpers

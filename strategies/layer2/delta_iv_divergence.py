@@ -49,25 +49,25 @@ logger = logging.getLogger("Syngex.Strategies.DeltaIVDivergence")
 MIN_DATA_POINTS = 3
 
 # Minimum divergence strength (combined z-score magnitude)
-MIN_DIVERSION_STRENGTH = 0.3
+MIN_DIVERSION_STRENGTH = 0.2
 
 # Stop distance
 STOP_PCT = 0.008  # 0.8%
 
 # Confidence threshold
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 # Skew divergence threshold
-SK_DIV_THRESHOLD = 0.05
+SK_DIV_THRESHOLD = 0.03
 
 # Decoupling history window (data points)
 DECOUPLE_HISTORY_WINDOW = 30
 
 # Decoupling correlation threshold
-DECOUPLE_THRESHOLD = 0.70
+DECOUPLE_THRESHOLD = 0.80
 
 # Gamma density decline threshold
-GAMMA_DECLINE_THRESHOLD = 0.80
+GAMMA_DECLINE_THRESHOLD = 0.85
 
 # IV expansion multiplier
 TARGET_IV_MULT = 2.0
@@ -461,8 +461,8 @@ class DeltaIVDivergence(BaseStrategy):
         if mean_density <= 0:
             return False
 
-        # Hard gate: current < mean × 0.80
-        return current < mean_density * 0.80
+        # Hard gate: current < mean × 0.85
+        return current < mean_density * 0.85
 
     def _compute_gamma_density(self, gex_calc: Any, price: float) -> Optional[float]:
         """Compute gamma density: sum of gamma for strikes within ±1% of price."""
