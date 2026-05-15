@@ -208,6 +208,8 @@ from strategies.rolling_keys import (
     MSG_TYPE_OPTION_UPDATE,
     MSG_TYPE_UNDERLYING_UPDATE,
     MSG_TYPE_MARKET_DEPTH_QUOTES,
+    KEY_DELTA_DENSITY_5M,
+    KEY_VOLUME_ZSCORE_5M,
 )
 from strategies.layer1 import (
     GammaWallBounce,
@@ -404,6 +406,12 @@ class SyngexOrchestrator:
             key: RollingWindow(window_type="time", window_size=ROLLING_WINDOW_SIZES.get(key, 300))
             for key in ALL_KEYS
         }
+
+        # SI Component rolling windows
+        if KEY_DELTA_DENSITY_5M not in self._rolling_data:
+            self._rolling_data[KEY_DELTA_DENSITY_5M] = RollingWindow(window_type="time", window_size=300)
+        if KEY_VOLUME_ZSCORE_5M not in self._rolling_data:
+            self._rolling_data[KEY_VOLUME_ZSCORE_5M] = RollingWindow(window_type="time", window_size=300)
 
         # Call/put update counters for volume_up/volume_down tracking
         self._call_update_count: int = 0
@@ -842,6 +850,14 @@ class SyngexOrchestrator:
                             atr = math.sqrt(var) * math.sqrt(5)
                             self._rolling_data[KEY_ATR_5M].push(atr, ts)
 
+                    # SI: delta_density — from GEXCalculator
+                    try:
+                        delta_density = self._calculator.get_delta_density()
+                        if delta_density is not None and KEY_DELTA_DENSITY_5M in self._rolling_data:
+                            self._rolling_data[KEY_DELTA_DENSITY_5M].push(delta_density, ts)
+                    except Exception:
+                        pass
+
             # Periodically update net_gamma rolling window
             if self._calculator._msg_count % 20 == 0:
                 ng = self._calculator.get_net_gamma()
@@ -897,6 +913,17 @@ class SyngexOrchestrator:
                 # Push total volume for volume confirmation filter
                 if KEY_VOLUME_5M in self._rolling_data:
                     self._rolling_data[KEY_VOLUME_5M].push(total_vol)
+                # SI: volume_zscore — rolling z-score of total_volume
+                if KEY_VOLUME_5M in self._rolling_data and KEY_VOLUME_ZSCORE_5M in self._rolling_data:
+                    vol_window = self._rolling_data[KEY_VOLUME_5M]
+                    zscore_window = self._rolling_data[KEY_VOLUME_ZSCORE_5M]
+                    if vol_window.count >= 5:
+                        vals = list(vol_window.values)
+                        mean_v = sum(vals) / len(vals)
+                        var_v = sum((x - mean_v) ** 2 for x in vals) / len(vals)
+                        std_v = math.sqrt(var_v) if var_v > 0 else 1.0
+                        zscore = (total_vol - mean_v) / std_v
+                        zscore_window.push(zscore, ts)
                 # Track total_delta_5m for delta_volume_exhaustion
                 if KEY_TOTAL_DELTA_5M in self._rolling_data:
                     self._rolling_data[KEY_TOTAL_DELTA_5M].push(net_delta)
