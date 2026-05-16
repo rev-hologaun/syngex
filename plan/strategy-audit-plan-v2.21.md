@@ -22,7 +22,7 @@
 | OBI_AF | `layer2/obi_aggression_flow.py` | `obi_aggression_flow.md` | ⏳ Pending |
 | CALL_PUT_FLOW | `layer2/call_put_flow_asymmetry.py` | `call_put_flow_asymmetry_v2.md` | ⏳ Pending |
 | IV_GEX_DIV | `layer2/iv_gex_divergence.py` | `iv_gex_divergence_v2.md` | ✅ Fixed (v2.21) |
-| TAIL_RISK | **NOT FOUND** | N/A | ❌ Missing |
+| TAIL_RISK | **REMOVED** | N/A | ❌ Not needed (per Hologaun 2026-05-16) |
 | DEPTH_IMBAL | `layer2/depth_imbalance_momentum.py` | `depth_imbalance_momentum.md` | ⏳ Pending |
 | DEPTH_DECAY | `layer2/depth_decay_momentum.py` | `depth_decay_momentum.md` | ⏳ Pending |
 | EXCHANGE | `layer2/exchange_flow_asymmetry.py` | `exchange_flow_asymmetry.md` | ⏳ Pending |
@@ -111,10 +111,7 @@
 
 ## Critical Questions for Hologaun
 
-1. **TAIL_RISK strategy:** Not found in codebase. Should we:
-   - Create it from scratch (if design exists)?
-   - Remove from hmstrat.md list?
-   - Mark as deferred/wontfix?
+1. **TAIL_RISK strategy:** Removed from audit per Hologaun 2026-05-16. Not needed.
 
 2. **Strategies without plan files:** Should I use docstrings as source of truth, or do you have designs for these elsewhere?
 
