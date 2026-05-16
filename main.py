@@ -1381,7 +1381,8 @@ class SyngexOrchestrator:
                         else:
                             momentum_accel = 0.0
                         self._rolling_data[KEY_MOMENTUM_ROC_5M].push(momentum_accel, time.time())
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"Phi accumulator error: {e}")
                     pass
 
                 # Push per-strike ATM delta and IV for delta_iv_divergence

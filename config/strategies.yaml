@@ -4,7 +4,7 @@
 
 # Global settings
 global:
-  min_confidence: 0.15
+  min_confidence: 0.10
   max_signals_per_tick: 10
   dedup_window_seconds: 60
 

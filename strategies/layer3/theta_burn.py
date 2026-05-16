@@ -1080,7 +1080,9 @@ class ThetaBurn(BaseStrategy):
         norm_iv = (iv_conf - 0.05) / (0.10 - 0.05)
 
         confidence = (norm_gamma + norm_prox + norm_nar + norm_div + norm_liq + norm_iv) / 6.0
-        return max(MIN_CONFIDENCE, confidence)
+        if confidence >= MIN_CONFIDENCE:
+            return [Signal(confidence=confidence, direction=1, strategy_name="theta_burn")]
+        return []
 
     # ------------------------------------------------------------------
     # Confidence Computation — Slice Mode (7 components)
@@ -1155,7 +1157,9 @@ class ThetaBurn(BaseStrategy):
         norm_tod = (tod_conf - 0.05) / (0.10 - 0.05)
 
         confidence = (norm_gamma + norm_div + norm_liq + norm_nar + norm_vol + norm_iv + norm_tod) / 7.0
-        return max(MIN_CONFIDENCE, confidence)
+        if confidence >= MIN_CONFIDENCE:
+            return [Signal(confidence=confidence, direction=1, strategy_name="theta_burn")]
+        return []
 
     # ------------------------------------------------------------------
     # Helper: Volume Confidence

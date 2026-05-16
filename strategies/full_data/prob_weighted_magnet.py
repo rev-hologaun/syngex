@@ -80,7 +80,7 @@ STOP_PCT = 0.005                    # 0.5% stop
 TARGET_RISK_MULT = 1.5              # 1.5× risk for target (v1 fallback)
 
 # Min confidence — raised from 0.25 to 0.35 for v2 hard gates
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 # Min data points
 MIN_DATA_POINTS = 3

@@ -46,7 +46,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.ExchangeFlowConcentration")
 
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 
 class ExchangeFlowConcentration(BaseStrategy):
