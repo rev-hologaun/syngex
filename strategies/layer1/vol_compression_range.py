@@ -56,7 +56,7 @@ logger = logging.getLogger("Syngex.Strategies.VolCompressionRange")
 COMPRESSION_PCT = 0.003                          # 0.3% max range for compression
 MIN_RANGE_BARS = 20                              # Minimum data points in rolling window
 WALL_EDGE_PROXIMITY = 0.004                      # 0.4% from wall for edge trade
-MIN_CONFIDENCE = 0.15                            # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.10                            # Minimum confidence to emit signal (relaxed)
 STOP_PCT = 0.006                                 # 0.6% stop (wider for scalping)
 TARGET_RISK_MULT = 1.5                           # 1.5× risk for target
 STD_THRESHOLD = 0.002                            # Max std of price for compression
@@ -488,21 +488,19 @@ class VolCompressionRange(BaseStrategy):
         iv_compressed: bool = True,
         delta_density: float = 0.0,
         regime_stop_mult: float = 1.0,
-        depth_score: Optional[float] = None,
     ) -> float:
         """
         Compute confidence for a range edge signal.
 
-        Family A — simple average of 5 normalized components:
+        Family A — simple average of 6 normalized components:
 
             1. Position in range: 0–1, closer to edge = higher.
             2. Wall proximity: wall_distance in [0, WALL_EDGE_PROXIMITY], closer = higher.
             3. Range tightness: range_pct in [0, COMPRESSION_PCT], tighter = higher.
             4. Wall strength: abs(wall_gex) in [0, 5_000_000], higher = higher.
-            5. Data quality: window_count in [0, 200], more = higher.
-
-        Future (Phase 5):
-            depth_score: if provided, used as 6th component.
+            5. IV compression: bool → 0 or 0.15 weight.
+            6. Delta density: [0, 1] → weighted as component.
+            7. Data quality: window_count in [0, 200], more = higher.
 
         Returns 0.0–1.0.
         """
@@ -525,10 +523,19 @@ class VolCompressionRange(BaseStrategy):
         # 4. Wall strength: higher GEX = higher, range [0, 5_000_000]
         norm_strength = min(1.0, abs(wall_gex) / 5_000_000)
 
-        # 5. Data quality: more data = higher, range [0, 200]
+        # 5. IV compression: bool → 0 or 0.15
+        norm_iv = 0.15 if iv_compressed else 0.0
+
+        # 6. Delta density: already [0, 1], weight as component
+        norm_delta = delta_density * 0.15
+
+        # 7. Data quality: more data = higher, range [0, 200]
         norm_data = min(1.0, window_count / 200.0)
 
-        confidence = (norm_pos + norm_wall + norm_tight + norm_strength + norm_data) / 5.0
+        # 6-component formula (pos, wall, tight, strength, iv, delta, data)
+        confidence = (
+            norm_pos + norm_wall + norm_tight + norm_strength + norm_iv + norm_delta + norm_data
+        ) / 7.0
 
         return min(1.0, max(0.0, confidence))
 

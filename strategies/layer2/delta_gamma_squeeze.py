@@ -428,9 +428,17 @@ class DeltaGammaSqueeze(BaseStrategy):
         gex_accel: Optional[float] = None,
         iv_roc: Optional[float] = None,
         iv_roc_bonus: float = 0.0,
-        depth_score: Optional[float] = None,
     ) -> float:
-        """Combine all factors into a single confidence score — Family A simple average.
+        """Combine all factors into a single confidence score — Family A simple average with v2 Gamma-Velocity bonuses.
+
+        Components:
+            - Proximity to wall (closer = stronger squeeze)
+            - Delta acceleration rate (faster = more urgency)
+            - Volume spike magnitude
+            - Price momentum alignment
+            - Net gamma magnitude
+            - GEX acceleration bonus (v2): +0.10 when gamma is accelerating
+            - IV ROC bonus (v2): up to +0.08 when IV is rising
 
         Returns 0.0–1.0.
         """
@@ -453,5 +461,15 @@ class DeltaGammaSqueeze(BaseStrategy):
         # 5. Net gamma: abs(net_gamma) from 0→5M, higher = higher
         c5 = normalize(abs(net_gamma), 0.0, 5000000.0)
 
-        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
-        return min(1.0, max(0.0, confidence))
+        # v2: GEX acceleration bonus: > 1.10 means accelerating gamma
+        gex_accel_bonus = 0.0
+        if gex_accel is not None and gex_accel > GEX_ACCEL_RATIO:
+            gex_accel_bonus = 0.10  # Bonus for accelerating gamma
+
+        # v2: IV ROC bonus: already 0-0.08
+        iv_bonus = iv_roc_bonus  # Already calculated
+
+        # Updated formula with v2 bonuses:
+        confidence = (c1 + c2 + c3 + c4 + c5 + gex_accel_bonus) / 6.0
+        confidence = min(1.0, confidence + iv_bonus)  # IV bonus on top
+        return max(0.0, min(1.0, confidence))

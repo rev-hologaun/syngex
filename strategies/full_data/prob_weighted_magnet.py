@@ -361,7 +361,6 @@ class ProbWeightedMagnet(BaseStrategy):
         delta_roc: Optional[float],
         liquidity_vacuum: bool,
         skew_converging: bool,
-        depth_score=None,
     ) -> float:
         """
         Compute confidence for a magnet signal (Family A — 5 components).

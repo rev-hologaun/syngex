@@ -114,6 +114,7 @@ class VampMomentum(BaseStrategy):
         vamp_roc_history = rolling_data.get(KEY_VAMP_ROC_5M)
         participants_history = rolling_data.get(KEY_VAMP_PARTICIPANTS_5M)
         depth_density_history = rolling_data.get(KEY_VAMP_DEPTH_DENSITY_5M)
+        spread_ma_window = rolling_data.get(KEY_DEPTH_SPREAD_5M)
 
         # Current values
         current_vamp_dev = vamp_mid_dev

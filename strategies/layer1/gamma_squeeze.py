@@ -52,7 +52,7 @@ PIN_MAX_RANGE_PCT = 0.003     # 0.3% — max rolling range for pin detection
 WALL_PROXIMITY_PCT = 0.003    # 0.3% — price must be near wall for breakout
 VOLUME_SURGE_MULT = 1.5       # 1.5× average volume = confirmation
 MIN_WALL_GEX = 500000         # Minimum |GEX| for wall consideration
-MIN_CONFIDENCE = 0.15         # was 0.25
+MIN_CONFIDENCE = 0.10         # relaxed from 0.15
 TARGET_RISK_MULT = 2.0        # 2× risk for squeeze targets
 MIN_MASSIVE_WALL_GEX = 5_000_000  # Fallback threshold for POSITIVE regime filter
 
@@ -577,11 +577,9 @@ class GammaSqueeze(BaseStrategy):
         wall_gex = breakout["wall_gex"]
         wall_side = breakout["wall_side"]
 
-        # Net gamma direction alignment
-        if direction == Direction.LONG and net_gamma <= 0:
-            return None  # Long signal but dealers not buying
-        if direction == Direction.SHORT and net_gamma >= 0:
-            return None  # Short signal but dealers not selling
+        # Net gamma direction alignment — breakouts accelerate in NEGATIVE gamma
+        if net_gamma >= 0:
+            return None  # Positive gamma = mean reversion, not breakout acceleration
 
         # Liquidity-aware stop placement (replaces fixed 1% stops)
         stop = self._liquidity_aware_stop(
@@ -654,7 +652,6 @@ class GammaSqueeze(BaseStrategy):
         depth_snapshot: Optional[Dict[str, Any]] = None,
         wall_strength: float = 0.5,
         liquidity_vacuum: float = 0.0,
-        depth_score: Optional[float] = None,
     ) -> float:
         """
         Confidence for squeeze trade.

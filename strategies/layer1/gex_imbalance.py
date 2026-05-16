@@ -54,7 +54,7 @@ STRONG_CALL_RATIO = 0.75     # very strong short signal
 MIN_MESSAGES = 20            # minimum data points for signal quality
 STOP_VOL_MULT = 2.5          # stop = 2.5x rolling price std dev
 TARGET_RISK_MULT = 1.5       # target = 1.5x stop distance
-MIN_CONFIDENCE = 0.15        # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.10        # Minimum confidence to emit signal
 
 # v2 Imbalance-Velocity constants
 RATIO_ROC_WINDOW = 5         # Number of ticks back for ROC
@@ -146,10 +146,10 @@ class GEXImbalance(BaseStrategy):
         # Regime intensity
         regime_intensity = self._compute_regime_intensity(regime, net_gamma, bias)
 
-        # Compute confidence with 6-component scoring
+        # Compute confidence with 5-component scoring
         confidence = self._compute_confidence_v2(
             ratio, bias_strength, bias, regime_intensity, total_msgs,
-            vwap_dev, roc, depth_alignment
+            vwap_dev, depth_alignment
         )
         if confidence < MIN_CONFIDENCE:
             return []
@@ -364,14 +364,12 @@ class GEXImbalance(BaseStrategy):
     def _compute_confidence_v2(
         self, ratio: float, bias_strength: float, bias: str,
         regime_intensity: float, total_msgs: int,
-        vwap_dev: Optional[float], roc: Optional[float],
-        depth_alignment: Optional[float],
-        depth_score: Optional[float] = None,
+        vwap_dev: Optional[float], depth_alignment: Optional[float],
     ) -> float:
         """
         Compute confidence for GEX imbalance signal.
 
-        Family A — simple average of 4 normalized components:
+        Family A — simple average of 5 normalized components:
 
             1. Ratio extremity: how extreme the call/put ratio is.
                For put-heavy: ratio in [0, PUT_HEAVY_RATIO], lower = higher.
@@ -379,9 +377,7 @@ class GEXImbalance(BaseStrategy):
             2. Bias strength: in [0, 1], how extreme the imbalance is.
             3. Depth alignment: in [0, 1], liquidity support for bias.
             4. VWAP deviation: in [0, 3.0] std-dev units, further = higher.
-
-        Future (Phase 5):
-            depth_score: if provided, used as 5th component.
+            5. Regime alignment: in [-0.10, 0.15], aligned regimes boost confidence.
 
         Returns 0.0–1.0.
         """
@@ -410,6 +406,10 @@ class GEXImbalance(BaseStrategy):
         else:
             norm_vwap = 0.0  # no data
 
-        confidence = (norm_ratio + norm_bias + norm_depth + norm_vwap) / 4.0
+        # 5. Regime alignment: in [-0.10, 0.15]
+        norm_regime = (regime_intensity + 0.10) / 0.25  # Normalize to [0, 1]
+        norm_regime = max(0.0, min(1.0, norm_regime))
+
+        confidence = (norm_ratio + norm_bias + norm_depth + norm_vwap + norm_regime) / 5.0
 
         return min(1.0, max(0.0, confidence))

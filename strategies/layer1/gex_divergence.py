@@ -52,7 +52,7 @@ logger = logging.getLogger("Syngex.Strategies.GEXDivergence")
 DIVERGENCE_MIN_SLOPE = 0.0005   # Minimum slope magnitude (0.05% — catches subtler divergences)
 DIVERGENCE_WINDOW = 30           # Number of points for slope calculation
 CONFIRMATION_CANDLE_PCT = 0.002  # 0.2% candle for confirmation
-MIN_CONFIDENCE = 0.15            # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.10            # Minimum confidence to emit signal (relaxed for v2 Structural-Decay)
 STOP_PCT = 0.005                 # 0.5% stop
 TARGET_RISK_MULT = 1.5           # 1.5× risk for target
 MIN_DATA_POINTS = 15             # Minimum data points for slope calculation
@@ -410,21 +410,19 @@ class GEXDivergence(BaseStrategy):
         gamma_accel: Optional[Dict] = None,
         wall_bonus: float = 0.0,
         regime_intensity: float = 0.0,
-        depth_score: Optional[float] = None,
     ) -> float:
         """
-        Compute divergence signal confidence.
+        Compute divergence signal confidence with v2 Structural-Decay integration.
 
-        Family A — simple average of 5 normalized components:
+        7-component formula (v2):
 
-            1. Price slope: abs(price_slope) in [0, 0.01], higher = higher.
-            2. Gamma slope: abs(gamma_slope) in [0, 0.01], higher = higher.
+            1. Price slope: abs(price_slope) in [0, 0.01], higher = higher confidence.
+            2. Gamma slope: abs(gamma_slope) in [0, 0.01], higher = higher confidence.
             3. Balance (slope ratio): min(|price|, |gamma|) / max(|price|, |gamma|) in [0, 1].
             4. Data quality: min(window counts) in [MIN_DATA_POINTS, MIN_DATA_POINTS+100].
             5. Regime alignment: 1.0 if aligned, 0.5 if not.
-
-        Future (Phase 5):
-            depth_score: if provided, used as 5th component instead of regime.
+            6. Wall proximity bonus: [0, 0.15] — price near gamma wall in divergence direction.
+            7. Regime intensity bonus: [0, 0.10] — |net_gamma| magnitude bonus.
 
         Returns 0.0–1.0.
         """
@@ -457,7 +455,14 @@ class GEXDivergence(BaseStrategy):
         else:
             norm_regime = 0.5
 
-        confidence = (norm_price + norm_gamma + norm_balance + norm_data + norm_regime) / 5.0
+        # 6. Wall proximity bonus: already [0, 0.15]
+        norm_wall = wall_bonus
+
+        # 7. Regime intensity bonus: already [0, 0.10]
+        norm_regime_intensity = regime_intensity
+
+        # Updated 7-component formula (v2 Structural-Decay integration):
+        confidence = (norm_price + norm_gamma + norm_balance + norm_data + norm_regime + norm_wall + norm_regime_intensity) / 7.0
 
         return min(1.0, max(0.0, confidence))
 

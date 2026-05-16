@@ -208,11 +208,19 @@ class DeltaVolumeExhaustion(BaseStrategy):
         if not liq_vacuum:
             return None
 
-        # 4. Compute confidence (v2 — 6 components)
+        # Wall proximity (bonus, not a gate) — compute BEFORE confidence
+        wall_dist_pct, nearest_wall_type, wall_proximity_bonus = (
+            self._check_wall_proximity(
+                price, trend_direction, gex_calc
+            )
+        )
+
+        # 4. Compute confidence (v2 — 6 components + bonuses)
         confidence = self._compute_confidence(
             trend_strength, delta_decline, liq_vacuum,
             net_gamma, regime, trend_direction,
             rolling_data=rolling_data,
+            wall_proximity_bonus=wall_proximity_bonus,
         )
         if confidence < MIN_CONFIDENCE:
             return None
@@ -238,14 +246,6 @@ class DeltaVolumeExhaustion(BaseStrategy):
         reason = (
             f"{trend_direction} trend exhausted: delta declining "
             f"(below avg) + liquidity vacuum — fade the move"
-        )
-
-        # Wall proximity (bonus, not a gate)
-        wall_dist_pct, nearest_wall_type, wall_proximity_bonus = (
-            self._check_wall_proximity(
-                price, trend_direction, gex_calc
-            )
-        )
 
         return Signal(
             direction=direction,
@@ -506,9 +506,21 @@ class DeltaVolumeExhaustion(BaseStrategy):
         regime: str,
         trend_direction: str,
         rolling_data: Optional[Dict[str, Any]] = None,
-        depth_score: Optional[float] = None,
+        wall_proximity_bonus: float = 0.0,
     ) -> float:
-        """Combine all v2 factors into confidence score (Family A simple average)."""
+        """Combine all v2 factors into confidence score (6 components).
+
+        Components:
+            1. Trend strength (0.0–0.20)
+            2. Delta decline (0.0–0.20) — hard gate
+            3. Liquidity vacuum (0.0–0.20) — hard gate
+            4. IV acceleration (-0.05 to +0.15)
+            5. Net gamma (0.0–0.20)
+            6. Regime alignment (0.0–0.10)
+            7. Wall proximity bonus (0.0–0.10)
+
+        Final confidence is the average of all 6 core components plus bonuses.
+        """
         def normalize(val, vmin, vmax):
             return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
 
@@ -536,8 +548,16 @@ class DeltaVolumeExhaustion(BaseStrategy):
         # 5. Net gamma: abs(net_gamma) from 0→5M, higher = higher
         c5 = normalize(abs(net_gamma), 0.0, 5000000.0)
 
-        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
-        return min(1.0, max(0.0, confidence))
+        # 6. Regime alignment (0.0–0.10)
+        regime_align = self._regime_alignment(regime, net_gamma, trend_direction)
+
+        # 7. Wall proximity bonus (0.0–0.10)
+        wall_bonus = wall_proximity_bonus  # Already scaled 0-0.10
+
+        # Average of 6 core components, then add bonuses
+        base_confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+        confidence = min(1.0, base_confidence + regime_align + wall_bonus)
+        return max(0.0, confidence)
 
     def _regime_alignment(
         self, regime: str, net_gamma: float, trend_direction: str

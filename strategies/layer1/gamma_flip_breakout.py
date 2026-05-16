@@ -52,7 +52,7 @@ FLIP_ZONE_PCT = 0.015           # 1.5% — the transition zone around flip
 STOP_OTHER_SIDE_PCT = 0.01      # 1% — stop on other side of flip
 ATR_MULT = 1.5                   # 1.5× rolling range as ATR proxy
 TARGET_RR = 2.5                  # 1:2.5 risk-reward minimum
-MIN_CONFIDENCE = 0.15            # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.10            # Minimum confidence to emit signal
 MIN_GAMMA_STRENGTH = 100000      # Minimum |net_gamma| for regime confidence
 
 # Regime-adjusted stop multipliers
@@ -346,7 +346,10 @@ class GammaFlipBreakout(BaseStrategy):
         net_gamma_5m = _extract_float(rolling_data, KEY_NET_GAMMA_5M, 0.0)
 
         # Distance to wall from flip_mid
-        distance_to_wall_pct = abs(price - flip_mid) / price if price > 0 else 0.0
+        if wall:
+            distance_to_wall_pct = abs(price - wall["strike"]) / price if price > 0 else 0.0
+        else:
+            distance_to_wall_pct = abs(price - flip_mid) / price if price > 0 else 0.0
 
         # Wall GEX and depth from gex_calc
         wall_gex = gex_calc.get_wall_gex(flip_mid) if hasattr(gex_calc, 'get_wall_gex') else 0.0
@@ -437,7 +440,10 @@ class GammaFlipBreakout(BaseStrategy):
         net_gamma_5m = _extract_float(rolling_data, KEY_NET_GAMMA_5M, 0.0)
 
         # Distance to wall from flip_mid
-        distance_to_wall_pct = abs(price - flip_mid) / price if price > 0 else 0.0
+        if wall:
+            distance_to_wall_pct = abs(price - wall["strike"]) / price if price > 0 else 0.0
+        else:
+            distance_to_wall_pct = abs(price - flip_mid) / price if price > 0 else 0.0
 
         # Wall GEX and depth from gex_calc
         wall_gex = gex_calc.get_wall_gex(flip_mid) if hasattr(gex_calc, 'get_wall_gex') else 0.0
@@ -576,7 +582,10 @@ class GammaFlipBreakout(BaseStrategy):
         net_gamma_5m = _extract_float(rolling_data, KEY_NET_GAMMA_5M, 0.0)
 
         # Distance to wall from flip_mid
-        distance_to_wall_pct = abs(price - flip_mid) / price if price > 0 else 0.0
+        if wall:
+            distance_to_wall_pct = abs(price - wall["strike"]) / price if price > 0 else 0.0
+        else:
+            distance_to_wall_pct = abs(price - flip_mid) / price if price > 0 else 0.0
 
         # Wall GEX and depth from gex_calc
         wall_gex = gex_calc.get_wall_gex(flip_mid) if hasattr(gex_calc, 'get_wall_gex') else 0.0
@@ -666,7 +675,10 @@ class GammaFlipBreakout(BaseStrategy):
         net_gamma_5m = _extract_float(rolling_data, KEY_NET_GAMMA_5M, 0.0)
 
         # Distance to wall from flip_mid
-        distance_to_wall_pct = abs(price - flip_mid) / price if price > 0 else 0.0
+        if wall:
+            distance_to_wall_pct = abs(price - wall["strike"]) / price if price > 0 else 0.0
+        else:
+            distance_to_wall_pct = abs(price - flip_mid) / price if price > 0 else 0.0
 
         # Wall GEX and depth from gex_calc
         wall_gex = gex_calc.get_wall_gex(flip_mid) if hasattr(gex_calc, 'get_wall_gex') else 0.0

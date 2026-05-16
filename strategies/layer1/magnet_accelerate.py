@@ -260,17 +260,17 @@ class MagnetAccelerate(BaseStrategy):
         if abs(distance_from_magnet) > MAX_BREAKOUT_PCT:
             return None
 
-        # Direction in NEGATIVE regime: opposite of Phase 1
-        # Price below magnet → oversold bounce (LONG)
-        # Price above magnet → overextended pullback (SHORT)
+        # Direction in NEGATIVE regime: breakout continuation
+        # Price below magnet → SHORT (breakout down continues)
+        # Price above magnet → LONG (breakout up continues)
         if distance_from_magnet < 0:
-            # Price below magnet in NEGATIVE regime → LONG (oversold bounce)
-            direction = Direction.LONG
-            stop = magnet_strike * (1 - TRAIL_STOP_PCT)
-        else:
-            # Price above magnet in NEGATIVE regime → SHORT (overextended)
+            # Price below magnet in NEGATIVE regime → SHORT (breakout down)
             direction = Direction.SHORT
             stop = magnet_strike * (1 + TRAIL_STOP_PCT)
+        else:
+            # Price above magnet in NEGATIVE regime → LONG (breakout up)
+            direction = Direction.LONG
+            stop = magnet_strike * (1 - TRAIL_STOP_PCT)
 
         # Confidence: further from magnet + stronger negative gamma
         confidence = self._phase2_confidence(
