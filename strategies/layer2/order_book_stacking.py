@@ -69,7 +69,7 @@ def normalize(val: float, vmin: float, vmax: float) -> float:
 
 logger = logging.getLogger("Syngex.Strategies.OrderBookStacking")
 
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 
 class OrderBookStacking(BaseStrategy):
@@ -432,7 +432,7 @@ class OrderBookStacking(BaseStrategy):
     def _compute_confidence(
         self, signal_type, direction, sis_bid, sis_ask, bid_roc, ask_roc,
         vol_ratio, spread, avg_spread, rolling_data, data, params, regime,
-        gex_calc, depth_score=None,
+        gex_calc,
     ):
         """Combine all factors into a single confidence score — 5 components.
 
@@ -440,13 +440,24 @@ class OrderBookStacking(BaseStrategy):
         """
         intensity_threshold = params.get("intensity_threshold", 0.5)
 
-        # Select based on signal type and direction
-        if signal_type.startswith("SPOOF"):
-            intensity = top_wall_size
-            decay_val = decay
+        # Get top_wall from rolling data based on direction
+        top_wall_key = (
+            KEY_TOP_WALL_BID_SIZE_5M if direction == "LONG" else KEY_TOP_WALL_ASK_SIZE_5M
+        )
+        top_wall_rw = rolling_data.get(top_wall_key)
+        top_wall = top_wall_rw.values[-1] if top_wall_rw and top_wall_rw.count > 0 else 0
+
+        # Compute avg_level_size for intensity calculation
+        avg_level_size = self._compute_avg_level_size(rolling_data)
+
+        # Select decay based on direction (use ROC values as decay proxy)
+        decay_val = ask_roc if direction == "SHORT" else bid_roc
+
+        # Compute intensity based on wall significance
+        if top_wall > 0 and avg_level_size > 0:
+            intensity = top_wall / avg_level_size
         else:
-            intensity = avg_level_size / top_wall_size if top_wall_size > 0 else 1.0
-            decay_val = decay
+            intensity = 1.0
 
         # 1. Intensity: intensity from threshold→2.0, higher = higher
         c1 = normalize(intensity, intensity_threshold, 2.0)
@@ -455,7 +466,7 @@ class OrderBookStacking(BaseStrategy):
         c2 = normalize(abs(decay_val), 0.0, 0.5)
 
         # 3. Wall significance: wall_ratio from 1→10, higher = higher
-        wall_ratio = top_wall_size / avg_level_size if avg_level_size > 0 else 1.0
+        wall_ratio = top_wall / avg_level_size if avg_level_size > 0 else 1.0
         c3 = normalize(wall_ratio, 1.0, 10.0)
 
         # 4. Volume: vol_ratio from 0→2.0, higher = higher

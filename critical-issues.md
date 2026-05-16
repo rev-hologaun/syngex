@@ -2,7 +2,7 @@
 
 **Purpose:** Track critical bugs found during strategy audit that require Hologaun review
 **Created:** Sat 2026-05-16 02:11 PDT
-**Last Updated:** (awaiting findings)
+**Last Updated:** Sat 2026-05-16 02:15 PDT (Batch 2)
 
 ---
 
@@ -10,7 +10,7 @@
 
 | Strategy | Issue | Severity | Status | Recommendation |
 |----------|-------|----------|--------|----------------|
-| *(none yet)* | — | — | — | — |
+| **STACKING** | `_compute_confidence()` uses undefined variables: `top_wall_size`, `decay` | Critical | 🔴 **Pending Fix** | Code does not compile - needs immediate fix |
 
 ---
 
@@ -21,6 +21,7 @@ A **critical issue** is any bug that could cause:
 - Incorrect gamma regime requirements
 - Position sizing errors
 - Stop/target miscalculations
+- **Code that doesn't compile**
 - Data corruption or crashes
 
 **Non-critical issues** (auto-fixed, logged here for reference):

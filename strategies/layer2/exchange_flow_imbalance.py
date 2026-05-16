@@ -57,7 +57,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.ExchangeFlowImbalance")
 
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 
 class ExchangeFlowImbalance(BaseStrategy):
@@ -359,7 +359,6 @@ class ExchangeFlowImbalance(BaseStrategy):
         params: Dict[str, Any],
         regime: str,
         gex_calc: Any,
-        depth_score: Optional[float] = None,
     ) -> float:
         """
         Compute 5-component simple average confidence score (Family A).

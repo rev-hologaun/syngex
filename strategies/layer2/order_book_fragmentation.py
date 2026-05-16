@@ -58,7 +58,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.OrderBookFragmentation")
 
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 
 def normalize(val: float, vmin: float, vmax: float) -> float:
@@ -439,7 +439,6 @@ class OrderBookFragmentation(BaseStrategy):
     def _compute_confidence(
         self, signal_type, direction, frag_bid, frag_ask, decay_bid, decay_ask,
         vol_ratio, spread, avg_spread, rolling_data, params, avg_wall_size,
-        depth_score=None,
     ):
         """Combine all factors into a single confidence score — 5 components.
 

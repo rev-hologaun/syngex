@@ -36,7 +36,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.ParticipantDiversityConviction")
 
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 
 def normalize(val: float, vmin: float, vmax: float) -> float:
@@ -320,7 +320,7 @@ class ParticipantDiversityConviction(BaseStrategy):
     def _compute_confidence(
         self, bid_participants, ask_participants, bid_exchanges, ask_exchanges,
         bid_conviction, ask_conviction, conviction, direction, rolling_data,
-        data, params, regime, gex_calc, depth_score=None,
+        data, params, regime, gex_calc,
     ):
         """Combine all factors into a single confidence score — 5 components.
 
