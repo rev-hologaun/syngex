@@ -7,7 +7,10 @@ __pycache__/
 *.pyo
 
 # Data files (runtime output)
-data/
+data/gex_state_*.json
+data/phi_state_*.json
+data/level2/
+data/orb1/
 
 # IDE
 .idea/
