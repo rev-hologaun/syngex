@@ -9,3 +9,7 @@ pyyaml
 flask
 flask-socketio
 python-socketio[asyncio]
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+websockets
+httpx

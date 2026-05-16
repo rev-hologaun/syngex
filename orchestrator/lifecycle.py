@@ -313,6 +313,7 @@ class SyngexOrchestrator:
 
         # Signal tracking
         self._signal_tracker: SignalTracker | None = None
+        self._websocket_server = None
 
         # Message counters
         self._call_update_count: int = 0
@@ -416,6 +417,9 @@ class SyngexOrchestrator:
         # Wire callback
         self._client.set_on_message_callback(self._on_message)
 
+        # Initialize WebSocket server if enabled
+        await self._init_websocket_server()
+
         # Subscribe to streams
         self._client.subscribe_to_quotes(self.symbol)
         self._client.subscribe_to_option_chain(self.symbol)
@@ -429,6 +433,26 @@ class SyngexOrchestrator:
         assert self._client is not None
         logger.info("Connecting to TradeStation streams...")
         await self._client.connect()
+
+    async def _init_websocket_server(self) -> None:
+        """Initialize WebSocket server if enabled in config."""
+        try:
+            ws_enabled = self._strategy_config.get("websocket", {}).get("enabled", False)
+            ws_host = self._strategy_config.get("websocket", {}).get("host", "0.0.0.0")
+            ws_port = self._strategy_config.get("websocket", {}).get("port", 8202)
+            ws_timeout = self._strategy_config.get("websocket", {}).get("timeout", 5000)
+
+            if ws_enabled:
+                from websocket_server import SyngexWebSocketServer
+
+                self._websocket_server = SyngexWebSocketServer(
+                    host=ws_host, port=ws_port, timeout=ws_timeout
+                )
+                await self._websocket_server.start()
+            else:
+                logger.debug("WebSocket server disabled in config")
+        except Exception as e:
+            logger.warning(f"WebSocket server initialization failed: {e}")
 
     async def run(self) -> None:
         """
@@ -513,6 +537,10 @@ class SyngexOrchestrator:
         if self._strategy_engine:
             self._strategy_engine.stop()
             logger.info("Strategy engine: %d signals produced", self._strategy_engine.signal_count)
+
+        # Stop WebSocket server FIRST (before other cleanup)
+        if self._websocket_server:
+            await self._websocket_server.stop()
 
         self._stop_dashboard()
         self._stop_heatmap()
