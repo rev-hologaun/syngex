@@ -96,10 +96,8 @@ from .rolling_keys_ext import (
 )
 
 from .stream_processor import (
-    process_underlying_update,
-    process_option_update,
-    process_market_depth,
     _compute_linear_slope,
+    StreamProcessor,
 )
 
 __all__ = [
