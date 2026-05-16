@@ -48,7 +48,7 @@ def normalize(val: float, vmin: float, vmax: float) -> float:
     return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
 
 
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 
 class SmileDynamics(BaseStrategy):
@@ -306,16 +306,12 @@ class SmileDynamics(BaseStrategy):
         rolling_data: Dict[str, Any],
         params: Dict[str, Any],
         regime: str,
-        depth_score=None,
     ) -> float:
         """
         Compute 5-component confidence score (Family A).
 
         Returns 0.0–1.0.
         """
-        if getattr(self, '_regime_mismatch', False):
-            # Phase 1: regime-soft mode — 30% penalty for mismatch
-            confidence *= 0.7
         # 1. Ω magnitude: current_omega from 0→5, higher = higher
         c1 = normalize(current_omega, 0.0, 5.0)
         # 2. Ω velocity: current_omega_roc from -0.1 to 0.1, use abs
@@ -328,4 +324,9 @@ class SmileDynamics(BaseStrategy):
         # 5. Call slope: normalize to [0,1]
         c5 = normalize(abs(current_call_slope), 0.0, 0.5)
         confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+        
+        # Apply penalty AFTER calculation
+        if getattr(self, '_regime_mismatch', False):
+            confidence *= 0.7
+        
         return min(1.0, max(0.0, confidence))

@@ -47,7 +47,7 @@ def normalize(val: float, vmin: float, vmax: float) -> float:
     return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
 
 
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 
 class SkewDynamics(BaseStrategy):
@@ -302,16 +302,12 @@ class SkewDynamics(BaseStrategy):
         rolling_data: Dict[str, Any],
         params: Dict[str, Any],
         regime: str,
-        depth_score=None,
     ) -> float:
         """
         Compute 5-component confidence score (Family A).
 
         Returns 0.0–1.0.
         """
-        if getattr(self, '_regime_mismatch', False):
-            # Phase 1: regime-soft mode — 30% penalty for mismatch
-            confidence *= 0.7
         # 1. Ψ magnitude: current_psi from 0→5, higher = higher
         c1 = normalize(current_psi, 0.0, 5.0)
         # 2. Ψ velocity: current_psi_roc from -0.1 to 0.1, use abs
@@ -326,4 +322,9 @@ class SkewDynamics(BaseStrategy):
         call_slope = rolling_data.get("call_slope", 0.0)
         c5 = normalize(abs(call_slope), 0.0, 0.5)
         confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+        
+        # Apply penalty AFTER calculation
+        if getattr(self, '_regime_mismatch', False):
+            confidence *= 0.7
+        
         return min(1.0, max(0.0, confidence))

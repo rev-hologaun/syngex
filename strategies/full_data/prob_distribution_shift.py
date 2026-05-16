@@ -84,7 +84,7 @@ MIN_NET_GAMMA = 500000.0
 STOP_PCT = 0.005                    # 0.5% stop
 
 # Min confidence (raised from 0.25 → 0.35 for v2)
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 # Min strikes with data
 MIN_STRIKES_WITH_DATA = 5           # Need at least 5 strikes for distribution
@@ -614,7 +614,6 @@ class ProbDistributionShift(BaseStrategy):
         skew_coupled: bool,
         momentum: float,
         greeks_summary: Dict[str, Any],
-        depth_score=None,
     ) -> float:
         """
         Compute confidence for a distribution-shift signal (Family A — 5 components).

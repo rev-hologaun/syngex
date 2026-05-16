@@ -89,7 +89,7 @@ VOLUME_SPIKE_RATIO = 1.30               # 130% of avg (1.3×)
 STOP_PCT = 0.005                        # 0.5% stop
 
 # Min confidence — raised from 0.25 to 0.35 (v2 Conviction-Master)
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 # Min data points — need more data for extrinsic tracking
 MIN_DATA_POINTS = 5
@@ -394,7 +394,6 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         extrinsic_accel: Optional[float],
         aggressor_ratio: Optional[float],
         skew_coupled: bool,
-        depth_score=None,
     ) -> float:
         """
         Compute confidence using 5 unified components for all signal types (Family A).
