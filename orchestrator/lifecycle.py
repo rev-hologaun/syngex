@@ -41,7 +41,7 @@ import yaml
 # Logging — strict, zero-noise
 # ---------------------------------------------------------------------------
 _noisy_loggers = {
-    "ingestor.tradestone_client": logging.WARNING,
+    "ingestor.tradestation_client": logging.WARNING,
     "GEXCalculator": logging.WARNING,
     "aiohttp": logging.WARNING,
     "httpx": logging.WARNING,
@@ -65,12 +65,12 @@ logger.addHandler(_handler)
 # ---------------------------------------------------------------------------
 from config.trade_guard import READ_ONLY
 if READ_ONLY:
-    logger.info("SAETY: READ-ONLY mode active — all order placement blocked")
+    logger.info("🔒 SAFETY: READ-ONLY mode active — all order placement blocked")
 
 # ---------------------------------------------------------------------------
 # Component imports
 # ---------------------------------------------------------------------------
-from ingestor.tradestone_client import TradeStationClient
+from ingestor.tradestation_client import TradeStationClient
 from engine.gex_calculator import GEXCalculator
 from strategies.engine import StrategyEngine, EngineConfig
 from strategies.filters.net_gamma_filter import NetGammaFilter
@@ -208,7 +208,9 @@ from strategies.rolling_keys import (
     KEY_WALL_GEX_5M,
     KEY_WALL_GEX_SIGMA_5M,
 )
-from strategies.rolling_keys_ext import EXTENDED_KEYS, EXTENDED_ROLLING_WINDOW_SIZES
+# Extended keys module not yet created - placeholder for future expansion
+EXTENDED_KEYS = []
+EXTENDED_ROLLING_WINDOW_SIZES = {}
 
 # Strategy imports
 from strategies.layer1 import (
