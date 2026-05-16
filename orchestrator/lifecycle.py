@@ -264,11 +264,7 @@ from strategies.full_data import (
 )
 
 # Stream processor for message handling
-from data.stream_processor import (
-    process_underlying_update,
-    process_option_update,
-    process_market_depth,
-)
+# Note: process_* functions moved to StreamProcessor class methods
 
 
 class SyngexOrchestrator:
