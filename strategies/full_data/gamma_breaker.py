@@ -54,7 +54,7 @@ def normalize(val: float, vmin: float, vmax: float) -> float:
     return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
 
 
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 
 class GammaBreaker(BaseStrategy):
@@ -325,16 +325,12 @@ class GammaBreaker(BaseStrategy):
         rolling_data: Dict[str, Any],
         params: Dict[str, Any],
         regime: str,
-        depth_score=None,
     ) -> float:
         """
         Compute 5-component confidence score (Family A).
 
         Returns 0.0–1.0.
         """
-        if getattr(self, '_regime_mismatch', False):
-            # Phase 1: regime-soft mode — 30% penalty for mismatch
-            confidence *= 0.7
         # 1. Γ_break magnitude: current_gamma_break from 0→0.01, higher = higher
         c1 = normalize(current_gamma_break, 0.0, 0.01)
         # 2. Wall proximity: current_wall_dist from 0→0.02, closer = higher, invert
@@ -346,4 +342,7 @@ class GammaBreaker(BaseStrategy):
         # 5. Wall GEX: current_wall_gex from 0→1M, higher = higher
         c5 = normalize(current_wall_gex, 0.0, 1000000.0)
         confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+        if getattr(self, '_regime_mismatch', False):
+            # Phase 1: regime-soft mode — 30% penalty for mismatch
+            confidence *= 0.7
         return min(1.0, max(0.0, confidence))

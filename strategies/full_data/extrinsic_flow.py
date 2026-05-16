@@ -51,7 +51,7 @@ def normalize(val: float, vmin: float, vmax: float) -> float:
     return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
 
 
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 
 class ExtrinsicFlow(BaseStrategy):
@@ -282,16 +282,12 @@ class ExtrinsicFlow(BaseStrategy):
         regime: str,
         rolling_data: Dict[str, Any],
         params: Dict[str, Any],
-        depth_score=None,
     ) -> float:
         """
         Compute 5-component confidence score (Family A).
 
         Returns 0.0–1.0.
         """
-        if getattr(self, '_regime_mismatch', False):
-            # Phase 1: regime-soft mode — 30% penalty for mismatch
-            confidence *= 0.7
         # 1. RΦ magnitude: phi_ratio from 0→5, higher = higher
         c1 = normalize(phi_ratio, 0.0, 5.0)
         # 2. Total phi: phi_total from 0→1, higher = higher
@@ -303,4 +299,7 @@ class ExtrinsicFlow(BaseStrategy):
         # 5. Put bias: phi_put from 0→5, higher = higher
         c5 = normalize(phi_put, 0.0, 5.0)
         confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+        if getattr(self, '_regime_mismatch', False):
+            # Phase 1: regime-soft mode — 30% penalty for mismatch
+            confidence *= 0.7
         return min(1.0, max(0.0, confidence))

@@ -47,7 +47,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.VortexCompressionBreakout")
 
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 
 def normalize(val: float, vmin: float, vmax: float) -> float:
@@ -238,7 +238,7 @@ class VortexCompressionBreakout(BaseStrategy):
 
     def _compute_confidence(
         self, spread_z, liq_density, part_eq, vol_spike, spread_widening,
-        direction, rolling_data, data, params, regime, gex_calc, depth_score=None,
+        direction, rolling_data, data, params, regime, gex_calc,
     ):
         """Combine all factors into a single confidence score — 5 components.
 

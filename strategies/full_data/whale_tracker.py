@@ -49,7 +49,7 @@ def normalize(val: float, vmin: float, vmax: float) -> float:
     return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
 
 
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 
 class WhaleTracker(BaseStrategy):
@@ -349,16 +349,12 @@ class WhaleTracker(BaseStrategy):
         regime: str,
         gex_calc: Any,
         data: Dict[str, Any],
-        depth_score=None,
     ) -> float:
         """
         Compute 5-component confidence score (Family A).
 
         Returns 0.0–1.0.
         """
-        if getattr(self, '_regime_mismatch', False):
-            # Phase 1: regime-soft mode — 30% penalty for mismatch
-            confidence *= 0.7
         # 1. Concentration magnitude: current_conc_ratio from 0→1, higher = higher
         c1 = normalize(current_conc_ratio, 0.0, 1.0)
         # 2. Concentration sigma: current_conc_sigma from 0→5, higher = higher
@@ -370,4 +366,7 @@ class WhaleTracker(BaseStrategy):
         # 5. Participant diversity: current_participants from 0→5, higher = higher
         c5 = normalize(current_participants, 0.0, 5.0)
         confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+        if getattr(self, '_regime_mismatch', False):
+            # Phase 1: regime-soft mode — 30% penalty for mismatch
+            confidence *= 0.7
         return min(1.0, max(0.0, confidence))
