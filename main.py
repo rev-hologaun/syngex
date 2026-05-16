@@ -770,7 +770,8 @@ class SyngexOrchestrator:
 
             return total_proxy if strike_count >= 3 else None
 
-        except Exception:
+        except Exception as e:
+            logger.debug("Extrinsic proxy calculation skipped: %s", e)
             return None
 
     def _calculate_prob_momentum(
@@ -821,7 +822,8 @@ class SyngexOrchestrator:
 
             return total_momentum if contributing >= 5 else None
 
-        except Exception:
+        except Exception as e:
+            logger.debug("Probability momentum calculation skipped: %s", e)
             return None
 
     # ------------------------------------------------------------------
@@ -856,8 +858,8 @@ class SyngexOrchestrator:
                         delta_density = self._calculator.get_total_delta_activity()
                         if delta_density is not None and KEY_DELTA_DENSITY_5M in self._rolling_data:
                             self._rolling_data[KEY_DELTA_DENSITY_5M].push(delta_density, ts)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Delta density tracking skipped: %s", e)
 
             # Periodically update net_gamma rolling window
             if self._calculator._msg_count % 20 == 0:
@@ -903,8 +905,8 @@ class SyngexOrchestrator:
                                 self._phi_call_tick += phi
                             elif side == "put":
                                 self._phi_put_tick += phi
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Phi accumulator update skipped: %s", e)
 
             # Update Layer 2 rolling windows
             gex_summary = self._calculator.get_greeks_summary()
@@ -955,8 +957,8 @@ class SyngexOrchestrator:
                     iv_skew = self._calculator.get_iv_skew()
                     if iv_skew is not None:
                         self._rolling_data[KEY_IV_SKEW_5M].push(iv_skew)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("IV skew calculation skipped: %s", e)
 
                 # iv_skew_squeeze v2 — Skew ROC (rate of change over 5m window)
                 try:
@@ -967,8 +969,8 @@ class SyngexOrchestrator:
                         if abs(first_val) > 0:
                             skew_roc = (iv_skew - first_val) / abs(first_val)
                             self._rolling_data[KEY_SKEW_ROC_5M].push(skew_roc)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Skew ROC calculation skipped: %s", e)
 
                 # IV Skew Dynamics — Ψ (Skewness Coefficient)
                 # Ψ = (IV_Put_Wing - IV_Call_Wing) / IV_ATM
@@ -1042,8 +1044,8 @@ class SyngexOrchestrator:
                                     ) / len(vals)
                                     std_psi = math.sqrt(var)
                                     psi_sigma_window.push(std_psi, ts)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Skew PSI dynamics calculation skipped: %s", e)
 
                 # IV Smile Dynamics — Ω (Curvature Asymmetry Index)
                 # Ω = |Slope_Put_Wing| / |Slope_Call_Wing|
@@ -1123,8 +1125,8 @@ class SyngexOrchestrator:
                                         ) / len(vals)
                                         std_omega = math.sqrt(var)
                                         omega_sigma_window.push(std_omega, ts)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Smile dynamics (Omega) calculation skipped: %s", e)
 
                 # volume_up_5m / volume_down_5m — call/put update counts as proxy
                 self._rolling_data[KEY_VOLUME_UP_5M].push(self._call_update_count)
@@ -1154,8 +1156,8 @@ class SyngexOrchestrator:
                         else:
                             ext_accel = 0.0
                         self._rolling_data[KEY_EXTRINSIC_ROC_5M].push(ext_accel, time.time())
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Extrinsic ROC calculation skipped: %s", e)
 
                 # Commit per-tick Φ accumulators to rolling windows
                 if self._phi_call_tick > 0 or self._phi_put_tick > 0:
@@ -1239,8 +1241,8 @@ class SyngexOrchestrator:
 
                             gb_w = self._rolling_data.get(KEY_GAMMA_BREAK_INDEX_5M)
                             if gb_w: gb_w.push(gamma_break, ts)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Gamma Breaker calculation skipped: %s", e)
 
                 # Iron Anchor — Confluence Detection
                 # Ω_conf = |Price_GammaWall - Price_LiquidityWall|
@@ -1301,8 +1303,8 @@ class SyngexOrchestrator:
                                     mean_l = sum(vals) / len(vals)
                                     var = sum((x - mean_l) ** 2 for x in vals) / len(vals)
                                     liq_sig_w.push(math.sqrt(var), ts)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Iron Anchor confluence detection skipped: %s", e)
 
                 # Sentiment Sync — Γ_sync (Synchronization Engine)
                 # Γ_sync = Sign(ΔSkew) × Sign(Aggressor_VSI)
@@ -1354,8 +1356,8 @@ class SyngexOrchestrator:
 
                         vsi_mag_w = self._rolling_data.get(KEY_VSI_MAGNITUDE_5M)
                         if vsi_mag_w: vsi_mag_w.push(abs(current_vsi), ts)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Sentiment Sync calculation skipped: %s", e)
 
                 # prob_momentum_5m — probability distribution momentum
                 prob_mom = self._calculate_prob_momentum(gex_summary)
@@ -1382,8 +1384,7 @@ class SyngexOrchestrator:
                             momentum_accel = 0.0
                         self._rolling_data[KEY_MOMENTUM_ROC_5M].push(momentum_accel, time.time())
                 except Exception as e:
-                    logger.warning(f"Phi accumulator error: {e}")
-                    pass
+                    logger.warning("Probability distribution shift (momentum ROC) failed: %s", e)
 
                 # Push per-strike ATM delta and IV for delta_iv_divergence
                 atm_price = self._calculator.underlying_price
@@ -1403,8 +1404,8 @@ class SyngexOrchestrator:
                             if abs(first_delta) > 0:
                                 delta_roc = (atm_delta - first_delta) / abs(first_delta)
                                 self._rolling_data[KEY_DELTA_ROC_5M].push(delta_roc)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("ATM delta ROC calculation skipped: %s", e)
 
                     atm_iv = self._calculator.get_iv_by_strike(atm_strike)
                     if atm_iv is not None and KEY_ATM_IV_5M in self._rolling_data:
@@ -1455,8 +1456,8 @@ class SyngexOrchestrator:
                                             self._rolling_data[KEY_MAGNET_DELTA_5M].push(delta_roc, time.time())
                                     else:
                                         self._rolling_data[KEY_MAGNET_DELTA_5M].push(current_delta, time.time())
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Prob weighted magnet (delta ROC) calculation skipped: %s", e)
 
                 # ── theta_burn v2: Wall delta tracking ──
                 try:
@@ -1471,13 +1472,13 @@ class SyngexOrchestrator:
                                         dd = self._calculator.get_delta_by_strike(ws)
                                         nd = dd.get("net_delta", 0.0)
                                         wall_deltas.append(nd)
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    logger.debug("Wall delta fetch skipped for strike: %s", e)
                             if wall_deltas:
                                 avg_wall_delta = sum(wall_deltas) / len(wall_deltas)
                                 self._rolling_data[KEY_WALL_DELTA_5M].push(avg_wall_delta)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Theta burn (wall delta) calculation skipped: %s", e)
 
                 # ── iv_band_breakout v2: Skew width (|OTM Put IV - OTM Call IV|) ──
                 try:
@@ -1493,8 +1494,8 @@ class SyngexOrchestrator:
                         if otm_put_iv is not None and otm_put_iv > 0 and otm_call_iv is not None and otm_call_iv > 0:
                             skew_width = abs(otm_put_iv - otm_call_iv)
                             self._rolling_data[KEY_SKEW_WIDTH_5M].push(skew_width)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("IV band breakout (skew width) calculation skipped: %s", e)
 
                 # ── delta_iv_divergence v2: OTM Delta/IV and Delta-IV correlation ──
                 try:
@@ -1569,8 +1570,8 @@ class SyngexOrchestrator:
                                     corr = 0.0
                                 if KEY_DELTA_IV_CORR_5M in self._rolling_data:
                                     self._rolling_data[KEY_DELTA_IV_CORR_5M].push(corr)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Delta-IV divergence calculation skipped: %s", e)
 
                 # Push flow_ratio to rolling window for call_put_flow_asymmetry v2
                 try:
@@ -1598,8 +1599,8 @@ class SyngexOrchestrator:
 
                     if KEY_FLOW_RATIO_5M in self._rolling_data:
                         self._rolling_data[KEY_FLOW_RATIO_5M].push(flow_ratio)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Call-put flow asymmetry calculation skipped: %s", e)
 
                 # ── iv_gex_divergence v2: IV skew gradient ──
                 try:
@@ -1618,8 +1619,8 @@ class SyngexOrchestrator:
                                     self._rolling_data[KEY_IV_SKEW_GRADIENT_5M].push(
                                         iv_skew,
                                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("IV-GEX divergence (skew gradient) calculation skipped: %s", e)
 
                 # ── iv_gex_divergence v2: Gamma density ──
                 try:
@@ -1643,8 +1644,8 @@ class SyngexOrchestrator:
                             self._rolling_data[KEY_GAMMA_DENSITY_5M].push(
                                 gamma_density,
                             )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("IV-GEX divergence (gamma density) calculation skipped: %s", e)
 
                 # ── Strike Concentration v2: net delta at top-OI strikes ──
                 try:
@@ -1670,8 +1671,8 @@ class SyngexOrchestrator:
                             delta_data = self._calculator.get_delta_by_strike(strike)
                             total_net_delta += delta_data.get("net_delta", 0.0)
                         self._rolling_data[KEY_STRIKE_DELTA_5M].push(total_net_delta)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Strike concentration (delta) calculation skipped: %s", e)
 
 
 
@@ -2438,13 +2439,13 @@ class SyngexOrchestrator:
                                     )
                                     if parts_w:
                                         parts_w.push(best_participants, ts)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Concentration ratio calculation skipped: %s", e)
 
 
 
         except Exception as exc:
-            logger.error("Error processing message: %s", exc, exc_info=True)
+            logger.error("Message processing failed (critical): %s", exc, exc_info=True)
 
     def _evaluate_strategies(self) -> None:
         """Run strategy evaluation with current market state."""
@@ -2831,7 +2832,7 @@ class SyngexOrchestrator:
                 venv_streamlit,
             )
         except Exception as exc:
-            logger.warning("Failed to start Command Center: %s", exc)
+            logger.warning("Command Center (Streamlit) startup failed: %s", exc)
 
     def _stop_dashboard(self) -> None:
         """Terminate the Streamlit Command Center subprocess."""
@@ -2842,11 +2843,12 @@ class SyngexOrchestrator:
         try:
             self._dashboard_process.terminate()
             self._dashboard_process.wait(timeout=5)
-        except Exception:
+        except Exception as e:
+            logger.debug("Dashboard termination failed, attempting kill: %s", e)
             try:
                 self._dashboard_process.kill()
-            except Exception:
-                pass
+            except Exception as kill_exc:
+                logger.debug("Dashboard kill also failed: %s", kill_exc)
         finally:
             self._dashboard_process = None
 
@@ -2911,7 +2913,7 @@ class SyngexOrchestrator:
                 "Ensure flask and flask-socketio are installed.",
             )
         except Exception as exc:
-            logger.warning("Failed to start Heatmap Dashboard: %s", exc)
+            logger.warning("Heatmap Dashboard startup failed: %s", exc)
 
     def _stop_heatmap(self) -> None:
         """Terminate the Heatmap Dashboard subprocess."""
@@ -2922,17 +2924,18 @@ class SyngexOrchestrator:
         try:
             self._heatmap_process.terminate()
             self._heatmap_process.wait(timeout=5)
-        except Exception:
+        except Exception as e:
+            logger.debug("Heatmap termination failed, attempting kill: %s", e)
             try:
                 self._heatmap_process.kill()
-            except Exception:
-                pass
+            except Exception as kill_exc:
+                logger.debug("Heatmap kill also failed: %s", kill_exc)
         finally:
             if self._heatmap_stderr is not None:
                 try:
                     self._heatmap_stderr.close()
-                except Exception:
-                    pass
+                except Exception as close_exc:
+                    logger.debug("Heatmap stderr close failed: %s", close_exc)
                 self._heatmap_stderr = None
             self._heatmap_process = None
 
@@ -2961,7 +2964,7 @@ class SyngexOrchestrator:
                 json.dump(state, f)
             self._phi_last_write = now
         except Exception as exc:
-            logger.debug("Failed to persist phi accumulators: %s", exc)
+            logger.debug("Phi accumulator persistence failed: %s", exc)
 
     def _load_phi_accumulators(self) -> None:
         """Load persisted phi tick accumulators from disk on startup.
@@ -2982,7 +2985,7 @@ class SyngexOrchestrator:
                     self._phi_call_tick, self._phi_put_tick,
                 )
         except Exception as exc:
-            logger.debug("Failed to load phi accumulators: %s", exc)
+            logger.debug("Phi accumulator load failed: %s", exc)
 
     # ------------------------------------------------------------------
     # GEX State Export (shared file for Streamlit)
