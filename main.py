@@ -94,8 +94,13 @@ async def main() -> None:
 
     # Graceful shutdown on signals
     loop = asyncio.get_running_loop()
+    _shutdown_called = False
 
     def _signal_handler() -> None:
+        nonlocal _shutdown_called
+        if _shutdown_called:
+            return
+        _shutdown_called = True
         logger.info("Shutdown signal received.")
         asyncio.ensure_future(orchestrator.shutdown())
 
@@ -115,7 +120,8 @@ async def main() -> None:
     except Exception as exc:
         logger.critical("Pipeline failure: %s", exc, exc_info=True)
     finally:
-        await orchestrator.shutdown()
+        if not _shutdown_called:
+            await orchestrator.shutdown()
 
 
 if __name__ == "__main__":

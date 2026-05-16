@@ -37,35 +37,8 @@ from typing import Any, Dict, List, Optional, Type
 
 import yaml
 
-# ---------------------------------------------------------------------------
-# Logging — strict, zero-noise
-# ---------------------------------------------------------------------------
-_noisy_loggers = {
-    "ingestor.tradestation_client": logging.WARNING,
-    "GEXCalculator": logging.WARNING,
-    "aiohttp": logging.WARNING,
-    "httpx": logging.WARNING,
-    "asyncio": logging.WARNING,
-}
-for _name, _level in _noisy_loggers.items():
-    logging.getLogger(_name).setLevel(_level)
-    logging.getLogger(_name).handlers.clear()
-
+# Logger configured in main.py — reuse it
 logger = logging.getLogger("Syngex")
-logger.setLevel(logging.INFO)
-
-_handler = logging.StreamHandler(sys.stdout)
-_handler.setFormatter(
-    logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
-)
-logger.addHandler(_handler)
-
-# ---------------------------------------------------------------------------
-# Safety — READ-ONLY enforcement
-# ---------------------------------------------------------------------------
-from config.trade_guard import READ_ONLY
-if READ_ONLY:
-    logger.info("🔒 SAFETY: READ-ONLY mode active — all order placement blocked")
 
 # ---------------------------------------------------------------------------
 # Component imports
@@ -264,7 +237,11 @@ from strategies.full_data import (
 )
 
 # Stream processor for message handling
-# Note: process_* functions moved to StreamProcessor class methods
+from data.stream_processor_stubs import (
+    process_underlying_update,
+    process_option_update,
+    process_market_depth,
+)
 
 
 class SyngexOrchestrator:
