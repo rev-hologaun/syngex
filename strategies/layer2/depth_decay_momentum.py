@@ -43,7 +43,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.DepthDecayMomentum")
 
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 
 class DepthDecayMomentum(BaseStrategy):
@@ -200,7 +200,6 @@ class DepthDecayMomentum(BaseStrategy):
             top5_bid, top5_ask, vol_ratio_window,
             depth_snapshot, rolling_data,
             direction, regime, gex_calc,
-            depth_score=None,
         )
 
         min_confidence = MIN_CONFIDENCE
@@ -276,7 +275,6 @@ class DepthDecayMomentum(BaseStrategy):
         _direction: str,  # noqa: ARG002 — used for clarity
         regime: str,
         gex_calc: Any,
-        depth_score=None,
     ) -> float:
         """
         Compute 5-component confidence score (Family A: simple average).

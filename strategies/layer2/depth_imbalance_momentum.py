@@ -167,7 +167,6 @@ class DepthImbalanceMomentum(BaseStrategy):
             current_ir, current_ir_roc, direction,
             rolling_data, data, params,
             regime, gex_calc,
-            depth_score=None,
         )
 
         min_confidence = MIN_CONFIDENCE
@@ -332,7 +331,6 @@ class DepthImbalanceMomentum(BaseStrategy):
         params: Dict[str, Any],
         regime: str,
         gex_calc: Any,
-        depth_score=None,
     ) -> float:
         """
         Compute 5-component confidence score (Family A: simple average).

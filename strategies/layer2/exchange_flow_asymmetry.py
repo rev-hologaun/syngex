@@ -49,7 +49,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.ExchangeFlowAsymmetry")
 
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 
 class ExchangeFlowAsymmetry(BaseStrategy):
@@ -235,7 +235,6 @@ class ExchangeFlowAsymmetry(BaseStrategy):
             exchange_ask_sizes,
             data,
             params,
-            depth_score=None,
         )
 
         min_confidence = MIN_CONFIDENCE
@@ -401,7 +400,6 @@ class ExchangeFlowAsymmetry(BaseStrategy):
         exchange_ask_sizes: Dict[str, int],
         data: Dict[str, Any],
         params: Dict[str, Any],
-        depth_score=None,
     ) -> float:
         """
         Compute 5-component confidence score (Family A: simple average).

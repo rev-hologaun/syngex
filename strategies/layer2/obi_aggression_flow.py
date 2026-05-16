@@ -239,7 +239,6 @@ class ObiAggressionFlow(BaseStrategy):
         direction: str,
         regime: str,
         gex_calc: Any,
-        depth_score: Optional[float] = None,
     ) -> float:
         """
         Compute 5-component simple average confidence score (Family A).
