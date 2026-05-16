@@ -246,6 +246,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
         reason = (
             f"{trend_direction} trend exhausted: delta declining "
             f"(below avg) + liquidity vacuum — fade the move"
+        )
 
         return Signal(
             direction=direction,
