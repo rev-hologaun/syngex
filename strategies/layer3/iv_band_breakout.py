@@ -61,7 +61,7 @@ STOP_PCT = 0.005  # 0.5% stop
 TARGET_PCT = 0.010  # 1.0% target
 
 # Min/max confidence
-MIN_CONFIDENCE = 0.15  # Raised from 0.25, lowered to 0.15 for global confluence hunting
+MIN_CONFIDENCE = 0.10  # Raised from 0.25, lowered to 0.10 for global confluence hunting
 
 # Min data points
 MIN_DATA_POINTS = 5

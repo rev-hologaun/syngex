@@ -75,7 +75,7 @@ STOP_PCT = 0.005                   # 0.5% stop
 TARGET_PCT = 0.008                 # 0.8% target (1.6:1 R:R)
 
 # Min confidence — raised from 0.25 to 0.35 for v2
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 # Min data points
 MIN_DATA_POINTS = 5                # Need data for basic checks
@@ -439,7 +439,6 @@ class IVSkewSqueeze(BaseStrategy):
         volume_ratio: Optional[float],
         net_gamma: float,
         direction: str,
-        depth_score=None,
     ) -> float:
         """
         Compute unified confidence for LONG and SHORT signals (Family A).

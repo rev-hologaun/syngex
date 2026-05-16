@@ -92,7 +92,7 @@ MAX_TARGET_PCT = 0.004      # 0.4% max target
 RANGE_NARROWNESS_RATIO = 0.40  # 40%
 
 # Min confidence — raised from 0.25 to 0.35 for v2
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.10
 
 # Min data points
 MIN_DATA_POINTS = 3
