@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Syngex Ultimate Control Center - TSLA</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/grid.css">
+</head>
+<body>
+    <div class="dashboard">
+        <!-- HEADER -->
+        <header class="header">
+            <div class="header-left">
+                <span class="symbol">TSLA</span>
+                <span class="price">$418.57</span>
+            </div>
+            <div class="header-center">
+                <span class="net-gamma gamma-pos">Net Gamma: +7</span>
+                <span class="separator">|</span>
+                <span class="oi">OI: 32 strikes</span>
+                <span class="separator">|</span>
+                <span class="strategies">41 strategies</span>
+            </div>
+            <div class="header-right">
+                <span class="ws-status connected">● WebSocket: Connected</span>
+            </div>
+        </header>
+
+        <!-- PROFILE TABS -->
+        <nav class="profile-tabs" id="profileTabs">
+            <button class="tab active" data-chart="gamma">Gamma</button>
+            <button class="tab" data-chart="oi">OI</button>
+            <button class="tab" data-chart="volume">Volume</button>
+            <button class="tab" data-chart="flow">Flow</button>
+            <button class="tab" data-chart="gex">GEX</button>
+            <button class="tab" data-chart="iv">IV</button>
+            <button class="tab" data-chart="greeks">Greeks</button>
+        </nav>
+
+        <!-- MAIN CONTENT GRID -->
+        <main class="main-grid">
+            <!-- PROFILE CHART PANEL -->
+            <section class="panel profile-chart-panel">
+                <div class="panel-header">
+                    <h3 id="chartSectionTitle">Profile Chart</h3>
+                </div>
+                <div class="chart-wrapper">
+                    <!-- Single chart container (when 1 selected) -->
+                    <div class="chart-container single" id="singleChartContainer">
+                        <canvas id="profileChart" width="700" height="300"></canvas>
+                    </div>
+                    
+                    <!-- Dual chart container (when 2 selected) -->
+                    <div class="chart-container dual" id="dualChartContainer" style="display: none;">
+                        <div class="chart-half">
+                            <canvas id="profileChart1" width="340" height="300"></canvas>
+                        </div>
+                        <div class="chart-half">
+                            <canvas id="profileChart2" width="340" height="300"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- RISK METRICS + DOMINANT LEVELS PANELS -->
+            <section class="panel risk-metrics-panel">
+                <div class="panel-header">
+                    <h3>Risk Metrics + OHLC</h3>
+                </div>
+                <div class="metrics-heatmap" id="riskMetrics">
+                    <!-- Populated by JS -->
+                </div>
+            </section>
+
+            <section class="panel dominant-levels-panel">
+                <div class="panel-header">
+                    <h3>Dominant Levels Heatmap</h3>
+                </div>
+                <div class="heatmap-grid" id="dominantLevelsHeatmap">
+                    <!-- Populated by JS -->
+                </div>
+            </section>
+
+            <!-- ACTIVE STRATEGIES HEATMAP -->
+            <section class="panel strategy-grid-panel">
+                <div class="panel-header">
+                    <h3>Active Strategies Heatmap</h3>
+                </div>
+                <div class="strategy-heatmap" id="strategyGrid">
+                    <!-- Populated by JS -->
+                </div>
+            </section>
+
+            <!-- SYSTEM LOG STREAM -->
+            <section class="panel system-log-panel">
+                <div class="panel-header log-header">
+                    <h3>System Log Stream</h3>
+                    <div class="log-filters">
+                        <button class="filter-btn active" data-filter="all">All</button>
+                        <button class="filter-btn" data-filter="SIGNAL">Signal</button>
+                        <button class="filter-btn" data-filter="ALERT">Alert</button>
+                        <button class="filter-btn" data-filter="GEX">GEX</button>
+                        <button class="filter-btn" data-filter="FLOW">Flow</button>
+                    </div>
+                </div>
+                <div class="log-stream" id="logStream">
+                    <!-- Populated by JS -->
+                </div>
+            </section>
+        </main>
+
+        <!-- FOOTER -->
+        <footer class="footer">
+            <div class="footer-left">
+                <span class="footer-stat">Total: 52</span>
+                <span class="footer-stat">Active: 8</span>
+            </div>
+            <div class="footer-center">
+                <span class="footer-stat pnl-pos">P&L: +$12.4K</span>
+            </div>
+            <div class="footer-right">
+                <span class="ws-status connected">● Connected</span>
+            </div>
+        </footer>
+    </div>
+
+    <script src="js/data.js"></script>
+    <script src="js/websocket.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

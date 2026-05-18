@@ -427,9 +427,10 @@ class TradeStationClient:
                             data = json.loads(line_str)
                             msg = self._normalize_depth_quotes(data)
                             now = time.time()
-                            if now - self._depth_quotes_last_ts < self._depth_window:
-                                continue  # skip this tick, keep streaming
-                            self._depth_quotes_last_ts = now
+#  uncomment these lines to enable the throttle
+#                            if now - self._depth_quotes_last_ts < self._depth_window:
+#                                continue  # skip this tick, keep streaming
+#                            self._depth_quotes_last_ts = now
                             self._dispatch(msg)
                         except json.JSONDecodeError:
                             pass
