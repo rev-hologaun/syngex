@@ -138,3 +138,42 @@ class NetGammaFilter:
         self._flip_buffer = value
         logger = logging.getLogger("Syngex.Core.NetGammaFilter")
         logger.info("Flip buffer updated to $%.2f", value)
+
+    def evaluate_signal(self, signal) -> bool:
+        """Determine if a signal should pass the regime filter.
+
+        Args:
+            signal: Signal object with direction and entry attributes.
+
+        Returns:
+            True if signal passes, False if blocked.
+        """
+        # Block all signals during transition
+        if self._transitioning:
+            return False
+
+        # Check signal direction alignment with regime
+        # This requires a Signal object, so we need to check direction
+        if hasattr(signal, 'direction'):
+            direction = signal.direction
+            if hasattr(direction, 'value'):
+                direction = direction.value
+        else:
+            direction = signal.get('direction', '') if isinstance(signal, dict) else ''
+
+        if self._regime == Regime.POSITIVE:
+            # Positive regime: fade extremes
+            # LONG when price < flip (buy dip), SHORT when price > flip (sell rally)
+            if direction == 'LONG':
+                return (self._underlying_price or 0) < (self._flip_strike or 0)
+            elif direction == 'SHORT':
+                return (self._underlying_price or 0) > (self._flip_strike or 0)
+        else:
+            # Negative regime: trend-follow
+            # LONG when price > flip (breakout), SHORT when price < flip (breakdown)
+            if direction == 'LONG':
+                return (self._underlying_price or 0) > (self._flip_strike or 0)
+            elif direction == 'SHORT':
+                return (self._underlying_price or 0) < (self._flip_strike or 0)
+
+        return False
