@@ -47,7 +47,7 @@ logger = logging.getLogger("Syngex.Strategies.ThetaBurn")
 # ---------------------------------------------------------------------------
 
 # Net gamma must be strongly positive (threshold to avoid weak signals)
-MIN_NET_GAMMA = 5000.0
+MIN_NET_GAMMA = 500000.0
 
 # Wall proximity for bounce trades
 WALL_PROXIMITY_PCT = 0.005  # 0.5%
@@ -79,7 +79,7 @@ MIDNIGHT_UTC_START = 16.5   # 16:30 UTC
 MIDNIGHT_UTC_END = 19.5     # 19:30 UTC
 
 # Gamma strength normalization for confidence
-GAMMA_STRENGTH_HIGH = 1_000_000.0  # Above this = max gamma strength bonus
+GAMMA_STRENGTH_HIGH = 500_000.0  # Above this = max gamma strength bonus
 
 
 class ThetaBurn(BaseStrategy):

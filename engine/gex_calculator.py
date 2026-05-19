@@ -256,7 +256,7 @@ class GEXCalculator:
             "quote_updates": self._quote_count,
         }
 
-    def get_gamma_walls(self, threshold: float = 1e6) -> List[Dict[str, Any]]:
+    def get_gamma_walls(self, threshold: float = 500_000) -> List[Dict[str, Any]]:
         """
         Identify Gamma Walls — strikes with massive GEX.
 
