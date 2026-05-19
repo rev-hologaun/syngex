@@ -235,7 +235,13 @@ class SyngexOrchestrator:
             KEY_WALL_DELTA_5M: RollingWindow(window_type="time", window_size=300),
             KEY_ATM_DELTA_5M: RollingWindow(window_type="time", window_size=300),
             KEY_ATM_IV_5M: RollingWindow(window_type="time", window_size=300),
-            # Layer 3 / full_data rolling windows (missing feeds)
+            # Layer 3 / full_data rolling windows (now populated via _on_message)
+            # KEY_VOLUME_UP_5M: call update count proxy
+            # KEY_VOLUME_DOWN_5M: put update count proxy  
+            # KEY_TOTAL_GAMMA_5M: from GEXCalculator.get_net_gamma()
+            # KEY_IV_SKEW_5M: from GEXCalculator.get_iv_skew()
+            # KEY_EXTRINSIC_PROXY_5M: from _calculate_extrinsic_proxy()
+            # KEY_PROB_MOMENTUM_5M: from _calculate_prob_momentum()
             KEY_VOLUME_UP_5M: RollingWindow(window_type="time", window_size=300),
             KEY_VOLUME_DOWN_5M: RollingWindow(window_type="time", window_size=300),
             KEY_TOTAL_GAMMA_5M: RollingWindow(window_type="time", window_size=300),
@@ -699,26 +705,6 @@ class SyngexOrchestrator:
                 prob_mom = self._calculate_prob_momentum(gex_summary)
                 if prob_mom is not None:
                     self._rolling_data[KEY_PROB_MOMENTUM_5M].push(prob_mom)
-
-                # Push probability momentum for prob_distribution_shift
-                try:
-                    atm_strike = self._calculator.get_atm_strike(self._calculator.underlying_price)
-                    if atm_strike is not None and KEY_PROB_MOMENTUM_5M in self._rolling_data:
-                        momentum = 0.0
-                        for strike_str, strike_data in gex_summary.items():
-                            try:
-                                strike = float(strike_str)
-                            except (ValueError, TypeError):
-                                continue
-                            call_delta = strike_data.get("call_delta_sum", 0.0)
-                            put_delta = strike_data.get("put_delta_sum", 0.0)
-                            if call_delta == 0 and put_delta == 0:
-                                continue
-                            distance = strike - atm_strike
-                            momentum += (call_delta - put_delta) * distance
-                        self._rolling_data[KEY_PROB_MOMENTUM_5M].push(momentum, time.time())
-                except Exception:
-                    pass
 
                 # Push per-strike ATM delta and IV for delta_iv_divergence
                 atm_price = self._calculator.underlying_price
