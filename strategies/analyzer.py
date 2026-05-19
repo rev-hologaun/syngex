@@ -12,13 +12,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
-import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
-from .signal_tracker import SignalTracker, SignalOutcome
+from .signal_tracker import SignalTracker
 
 
 def cmd_summary(tracker: SignalTracker) -> None:

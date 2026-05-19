@@ -20,7 +20,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
 from typing import Any, Callable, Dict, List, Optional
 
 import aiohttp
@@ -44,7 +43,7 @@ class TradeStationClient:
         4. stop() → graceful shutdown
     """
 
-    BASE_URL = "https://sim-api.tradestation.com/v3"
+    BASE_URL = "https://api.tradestation.com/v3"
 
     def __init__(self, base_url: str | None = None) -> None:
         self.base_url = base_url or self.BASE_URL

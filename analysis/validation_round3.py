@@ -12,7 +12,6 @@ Analyzes each strategy on its own across 5 dimensions:
 
 import json
 import os
-import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 

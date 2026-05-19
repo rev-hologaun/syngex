@@ -420,7 +420,6 @@ class GammaFlipBreakout(BaseStrategy):
     ) -> float:
         """Confidence for fade signals (above flip)."""
         # Risk/reward: tighter risk = higher confidence (0.2–0.3)
-        rr = TARGET_RR
         risk_conf = 0.2 + 0.1 * min(1.0, 0.005 / (risk / price))
 
         # Gamma strength: stronger positive gamma = better fade (0.2–0.3)

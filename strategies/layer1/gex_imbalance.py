@@ -34,8 +34,7 @@ Confidence factors:
 from __future__ import annotations
 
 import logging
-import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
@@ -79,9 +78,6 @@ class GEXImbalance(BaseStrategy):
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
             return []
-
-        ts = data.get("timestamp", time.time())
-        symbol = data.get("symbol", "")
 
         gex_calc = data.get("gex_calculator")
         if gex_calc is None:

@@ -446,11 +446,9 @@ class ProbWeightedMagnet(BaseStrategy):
         total_oi = target["total_oi"]
         net_delta = target["net_delta"]
         distance_pct = target["distance_pct"]
-        max_oi = max(s["total_oi"] for s in qualifying) if qualifying else total_oi
 
         # 1. OI concentration (0.20–0.30)
         #    Normalize against max OI in qualifying set
-        oi_ratio = total_oi / max_oi if max_oi > 0 else 0.5
         # Scale: MIN_OI_CONCENTRATION = baseline, 10× that = full weight
         oi_scaled = min(1.0, (total_oi - MIN_OI_CONCENTRATION) / (MIN_OI_CONCENTRATION * 9))
         oi_component = 0.20 + 0.10 * oi_scaled

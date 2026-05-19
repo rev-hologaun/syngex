@@ -110,9 +110,6 @@ class MagnetAccelerate(BaseStrategy):
         if magnet_gex < MIN_MAGNET_GEX:
             return []
 
-        ts = data.get("timestamp", time.time())
-        symbol = data.get("symbol", "")
-
         signals: List[Signal] = []
 
         # Phase 1: Magnet pull (bidirectional in POSITIVE regime)

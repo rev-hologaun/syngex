@@ -45,7 +45,7 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
-from strategies.rolling_keys import KEY_VOLUME_5M, KEY_VOLUME_UP_5M, KEY_VOLUME_DOWN_5M
+from strategies.rolling_keys import KEY_VOLUME_UP_5M, KEY_VOLUME_DOWN_5M
 from strategies.utils import normalize_confidence
 
 logger = logging.getLogger("Syngex.Strategies.CallPutFlowAsymmetry")

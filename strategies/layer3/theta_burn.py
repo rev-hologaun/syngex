@@ -33,54 +33,29 @@ Confidence factors:
 from __future__ import annotations
 
 import logging
-import math
 from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_keys import KEY_PRICE_5M, KEY_PRICE_30M, KEY_VOLUME_5M
 from strategies.utils import normalize_confidence
+from config.parameters import (
+    THETA_BURN_MIN_NET_GAMMA as MIN_NET_GAMMA,
+    THETA_BURN_WALL_PROXIMITY_PCT as WALL_PROXIMITY_PCT,
+    THETA_BURN_STOP_PAST_WALL_PCT as STOP_PAST_WALL_PCT,
+    THETA_BURN_MIN_TARGET_PCT as MIN_TARGET_PCT,
+    THETA_BURN_MAX_TARGET_PCT as MAX_TARGET_PCT,
+    THETA_BURN_RANGE_NARROWNESS_RATIO as RANGE_NARROWNESS_RATIO,
+    THETA_BURN_DIVERGENCE_VOLUME_THRESHOLD as DIVERGENCE_VOLUME_THRESHOLD,
+    THETA_BURN_MIN_CONFIDENCE as MIN_CONFIDENCE,
+    THETA_BURN_MAX_CONFIDENCE as MAX_CONFIDENCE,
+    THETA_BURN_MIN_DATA_POINTS as MIN_DATA_POINTS,
+    THETA_BURN_GAMMA_STRENGTH_HIGH as GAMMA_STRENGTH_HIGH,
+    THETA_BURN_MIDDAY_UTC_START as MIDNIGHT_UTC_START,
+    THETA_BURN_MIDDAY_UTC_END as MIDNIGHT_UTC_END,
+)
 
 logger = logging.getLogger("Syngex.Strategies.ThetaBurn")
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-# Net gamma must be strongly positive (threshold to avoid weak signals)
-MIN_NET_GAMMA = 500000.0
-
-# Wall proximity for bounce trades
-WALL_PROXIMITY_PCT = 0.005  # 0.5%
-
-# Stop loss: beyond the wall
-STOP_PAST_WALL_PCT = 0.003  # 0.3% beyond the wall
-
-# Quick targets: 0.2-0.4% from entry
-MIN_TARGET_PCT = 0.002      # 0.2% min target
-MAX_TARGET_PCT = 0.004      # 0.4% max target
-
-# Range narrowness: 5m range must be < this % of 30m range
-RANGE_NARROWNESS_RATIO = 0.40  # 40%
-
-# Rejection signal thresholds
-DIVERGENCE_VOLUME_THRESHOLD = 0.80  # Volume < 80% of avg = declining
-
-# Min confidence
-MIN_CONFIDENCE = 0.25
-MAX_CONFIDENCE = 0.80  # Micro-signal cap, lower for pin trades
-
-# Min data points
-MIN_DATA_POINTS = 3
-
-# Midday lull window in UTC (11:30-14:30 ET = 16:30-19:30 UTC)
-# Using LA timezone (PDT = UTC-7), so 11:30-14:30 ET = 18:30-21:30 UTC
-# But we use UTC timestamps directly: 16:30-19:30 UTC
-MIDNIGHT_UTC_START = 16.5   # 16:30 UTC
-MIDNIGHT_UTC_END = 19.5     # 19:30 UTC
-
-# Gamma strength normalization for confidence
-GAMMA_STRENGTH_HIGH = 500_000.0  # Above this = max gamma strength bonus
 
 
 class ThetaBurn(BaseStrategy):
@@ -475,8 +450,6 @@ class ThetaBurn(BaseStrategy):
         but volume is declining = buying exhaustion.
         """
         latest = price_window.latest
-        window_min = price_window.min
-        window_max = price_window.max
         vol_latest = vol_window.latest
         vol_avg = vol_window.mean
 

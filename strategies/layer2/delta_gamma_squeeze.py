@@ -36,38 +36,20 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
-from strategies.rolling_keys import KEY_PRICE_5M, KEY_VOLUME_5M, KEY_TOTAL_DELTA_5M, KEY_WALL_DELTA_5M
+from strategies.rolling_keys import KEY_PRICE_5M, KEY_VOLUME_5M, KEY_WALL_DELTA_5M
+
+from config.parameters import (
+    DELTA_GAMMA_SQUEEZE_WALL_PROXIMITY_PCT as WALL_PROXIMITY_PCT,
+    DELTA_GAMMA_SQUEEZE_DELTA_ACCEL_RATIO as DELTA_ACCEL_RATIO,
+    DELTA_GAMMA_SQUEEZE_VOLUME_SPIKE_RATIO as VOLUME_SPIKE_RATIO,
+    DELTA_GAMMA_SQUEEZE_MIN_WALL_GEX as MIN_WALL_GEX,
+    DELTA_GAMMA_SQUEEZE_MIN_DATA_POINTS as MIN_DATA_POINTS,
+    DELTA_GAMMA_SQUEEZE_MIN_CONFIDENCE as MIN_CONFIDENCE,
+    DELTA_GAMMA_SQUEEZE_STOP_BELOW_WALL_PCT as STOP_BELOW_WALL_PCT,
+    DELTA_GAMMA_SQUEEZE_TARGET_RISK_MULT as TARGET_RISK_MULT,
+)
 
 logger = logging.getLogger("Syngex.Strategies.DeltaGammaSqueeze")
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-# How close price must be to call wall (as fraction of price)
-WALL_PROXIMITY_PCT = 0.03             # 3% (was 2%) — wider wall proximity
-
-# Minimum delta acceleration ratio: current delta must exceed rolling avg by this
-DELTA_ACCEL_RATIO = 1.10              # 10% above rolling avg (was 15%)
-
-# Volume spike threshold: current volume must exceed rolling avg by this
-VOLUME_SPIKE_RATIO = 1.20             # 20% above rolling avg
-
-# Minimum wall GEX to consider
-MIN_WALL_GEX = 500000
-
-# Price must be above rolling mean for squeeze confirmation
-PRICE_ABOVE_MEAN_CONFIDENCE = 0.55    # Price in upper half of 5m window
-
-# Min rolling window data points required
-MIN_DATA_POINTS = 3                   # Fewer points needed (was 5)
-
-# Minimum confidence threshold
-MIN_CONFIDENCE = 0.25
-
-# Stop and target parameters
-STOP_BELOW_WALL_PCT = 0.008           # 0.8% below entry
-TARGET_RISK_MULT = 2.0                # 2× risk for target
 
 
 class DeltaGammaSqueeze(BaseStrategy):
@@ -167,7 +149,7 @@ class DeltaGammaSqueeze(BaseStrategy):
         # Direction-specific proximity check
         if direction == "LONG":
             distance_pct = (wall_strike - price) / price
-            if distance_pct > WALL_PROXIMITY_PCT:
+            if distance_pct > DELTA_GAMMA_SQUEEZE_WALL_PROXIMITY_PCT:
                 logger.debug(
                     "Squeeze: price %.2f too far from wall %.2f (dist=%.2f%%)",
                     price, wall_strike, distance_pct * 100,
@@ -192,7 +174,7 @@ class DeltaGammaSqueeze(BaseStrategy):
         accel_ratio = self._check_delta_acceleration(
             wall_delta, rolling_data, wall_strike,
         )
-        if accel_ratio is None or accel_ratio < DELTA_ACCEL_RATIO:
+        if accel_ratio is None or accel_ratio < DELTA_GAMMA_SQUEEZE_DELTA_ACCEL_RATIO:
             logger.debug(
                 "Squeeze: no delta acceleration at %.2f (ratio=%.2f)",
                 wall_strike, accel_ratio or 0,
@@ -217,9 +199,9 @@ class DeltaGammaSqueeze(BaseStrategy):
 
         # Build signal with direction-specific entry/stop/target
         entry = price
-        stop = entry * (1 - STOP_BELOW_WALL_PCT) if direction == "LONG" else entry * (1 + STOP_BELOW_WALL_PCT)
+        stop = entry * (1 - DELTA_GAMMA_SQUEEZE_STOP_BELOW_WALL_PCT) if direction == "LONG" else entry * (1 + DELTA_GAMMA_SQUEEZE_STOP_BELOW_WALL_PCT)
         risk = abs(entry - stop)
-        target = entry + (risk * TARGET_RISK_MULT) if direction == "LONG" else entry - (risk * TARGET_RISK_MULT)
+        target = entry + (risk * DELTA_GAMMA_SQUEEZE_TARGET_RISK_MULT) if direction == "LONG" else entry - (risk * DELTA_GAMMA_SQUEEZE_TARGET_RISK_MULT)
         direction_enum = Direction.LONG if direction == "LONG" else Direction.SHORT
 
         return Signal(
@@ -265,7 +247,7 @@ class DeltaGammaSqueeze(BaseStrategy):
         avg. > 1.0 means accelerating.
         """
         window = rolling_data.get(KEY_WALL_DELTA_5M)
-        if window is None or window.count < MIN_DATA_POINTS:
+        if window is None or window.count < DELTA_GAMMA_SQUEEZE_MIN_DATA_POINTS:
             return None
 
         rolling_avg = window.mean
@@ -293,7 +275,7 @@ class DeltaGammaSqueeze(BaseStrategy):
         if current is None or avg is None or avg == 0:
             return False
 
-        return current > avg * VOLUME_SPIKE_RATIO
+        return current > avg * DELTA_GAMMA_SQUEEZE_VOLUME_SPIKE_RATIO
 
     def _check_price_momentum(self, rolling_data: Dict[str, Any]) -> str:
         """Check price momentum from rolling window."""
@@ -320,7 +302,7 @@ class DeltaGammaSqueeze(BaseStrategy):
         """
         # 1. Proximity to wall (0.25–0.35)
         # Closer = higher confidence
-        proximity_conf = 0.25 + 0.10 * (1 - distance_pct / WALL_PROXIMITY_PCT)
+        proximity_conf = 0.25 + 0.10 * (1 - distance_pct / DELTA_GAMMA_SQUEEZE_WALL_PROXIMITY_PCT)
 
         # 2. Delta acceleration (0.20–0.30)
         # Higher ratio = more urgency

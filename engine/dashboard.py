@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 from rich.console import Console
 from rich.layout import Layout
 from rich.live import Live
@@ -11,7 +11,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.align import Align
 
-from engine.gex_calculator import GEXCalculator
+
 
 class SyngexDashboard:
     """
@@ -40,7 +40,6 @@ class SyngexDashboard:
 
     def _make_header(self) -> Panel:
         sym = self.orchestrator.symbol
-        price = self.orchestrator._calculator.underlying_price
         status = "[green]RUNNING[/green]" if self.orchestrator._running else "[red]STOPPED[/red]"
         
         grid = Table.grid(expand=True)
@@ -59,7 +58,6 @@ class SyngexDashboard:
     def _make_left_panel(self) -> Panel:
         # This panel will show the Gamma Walls and Top Strikes
         calc = self.orchestrator._calculator
-        summary = calc.get_summary()
         
         # Gamma Walls
         walls = calc.get_gamma_walls(threshold=500000)
@@ -118,7 +116,7 @@ class SyngexDashboard:
 
     async def run_live(self) -> None:
         """The loop that drives the UI updates."""
-        with Live(self.layout, refresh_per_second=4, screen=True) as live:
+        with Live(self.layout, refresh_per_second=4, screen=True) as _:
             while self.orchestrator._running:
                 # Update Header
                 self.layout["header"].update(self._make_header())

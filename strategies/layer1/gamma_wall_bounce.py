@@ -26,7 +26,6 @@ Confidence factors:
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
@@ -85,8 +84,6 @@ class GammaWallBounce(BaseStrategy):
         walls = gex_calc.get_gamma_walls(threshold=MIN_WALL_GEX)
         if not walls:
             return []
-
-        ts = data.get("timestamp", time.time())
 
         price_above_walls = [w for w in walls if w["strike"] > underlying_price]
         price_below_walls = [w for w in walls if w["strike"] < underlying_price]

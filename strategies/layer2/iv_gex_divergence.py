@@ -37,7 +37,7 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
-from strategies.rolling_keys import KEY_PRICE_30M, KEY_TOTAL_DELTA_5M
+from strategies.rolling_keys import KEY_PRICE_30M
 from strategies.utils import normalize_confidence
 
 logger = logging.getLogger("Syngex.Strategies.IVGEXDivergence")

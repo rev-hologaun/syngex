@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
-from strategies.rolling_keys import KEY_PRICE_5M, KEY_VOLUME_5M, KEY_VOLUME_UP_5M, KEY_VOLUME_DOWN_5M, KEY_TOTAL_DELTA_5M, KEY_TOTAL_GAMMA_5M
+from strategies.rolling_keys import KEY_PRICE_5M, KEY_TOTAL_DELTA_5M, KEY_TOTAL_GAMMA_5M
 from strategies.utils import normalize_confidence
 
 logger = logging.getLogger("Syngex.Strategies.GammaVolumeConvergence")

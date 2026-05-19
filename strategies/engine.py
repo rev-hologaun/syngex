@@ -16,6 +16,10 @@ Architecture:
     (POSITIVE / NEGATIVE) that all strategies check before producing signals.
 
     Only signals that pass the filter reach the output.
+
+Logging:
+    - Structured logging with correlation IDs for signal lifecycle tracing
+    - Confidence scores, thresholds, and decisions logged at appropriate levels
 """
 
 from __future__ import annotations
@@ -23,13 +27,19 @@ from __future__ import annotations
 import json
 import logging
 import time
+import uuid
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-from .signal import Direction, Signal, SignalStrength
-from .rolling_window import RollingWindow
+from .signal import Direction, Signal
+
+# Import structured logging helper
+try:
+    from config.logging_config import log_with_correlation
+except ImportError:
+    log_with_correlation = None  # Fallback if not available
 
 logger = logging.getLogger("Syngex.StrategyEngine")
 
@@ -128,6 +138,7 @@ class StrategyEngine:
         self._last_signals: Dict[str, float] = {}  # strategy_id -> last signal time
         self._signal_count: int = 0
         self._tick_count: int = 0
+        self._correlation_id = str(uuid.uuid4())[:8]  # Engine instance correlation ID
 
         # In-memory ring buffer for recent signals (used by Command Center)
         self._recent_signals: List[Dict[str, Any]] = []  # last N signal dicts
@@ -137,8 +148,17 @@ class StrategyEngine:
         log_path = Path(self.config.signal_log_path)
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        logger.info("StrategyEngine initialized (min_confidence=%.2f, max_per_tick=%d)",
-                     self.config.min_confidence, self.config.max_signals_per_tick)
+        if log_with_correlation:
+            log_with_correlation(
+                logger, logging.INFO,
+                "StrategyEngine initialized",
+                correlation_id=self._correlation_id,
+                min_confidence=self.config.min_confidence,
+                max_signals_per_tick=self.config.max_signals_per_tick
+            )
+        else:
+            logger.info("StrategyEngine initialized (min_confidence=%.2f, max_per_tick=%d)",
+                         self.config.min_confidence, self.config.max_signals_per_tick)
 
     # ------------------------------------------------------------------
     # Registration
@@ -149,7 +169,16 @@ class StrategyEngine:
         if not strategy.strategy_id:
             raise ValueError(f"Strategy {type(strategy).__name__} has no strategy_id")
         self._strategies.append(strategy)
-        logger.info("Registered strategy: %s (layer=%s)", strategy.strategy_id, strategy.layer)
+        if log_with_correlation:
+            log_with_correlation(
+                logger, logging.INFO,
+                "Registered strategy",
+                correlation_id=self._correlation_id,
+                strategy_id=strategy.strategy_id,
+                layer=strategy.layer
+            )
+        else:
+            logger.info("Registered strategy: %s (layer=%s)", strategy.strategy_id, strategy.layer)
 
     def register_filter(self, callback: Callable[[Signal], bool]) -> None:
         """
@@ -159,7 +188,14 @@ class StrategyEngine:
         should pass, False if it should be blocked.
         """
         self._filter_callback = callback
-        logger.info("Regime filter registered")
+        if log_with_correlation:
+            log_with_correlation(
+                logger, logging.INFO,
+                "Regime filter registered",
+                correlation_id=self._correlation_id
+            )
+        else:
+            logger.info("Regime filter registered")
 
     def register_signal_handler(self, callback: Callable[[Signal], None]) -> None:
         """Register a handler for output signals (e.g., Command Center push)."""
@@ -172,12 +208,28 @@ class StrategyEngine:
     def start(self) -> None:
         """Start the engine."""
         self._running = True
-        logger.info("StrategyEngine started (%d strategies registered)", len(self._strategies))
+        if log_with_correlation:
+            log_with_correlation(
+                logger, logging.INFO,
+                "StrategyEngine started",
+                correlation_id=self._correlation_id,
+                strategy_count=len(self._strategies)
+            )
+        else:
+            logger.info("StrategyEngine started (%d strategies registered)", len(self._strategies))
 
     def stop(self) -> None:
         """Stop the engine."""
         self._running = False
-        logger.info("StrategyEngine stopped. Total signals: %d", self._signal_count)
+        if log_with_correlation:
+            log_with_correlation(
+                logger, logging.INFO,
+                "StrategyEngine stopped",
+                correlation_id=self._correlation_id,
+                signal_count=self._signal_count
+            )
+        else:
+            logger.info("StrategyEngine stopped. Total signals: %d", self._signal_count)
 
     # ------------------------------------------------------------------
     # Core evaluation
@@ -248,24 +300,50 @@ class StrategyEngine:
                     all_signals.append(signal)
                     self._last_signals[signal.strategy_id] = now
             except Exception as exc:
-                logger.error("Strategy %s error: %s", strategy.strategy_id, exc, exc_info=True)
+                if log_with_correlation:
+                    log_with_correlation(
+                        logger, logging.ERROR,
+                        "Strategy error",
+                        correlation_id=self._correlation_id,
+                        strategy_id=strategy.strategy_id,
+                        error=str(exc)
+                    )
+                else:
+                    logger.error("Strategy %s error: %s", strategy.strategy_id, exc, exc_info=True)
 
         # Phase 2: Apply regime filter
         if self._filter_callback:
             filtered = [s for s in all_signals if self._filter_callback(s)]
             blocked = len(all_signals) - len(filtered)
             if blocked > 0:
-                logger.debug("Regime filter blocked %d signals", blocked)
+                if log_with_correlation:
+                    log_with_correlation(
+                        logger, logging.DEBUG,
+                        "Regime filter blocked signals",
+                        correlation_id=self._correlation_id,
+                        blocked_count=blocked
+                    )
+                else:
+                    logger.debug("Regime filter blocked %d signals", blocked)
             all_signals = filtered
 
         # Phase 2.5: Inter-strategy conflict detection & resolution
         conflicts = self._detect_conflicts(all_signals)
         if conflicts:
-            logger.info(
-                "Conflict detection: found %d conflict group(s) among %d signals",
-                len(conflicts),
-                len(all_signals),
-            )
+            if log_with_correlation:
+                log_with_correlation(
+                    logger, logging.INFO,
+                    "Conflict detection",
+                    correlation_id=self._correlation_id,
+                    conflict_groups=len(conflicts),
+                    total_signals=len(all_signals)
+                )
+            else:
+                logger.info(
+                    "Conflict detection: found %d conflict group(s) among %d signals",
+                    len(conflicts),
+                    len(all_signals),
+                )
             all_signals = self._filter_signals(all_signals, conflicts)
 
         # Phase 3: Cap signals per tick
@@ -289,15 +367,33 @@ class StrategyEngine:
                 try:
                     handler(signal)
                 except Exception as exc:
-                    logger.error("Signal handler error: %s", exc)
+                    if log_with_correlation:
+                        log_with_correlation(
+                            logger, logging.ERROR,
+                            "Signal handler error",
+                            correlation_id=self._correlation_id,
+                            error=str(exc)
+                        )
+                    else:
+                        logger.error("Signal handler error: %s", exc)
 
         if all_signals:
-            logger.info(
-                "Tick %d: %d signals produced (confidence: %s)",
-                self._tick_count,
-                len(all_signals),
-                ", ".join(f"{s.strategy_id}={s.confidence:.2f}" for s in all_signals[:5]),
-            )
+            if log_with_correlation:
+                log_with_correlation(
+                    logger, logging.INFO,
+                    "Tick signals produced",
+                    correlation_id=self._correlation_id,
+                    tick=self._tick_count,
+                    signal_count=len(all_signals),
+                    confidence_summary={s.strategy_id: round(s.confidence, 2) for s in all_signals[:5]}
+                )
+            else:
+                logger.info(
+                    "Tick %d: %d signals produced (confidence: %s)",
+                    self._tick_count,
+                    len(all_signals),
+                    ", ".join(f"{s.strategy_id}={s.confidence:.2f}" for s in all_signals[:5]),
+                )
 
         return all_signals
 
@@ -383,17 +479,31 @@ class StrategyEngine:
             for lc in low_conf:
                 if lc.direction not in high_directions:
                     suppressed.append(lc)
-                    logger.warning(
-                        "CONFLICT [%s]: suppressed %s (conf=%.2f, str=%s) "
-                        "vs %s (conf=%.2f, str=%s) — extreme confidence gap",
-                        symbol,
-                        lc.direction.value,
-                        lc.confidence,
-                        lc.strategy_id,
-                        "HIGH" if high_conf else "?",
-                        max(s.confidence for s in high_conf),
-                        ",".join(s.strategy_id for s in high_conf),
-                    )
+                    if log_with_correlation:
+                        log_with_correlation(
+                            logger, logging.WARNING,
+                            "CONFLICT - suppressed signal (extreme confidence gap)",
+                            correlation_id=self._correlation_id,
+                            symbol=symbol,
+                            suppressed_direction=lc.direction.value,
+                            suppressed_conf=round(lc.confidence, 2),
+                            suppressed_strategy=lc.strategy_id,
+                            high_conf_direction="HIGH",
+                            high_conf_value=round(max(s.confidence for s in high_conf), 2),
+                            high_conf_strategies=",".join(s.strategy_id for s in high_conf)
+                        )
+                    else:
+                        logger.warning(
+                            "CONFLICT [%s]: suppressed %s (conf=%.2f, str=%s) "
+                            "vs %s (conf=%.2f, str=%s) — extreme confidence gap",
+                            symbol,
+                            lc.direction.value,
+                            lc.confidence,
+                            lc.strategy_id,
+                            "HIGH" if high_conf else "?",
+                            max(s.confidence for s in high_conf),
+                            ",".join(s.strategy_id for s in high_conf),
+                        )
             return suppressed
 
         # --- Rule 2: Layer priority (similar confidence) ---
@@ -409,7 +519,6 @@ class StrategyEngine:
         if len(all_layers) > 1:
             # Find the highest-priority layer present
             max_priority = max(self._layer_priority(l) for l in all_layers)
-            max_priority_layers = {l for l in all_layers if self._layer_priority(l) == max_priority}
 
             # Find the lowest-priority layer present
             min_priority = min(self._layer_priority(l) for l in all_layers)
@@ -421,21 +530,30 @@ class StrategyEngine:
                     for s in all_by_layer[layer]:
                         if s not in suppressed:
                             suppressed.append(s)
-                            logger.info(
-                                "CONFLICT [%s]: suppressed %s (conf=%.2f, str=%s, layer=%s) "
-                                "in favor of higher-layer signal",
-                                symbol,
-                                s.direction.value,
-                                s.confidence,
-                                s.strategy_id,
-                                layer,
-                            )
+                            if log_with_correlation:
+                                log_with_correlation(
+                                    logger, logging.INFO,
+                                    "CONFLICT - suppressed signal (layer priority)",
+                                    correlation_id=self._correlation_id,
+                                    symbol=symbol,
+                                    suppressed_direction=s.direction.value,
+                                    suppressed_conf=round(s.confidence, 2),
+                                    suppressed_strategy=s.strategy_id,
+                                    suppressed_layer=layer
+                                )
+                            else:
+                                logger.info(
+                                    "CONFLICT [%s]: suppressed %s (conf=%.2f, str=%s, layer=%s) "
+                                    "in favor of higher-layer signal",
+                                    symbol,
+                                    s.direction.value,
+                                    s.confidence,
+                                    s.strategy_id,
+                                    layer,
+                                )
         else:
             # Same layer for all signals — check confidence spread
             layer = list(all_layers)[0]
-            long_max = max(s.confidence for s in longs) if longs else 0.0
-            short_max = max(s.confidence for s in shorts) if shorts else 0.0
-            confidence_spread = abs(long_max - short_max)
 
             # If confidence spread is small (<=0.15), they're "similar"
             # Same layer + similar confidence = keep both (Rule 3)
@@ -494,11 +612,20 @@ class StrategyEngine:
         filtered = [s for s in signals if id(s) not in suppressed_ids]
         total_suppressed = len(signals) - len(filtered)
         if total_suppressed > 0:
-            logger.info(
-                "Conflict resolution: suppressed %d of %d signals",
-                total_suppressed,
-                len(signals),
-            )
+            if log_with_correlation:
+                log_with_correlation(
+                    logger, logging.INFO,
+                    "Conflict resolution",
+                    correlation_id=self._correlation_id,
+                    suppressed_count=total_suppressed,
+                    total_signals=len(signals)
+                )
+            else:
+                logger.info(
+                    "Conflict resolution: suppressed %d of %d signals",
+                    total_suppressed,
+                    len(signals),
+                )
         return filtered
 
     # ------------------------------------------------------------------
@@ -512,7 +639,15 @@ class StrategyEngine:
             with open(log_path, "a") as f:
                 f.write(json.dumps(signal.to_dict()) + "\n")
         except Exception as exc:
-            logger.warning("Failed to log signal: %s", exc)
+            if log_with_correlation:
+                log_with_correlation(
+                    logger, logging.WARNING,
+                    "Failed to log signal",
+                    correlation_id=self._correlation_id,
+                    error=str(exc)
+                )
+            else:
+                logger.warning("Failed to log signal: %s", exc)
 
     # ------------------------------------------------------------------
     # Status

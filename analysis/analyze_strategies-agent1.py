@@ -5,8 +5,6 @@ Analyzes all signal_outcomes_*.jsonl files across all symbols.
 """
 
 import json
-import os
-import sys
 from collections import defaultdict
 from pathlib import Path
 

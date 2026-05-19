@@ -32,12 +32,11 @@ Confidence factors:
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
-from strategies.rolling_keys import KEY_PRICE_5M, KEY_PRICE_30M, KEY_VOLUME_5M
+from strategies.rolling_keys import KEY_PRICE_5M, KEY_PRICE_30M
 from strategies.volume_filter import VolumeFilter
 
 logger = logging.getLogger("Syngex.Strategies.VolCompressionRange")
@@ -88,9 +87,6 @@ class VolCompressionRange(BaseStrategy):
         # Must be positive gamma regime
         if regime != "POSITIVE":
             return []
-
-        ts = data.get("timestamp", time.time())
-        symbol = data.get("symbol", "")
 
         # Volume confirmation filter
         vol_filter = VolumeFilter.evaluate(rolling_data, MIN_CONFIDENCE)
@@ -173,7 +169,6 @@ class VolCompressionRange(BaseStrategy):
         if price_window.max is None:
             return None
 
-        max_price = price_window.max
         rng = price_window.range
         if rng is None or rng == 0:
             return None
@@ -255,7 +250,6 @@ class VolCompressionRange(BaseStrategy):
         if price_window.min is None:
             return None
 
-        min_price = price_window.min
         rng = price_window.range
         if rng is None or rng == 0:
             return None

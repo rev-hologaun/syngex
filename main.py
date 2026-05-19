@@ -10,11 +10,15 @@ Structured lifecycle:
     3. Run Loop    → process data, report Gamma Profile
     4. Cleanup     → graceful shutdown
 
-Zero-noise logging: only high-level status and evolving Gamma Profile.
+Logging:
+    - Development mode: human-readable text format
+    - Production mode: structured JSON with correlation IDs
+    - Configure via --json-log flag or SYNGEX_JSON_LOG env var
 
 Usage:
     python3 main.py TSLA              # stream mode (terminal logging)
     python3 main.py TSLA dashboard    # dashboard mode (starts Streamlit)
+    python3 main.py TSLA --json-log   # production JSON logging
 """
 
 from __future__ import annotations
@@ -28,35 +32,23 @@ import signal
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional, Type
 
 import yaml
 
 # ---------------------------------------------------------------------------
-# Logging — strict, zero-noise
+# Logging — structured with correlation IDs
 # ---------------------------------------------------------------------------
 
-# Suppress all noisy loggers; only our orchestrator speaks
-_noisy_loggers = {
-    "ingestor.tradestation_client": logging.WARNING,
-    "GEXCalculator": logging.WARNING,
-    "aiohttp": logging.WARNING,
-    "httpx": logging.WARNING,
-    "asyncio": logging.WARNING,
-}
-for _name, _level in _noisy_loggers.items():
-    logging.getLogger(_name).setLevel(_level)
-    logging.getLogger(_name).handlers.clear()
+# Check for JSON logging mode (production)
+_json_log_mode = os.environ.get("SYNGEX_JSON_LOG", "").lower() in ("1", "true", "yes")
 
-logger = logging.getLogger("Syngex")
-logger.setLevel(logging.INFO)
+from config.logging_config import setup_logging, log_with_correlation
 
-_handler = logging.StreamHandler(sys.stdout)
-_handler.setFormatter(
-    logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
-)
-logger.addHandler(_handler)
+# Initialize logging
+logger = setup_logging(log_level="DEBUG", json_format=_json_log_mode)
 
 # ---------------------------------------------------------------------------
 # Components
@@ -117,11 +109,13 @@ class SyngexOrchestrator:
     PROFILE_INTERVAL: float = 5.0
 
     def __init__(
-        self, symbol: str, mode: str = "stream", port: int = 8501
+        self, symbol: str, mode: str = "stream", port: int = 8501,
+        json_log: bool = False
     ) -> None:
         self.symbol = symbol.upper()
         self.mode = mode.lower()
         self._port = port
+        self._json_log = json_log
         self._client: TradeStationClient | None = None
         self._calculator: GEXCalculator | None = None
         self._dashboard: SyngexDashboard | None = None
@@ -149,13 +143,21 @@ class SyngexOrchestrator:
         # Signal outcome tracker
         self._signal_tracker: SignalTracker | None = None
 
+        # Correlation ID for this orchestrator instance (traces signal lifecycle)
+        self._correlation_id = str(uuid.uuid4())[:8]
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     async def initialize(self) -> None:
         """Create and wire all components."""
-        logger.info("Initializing components…")
+        log_with_correlation(
+            logger, logging.INFO,
+            "Initializing components",
+            correlation_id=self._correlation_id,
+            symbol=self.symbol
+        )
 
         self._calculator = GEXCalculator(symbol=self.symbol)
         self._dashboard = SyngexDashboard(orchestrator=self)
@@ -171,12 +173,27 @@ class SyngexOrchestrator:
             try:
                 with open(config_path, "r") as f:
                     self._strategy_config = yaml.safe_load(f) or {}
-                logger.info("Loaded strategy config from %s", config_path)
+                log_with_correlation(
+                    logger, logging.INFO,
+                    "Loaded strategy config",
+                    correlation_id=self._correlation_id,
+                    config_path=str(config_path)
+                )
             except Exception as exc:
-                logger.warning("Failed to load strategy config (%s), using defaults", exc)
+                log_with_correlation(
+                    logger, logging.WARNING,
+                    "Failed to load strategy config, using defaults",
+                    correlation_id=self._correlation_id,
+                    error=str(exc)
+                )
                 self._strategy_config = {}
         else:
-            logger.warning("Strategy config not found at %s, using defaults", config_path)
+            log_with_correlation(
+                logger, logging.WARNING,
+                "Strategy config not found, using defaults",
+                correlation_id=self._correlation_id,
+                config_path=str(config_path)
+            )
 
         # Build per-strategy hold times from YAML config
         strategy_hold_times: Dict[str, int] = {}
@@ -222,7 +239,12 @@ class SyngexOrchestrator:
             flip_buffer = net_gamma_cfg.get("params", {}).get("flip_buffer", 0.5)
             self._gamma_filter = NetGammaFilter(flip_buffer=flip_buffer)
             self._strategy_engine.register_filter(self._gamma_filter.evaluate_signal)
-            logger.info("Registered net_gamma filter (flip_buffer=%.2f)", flip_buffer)
+            log_with_correlation(
+                logger, logging.INFO,
+                "Registered net_gamma filter",
+                correlation_id=self._correlation_id,
+                flip_buffer=flip_buffer
+            )
 
         # Rolling windows for key metrics
         self._rolling_data = {
@@ -264,12 +286,21 @@ class SyngexOrchestrator:
         self._client.subscribe_to_quotes(self.symbol)
         self._client.subscribe_to_option_chain(self.symbol)
 
-        logger.info("Components initialized. Symbol: %s", self.symbol)
+        log_with_correlation(
+            logger, logging.INFO,
+            "Components initialized",
+            correlation_id=self._correlation_id,
+            symbol=self.symbol
+        )
 
     async def connect(self) -> None:
         """Establish streaming connections."""
         assert self._client is not None
-        logger.info("Connecting to TradeStation streams…")
+        log_with_correlation(
+            logger, logging.INFO,
+            "Connecting to TradeStation streams",
+            correlation_id=self._correlation_id
+        )
         await self._client.connect()
 
     async def run(self) -> None:
@@ -290,8 +321,13 @@ class SyngexOrchestrator:
         # Start strategy engine
         self._strategy_engine.start()
 
-        logger.info("Pipeline running. Ctrl+C to stop.  Mode: %s", self.mode)
-        logger.info("Strategy engine: %d strategies registered, filter active", len(self._strategy_engine._strategies))
+        log_with_correlation(
+            logger, logging.INFO,
+            "Pipeline running",
+            correlation_id=self._correlation_id,
+            mode=self.mode,
+            strategy_count=len(self._strategy_engine._strategies)
+        )
 
         # Start the Streamlit dashboard and heatmap as background subprocesses (dashboard mode only)
         if self.mode == "dashboard":
@@ -322,13 +358,15 @@ class SyngexOrchestrator:
                         resolved = self._signal_tracker.update(price, time.time())
                         if resolved:
                             for r in resolved:
-                                logger.info(
-                                    "SIGNAL_RESOLVED  |  %s  |  %s  |  %s  |  PnL: $%.2f  |  Hold: %.0fs",
-                                    r.open_signal.strategy_id,
-                                    r.open_signal.direction,
-                                    r.outcome.value,
-                                    r.pnl,
-                                    r.hold_time,
+                                log_with_correlation(
+                                    logger, logging.INFO,
+                                    "SIGNAL_RESOLVED",
+                                    correlation_id=self._correlation_id,
+                                    strategy_id=r.open_signal.strategy_id,
+                                    direction=r.open_signal.direction.value,
+                                    outcome=r.outcome.value,
+                                    pnl=r.pnl,
+                                    hold_seconds=r.hold_time
                                 )
                     self._signal_timer = now
 
@@ -338,7 +376,11 @@ class SyngexOrchestrator:
 
                 # Fail-fast: option chain critical error
                 if self._client._option_chain_failed:
-                    logger.error("Option chain stream failed (critical error). Shutting down.")
+                    log_with_correlation(
+                        logger, logging.ERROR,
+                        "Option chain stream failed (critical error), shutting down",
+                        correlation_id=self._correlation_id
+                    )
                     break
 
                 await asyncio.sleep(0.25)
@@ -349,13 +391,22 @@ class SyngexOrchestrator:
 
     async def shutdown(self) -> None:
         """Graceful shutdown."""
-        logger.info("Shutting down…")
+        log_with_correlation(
+            logger, logging.INFO,
+            "Shutting down",
+            correlation_id=self._correlation_id
+        )
         self._running = False
 
         # Stop strategy engine
         if self._strategy_engine:
             self._strategy_engine.stop()
-            logger.info("Strategy engine: %d signals produced", self._strategy_engine.signal_count)
+            log_with_correlation(
+                logger, logging.INFO,
+                "Strategy engine stopped",
+                correlation_id=self._correlation_id,
+                signal_count=self._strategy_engine.signal_count
+            )
 
         # Stop dashboard subprocess
         self._stop_dashboard()
@@ -365,9 +416,11 @@ class SyngexOrchestrator:
         if self._client:
             await self._client.stop()
 
-        summary = self._calculator.get_summary() if self._calculator else {}
-        logger.info("Final state: %s", summary)
-        logger.info("System shutdown complete.")
+        log_with_correlation(
+            logger, logging.INFO,
+            "System shutdown complete",
+            correlation_id=self._correlation_id
+        )
 
     # ------------------------------------------------------------------
     # Config hot-reload
@@ -418,10 +471,20 @@ class SyngexOrchestrator:
                     if "flip_buffer" in params:
                         self._gamma_filter.flip_buffer = params["flip_buffer"]
 
-                logger.info("Config reloaded: %d strategies updated", len(self._strategy_engine._strategies) if self._strategy_engine else 0)
+                log_with_correlation(
+                    logger, logging.INFO,
+                    "Config reloaded",
+                    correlation_id=self._correlation_id,
+                    strategy_count=len(self._strategy_engine._strategies) if self._strategy_engine else 0
+                )
 
             except Exception as exc:
-                logger.error("Config reload error: %s", exc, exc_info=True)
+                log_with_correlation(
+                    logger, logging.ERROR,
+                    "Config reload error",
+                    correlation_id=self._correlation_id,
+                    error=str(exc)
+                )
 
     async def _watch_config(self) -> None:
         """Watch config file for changes and reload when detected."""
@@ -431,8 +494,12 @@ class SyngexOrchestrator:
                     mtime = self._config_path.stat().st_mtime
                     if mtime != self._config_mtime:
                         await self._reload_config()
-            except Exception as exc:
-                logger.debug("Config watch error: %s", exc)
+            except Exception:
+                log_with_correlation(
+                    logger, logging.DEBUG,
+                    "Config watch error",
+                    correlation_id=self._correlation_id
+                )
 
             await asyncio.sleep(2)  # Check every 2 seconds
 
@@ -450,7 +517,12 @@ class SyngexOrchestrator:
         for layer in layers:
             layer_config = self._strategy_config.get(layer, {})
             if not layer_config:
-                logger.info("No config for layer %s, skipping", layer)
+                log_with_correlation(
+                    logger, logging.INFO,
+                    "No config for layer, skipping",
+                    correlation_id=self._correlation_id,
+                    layer=layer
+                )
                 continue
 
             layer_enabled = 0
@@ -459,9 +531,12 @@ class SyngexOrchestrator:
             for strat_name, strat_cfg in layer_config.items():
                 strat_cls = self._get_strategy_class(layer, strat_name)
                 if strat_cls is None:
-                    logger.warning(
-                        "Unknown strategy '%s' in layer '%s' — skipping",
-                        strat_name, layer,
+                    log_with_correlation(
+                        logger, logging.WARNING,
+                        "Unknown strategy in layer, skipping",
+                        correlation_id=self._correlation_id,
+                        strategy_name=strat_name,
+                        layer=layer
                     )
                     continue
 
@@ -474,20 +549,31 @@ class SyngexOrchestrator:
                 else:
                     layer_disabled += 1
                     total_disabled += 1
-                    logger.info(
-                        "Strategy '%s' (%s) disabled via config",
-                        strat_name, layer,
+                    log_with_correlation(
+                        logger, logging.INFO,
+                        "Strategy disabled via config",
+                        correlation_id=self._correlation_id,
+                        strategy_name=strat_name,
+                        layer=layer
                     )
 
             total_registered += layer_enabled
-            logger.info(
-                "Layer %s: %d enabled, %d disabled",
-                layer, layer_enabled, layer_disabled,
+            log_with_correlation(
+                logger, logging.INFO,
+                "Layer registration summary",
+                correlation_id=self._correlation_id,
+                layer=layer,
+                enabled=layer_enabled,
+                disabled=layer_disabled
             )
 
-        logger.info(
-            "Strategy registration complete: %d registered, %d disabled out of %d configured",
-            total_enabled, total_disabled, total_enabled + total_disabled,
+        log_with_correlation(
+            logger, logging.INFO,
+            "Strategy registration complete",
+            correlation_id=self._correlation_id,
+            registered=total_enabled,
+            disabled=total_disabled,
+            total=total_enabled + total_disabled
         )
 
     def _get_strategy_class(
@@ -721,7 +807,12 @@ class SyngexOrchestrator:
 
 
         except Exception as exc:
-            logger.error("Error processing message: %s", exc, exc_info=True)
+            log_with_correlation(
+                logger, logging.ERROR,
+                "Error processing message",
+                correlation_id=self._correlation_id,
+                error=str(exc)
+            )
 
     def _evaluate_strategies(self) -> None:
         """Run strategy evaluation with current market state."""
@@ -771,8 +862,15 @@ class SyngexOrchestrator:
                     self._signal_tracker.track(s.to_dict())
 
             for s in signals:
-                logger.info("SIGNAL  |  %s  |  %s  |  conf=%.2f  |  %s",
-                           s.strategy_id, s.direction.value, s.confidence, s.reason)
+                log_with_correlation(
+                    logger, logging.INFO,
+                    "SIGNAL",
+                    correlation_id=self._correlation_id,
+                    strategy_id=s.strategy_id,
+                    direction=s.direction.value,
+                    confidence=s.confidence,
+                    reason=s.reason
+                )
 
     def _report_profile(self) -> None:
         """Log the current Gamma Profile — the evolving state."""
@@ -835,7 +933,6 @@ class SyngexOrchestrator:
             return {}
 
         triggers: Dict[str, Dict[str, Any]] = {}
-        now = time.time()
 
         # Build timestamp -> signal map for open signals
         open_by_strat: Dict[str, Dict[str, Any]] = {}
@@ -901,7 +998,6 @@ class SyngexOrchestrator:
             return {}
 
         health: Dict[str, Dict[str, Any]] = {}
-        now = time.time()
 
         # Get strategy stats from signal tracker
         strat_stats = self._signal_tracker.get_strategy_stats()
@@ -911,7 +1007,6 @@ class SyngexOrchestrator:
             stats = strat_stats.get(sid, {})
 
             # Count signals from recent signals buffer
-            signal_count = 0
             last_signal_ts = 0.0
             sparkline_values: list = []
 
@@ -989,7 +1084,12 @@ class SyngexOrchestrator:
         script_path = Path(__file__).parent / "app_dashboard.py"
         venv_streamlit = Path(__file__).parent / "venv" / "bin" / "streamlit"
 
-        logger.info("Starting Command Center…")
+        log_with_correlation(
+            logger, logging.INFO,
+            "Starting Command Center",
+            correlation_id=self._correlation_id,
+            port=self._port
+        )
 
         try:
             self._dashboard_process = subprocess.Popen(
@@ -1009,28 +1109,39 @@ class SyngexOrchestrator:
                 stderr=subprocess.DEVNULL,
                 env=env,
             )
-            logger.info(
-                "Command Center started (PID %d, port %d).  "
-                "Open http://localhost:%d in a browser.",
-                self._dashboard_process.pid,
-                self._port,
-                self._port,
+            log_with_correlation(
+                logger, logging.INFO,
+                "Command Center started",
+                correlation_id=self._correlation_id,
+                pid=self._dashboard_process.pid,
+                port=self._port
             )
         except FileNotFoundError:
-            logger.warning(
-                "Streamlit not found at %s — Command Center will not start.  "
-                "Install with: pip install streamlit",
-                venv_streamlit,
+            log_with_correlation(
+                logger, logging.WARNING,
+                "Streamlit not found, Command Center will not start",
+                correlation_id=self._correlation_id,
+                path=str(venv_streamlit)
             )
         except Exception as exc:
-            logger.warning("Failed to start Command Center: %s", exc)
+            log_with_correlation(
+                logger, logging.WARNING,
+                "Failed to start Command Center",
+                correlation_id=self._correlation_id,
+                error=str(exc)
+            )
 
     def _stop_dashboard(self) -> None:
         """Terminate the Streamlit Command Center subprocess."""
         if self._dashboard_process is None:
             return
 
-        logger.info("Stopping Command Center (PID %d)…", self._dashboard_process.pid)
+        log_with_correlation(
+            logger, logging.INFO,
+            "Stopping Command Center",
+            correlation_id=self._correlation_id,
+            pid=self._dashboard_process.pid
+        )
         try:
             self._dashboard_process.terminate()
             self._dashboard_process.wait(timeout=5)
@@ -1061,7 +1172,12 @@ class SyngexOrchestrator:
         venv_python = Path(__file__).parent / "venv" / "bin" / "python"
         log_path = self._data_dir.parent / "log" / "heatmap.log"
 
-        logger.info("Starting Heatmap Dashboard…")
+        log_with_correlation(
+            logger, logging.INFO,
+            "Starting Heatmap Dashboard",
+            correlation_id=self._correlation_id,
+            port=heatmap_port
+        )
 
         try:
             self._heatmap_stderr = open(log_path, "a")  # append mode — avoids PIPE buffer deadlock
@@ -1084,33 +1200,47 @@ class SyngexOrchestrator:
                         err_msg = f.read().strip()
                 except OSError:
                     err_msg = "unknown"
-                logger.warning(
-                    "Heatmap Dashboard failed to start (exit %d): %s",
-                    ret, err_msg[:500],
+                log_with_correlation(
+                    logger, logging.WARNING,
+                    "Heatmap Dashboard failed to start",
+                    correlation_id=self._correlation_id,
+                    exit_code=ret,
+                    error=err_msg[:500]
                 )
                 self._heatmap_process = None
                 return
-            logger.info(
-                "Heatmap Dashboard started (PID %d, port %d).  "
-                "Open http://localhost:%d in a browser.",
-                self._heatmap_process.pid,
-                heatmap_port,
-                heatmap_port,
+            log_with_correlation(
+                logger, logging.INFO,
+                "Heatmap Dashboard started",
+                correlation_id=self._correlation_id,
+                pid=self._heatmap_process.pid,
+                port=heatmap_port
             )
         except FileNotFoundError:
-            logger.warning(
-                "app_heatmap.py not found — Heatmap Dashboard will not start.  "
-                "Ensure flask and flask-socketio are installed.",
+            log_with_correlation(
+                logger, logging.WARNING,
+                "app_heatmap.py not found, Heatmap Dashboard will not start",
+                correlation_id=self._correlation_id
             )
         except Exception as exc:
-            logger.warning("Failed to start Heatmap Dashboard: %s", exc)
+            log_with_correlation(
+                logger, logging.WARNING,
+                "Failed to start Heatmap Dashboard",
+                correlation_id=self._correlation_id,
+                error=str(exc)
+            )
 
     def _stop_heatmap(self) -> None:
         """Terminate the Heatmap Dashboard subprocess."""
         if self._heatmap_process is None:
             return
 
-        logger.info("Stopping Heatmap Dashboard (PID %d)…", self._heatmap_process.pid)
+        log_with_correlation(
+            logger, logging.INFO,
+            "Stopping Heatmap Dashboard",
+            correlation_id=self._correlation_id,
+            pid=self._heatmap_process.pid
+        )
         try:
             self._heatmap_process.terminate()
             self._heatmap_process.wait(timeout=5)
@@ -1182,7 +1312,12 @@ class SyngexOrchestrator:
             with open(self._data_file, "w") as f:
                 json.dump(export, f, indent=2)
         except Exception as exc:
-            logger.warning("Failed to export GEX state: %s", exc)
+            log_with_correlation(
+                logger, logging.WARNING,
+                "Failed to export GEX state",
+                correlation_id=self._correlation_id,
+                error=str(exc)
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1213,17 +1348,30 @@ async def main() -> None:
         default=8501,
         help="Port for the Streamlit Command Center (default: 8501)",
     )
+    parser.add_argument(
+        "--json-log",
+        action="store_true",
+        help="Enable structured JSON logging for production (overrides env var)",
+    )
     args = parser.parse_args()
 
+    # Determine JSON logging mode (CLI flag takes precedence)
+    json_log_mode = args.json_log or _json_log_mode
+
     orchestrator = SyngexOrchestrator(
-        symbol=args.symbol, mode=args.mode, port=args.port
+        symbol=args.symbol, mode=args.mode, port=args.port,
+        json_log=json_log_mode
     )
 
     # Graceful shutdown on signals
     loop = asyncio.get_running_loop()
 
     def _signal_handler() -> None:
-        logger.info("Shutdown signal received.")
+        log_with_correlation(
+            logger, logging.INFO,
+            "Shutdown signal received",
+            correlation_id=getattr(orchestrator, '_correlation_id', 'unknown')
+        )
         asyncio.ensure_future(orchestrator.shutdown())
 
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -1240,7 +1388,12 @@ async def main() -> None:
         await orchestrator.run()
 
     except Exception as exc:
-        logger.critical("Pipeline failure: %s", exc, exc_info=True)
+        log_with_correlation(
+            logger, logging.CRITICAL,
+            "Pipeline failure",
+            correlation_id=getattr(orchestrator, '_correlation_id', 'unknown'),
+            error=str(exc)
+        )
     finally:
         await orchestrator.shutdown()
 
