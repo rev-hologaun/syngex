@@ -351,10 +351,12 @@ class SyngexOrchestrator:
             self._logger.info("[RUN LOOP] Entering main run loop...")
             while self._running:
                 now = time.monotonic()
-                self._logger.debug("[RUN LOOP] Iteration: now=%.2f profile_timer=%.2f interval=%ss", now, self._profile_timer, self.PROFILE_INTERVAL)
+                self._logger.info("[RUN LOOP] Iteration: now=%.2f profile_timer=%.2f interval=%ss", now, self._profile_timer, self.PROFILE_INTERVAL)
 
                 # Report Gamma Profile at intervals (using new engine)
-                if now - self._profile_timer >= self.PROFILE_INTERVAL:
+                profile_check = now - self._profile_timer >= self.PROFILE_INTERVAL
+                self._logger.info("[PROFILE CHECK] profile_check=%s (diff=%.2f >= %s)", profile_check, now - self._profile_timer, self.PROFILE_INTERVAL)
+                if profile_check:
                     self._logger.info("[PROFILE] Checking report_profile()... strategy_engine_eval=%s", bool(self._strategy_engine_eval))
                     if self._strategy_engine_eval:
                         self._logger.info("[PROFILE] Calling report_profile()...")
