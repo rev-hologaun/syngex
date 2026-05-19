@@ -352,8 +352,9 @@ class SyngexOrchestrator:
 
                 # Report Gamma Profile at intervals (using new engine)
                 if now - self._profile_timer >= self.PROFILE_INTERVAL:
+                    self._logger.info("[PROFILE] Checking report_profile()... strategy_engine_eval=%s", bool(self._strategy_engine_eval))
                     if self._strategy_engine_eval:
-                        self._logger.info("[DEBUG] GAMMA_PROFILE triggered (PROFILE_INTERVAL=%ss)", self.PROFILE_INTERVAL)
+                        self._logger.info("[PROFILE] Calling report_profile()...")
                         self._strategy_engine_eval.report_profile(self._calculator, self.symbol)
                     self._profile_timer = now
 
