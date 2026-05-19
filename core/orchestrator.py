@@ -294,6 +294,7 @@ class SyngexOrchestrator:
             logger=self._logger,
             correlation_id=self._correlation_id,
         )
+        self._logger.info("[INIT] StrategyEvaluationEngine created: %s", bool(self._strategy_engine_eval))
 
         log_with_correlation(
             self._logger, logging.INFO,
