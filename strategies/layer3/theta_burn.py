@@ -79,9 +79,9 @@ class ThetaBurn(BaseStrategy):
     strategy_id = "theta_burn"
     layer = "layer3"
 
-    def __init__(self):
+    def __init__(self, calculator):
         """Initialize strategy with configurable parameters."""
-        super().__init__()
+        super().__init__(calculator)
         self._params = {
             'min_net_gamma': MIN_NET_GAMMA,
             'wall_proximity_pct': WALL_PROXIMITY_PCT,

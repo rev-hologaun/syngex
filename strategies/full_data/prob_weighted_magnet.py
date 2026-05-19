@@ -108,9 +108,9 @@ class ProbWeightedMagnet(BaseStrategy):
     strategy_id = "prob_weighted_magnet"
     layer = "full_data"
 
-    def __init__(self):
+    def __init__(self, calculator):
         """Initialize strategy with configurable parameters."""
-        super().__init__()
+        super().__init__(calculator)
         self._params = {
             'min_oi_concentration': DEFAULT_MIN_OI_CONCENTRATION,
             'consolidation_ratio': DEFAULT_CONSOLIDATION_RATIO,

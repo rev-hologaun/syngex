@@ -67,8 +67,8 @@ class DeltaGammaSqueeze(BaseStrategy):
     strategy_id = "delta_gamma_squeeze"
     layer = "layer2"
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, calculator):
+        super().__init__(calculator)
         self._params = {
             'wall_proximity_pct': WALL_PROXIMITY_PCT,
             'delta_accel_ratio': DELTA_ACCEL_RATIO,

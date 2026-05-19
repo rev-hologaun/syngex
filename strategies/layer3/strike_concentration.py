@@ -113,9 +113,9 @@ class StrikeConcentration(BaseStrategy):
     strategy_id = "strike_concentration"
     layer = "layer3"
 
-    def __init__(self):
+    def __init__(self, calculator):
         """Initialize strategy with configurable parameters."""
-        super().__init__()
+        super().__init__(calculator)
         self._params = {
             'top_oi_strikes_count': DEFAULT_TOP_OI_STRIKES_COUNT,
             'bounce_proximity_pct': DEFAULT_BOUNCE_PROXIMITY_PCT,

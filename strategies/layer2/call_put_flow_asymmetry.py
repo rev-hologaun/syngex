@@ -96,6 +96,17 @@ class CallPutFlowAsymmetry(BaseStrategy):
     strategy_id = "call_put_flow_asymmetry"
     layer = "layer2"
 
+    def __init__(self, calculator):
+        super().__init__(calculator)
+        self._params = {
+            'flow_threshold': FLOW_THRESHOLD,
+            'min_greeks_points': MIN_GREEKS_POINTS,
+            'iv_skew_threshold': IV_SKEW_THRESHOLD,
+            'min_confidence': MIN_CONFIDENCE,
+            'stop_pct': STOP_PCT,
+            'target_risk_mult': TARGET_RISK_MULT,
+        }
+
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """
         Evaluate current state for flow asymmetry.

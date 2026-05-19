@@ -99,9 +99,9 @@ class IVBandBreakout(BaseStrategy):
     strategy_id = "iv_band_breakout"
     layer = "layer3"
 
-    def __init__(self):
+    def __init__(self, calculator):
         """Initialize strategy with configurable parameters."""
-        super().__init__()
+        super().__init__(calculator)
         self._params = {
             'delta_decel_ratio': DEFAULT_DELTA_DECEL_RATIO,
             'price_compression_ratio': DEFAULT_PRICE_COMPRESSION_RATIO,

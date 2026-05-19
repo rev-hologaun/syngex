@@ -76,8 +76,8 @@ class DeltaVolumeExhaustion(BaseStrategy):
     strategy_id = "delta_volume_exhaustion"
     layer = "layer2"
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, calculator):
+        super().__init__(calculator)
         self._params = {
             'min_trend_points': MIN_TREND_POINTS,
             'min_greeks_points': MIN_GREEKS_POINTS,

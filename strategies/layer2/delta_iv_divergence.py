@@ -72,6 +72,16 @@ class DeltaIVDivergence(BaseStrategy):
     strategy_id = "delta_iv_divergence"
     layer = "layer2"
 
+    def __init__(self, calculator):
+        super().__init__(calculator)
+        self._params = {
+            'min_data_points': MIN_DATA_POINTS,
+            'min_divergence_strength': MIN_DIVERSION_STRENGTH,
+            'min_confidence': MIN_CONFIDENCE,
+            'stop_pct': STOP_PCT,
+            'target_risk_mult': TARGET_RISK_MULT,
+        }
+
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """Evaluate current state for delta-IV divergence."""
 

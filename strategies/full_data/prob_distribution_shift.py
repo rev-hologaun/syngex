@@ -74,8 +74,8 @@ class ProbDistributionShift(BaseStrategy):
     strategy_id = "prob_distribution_shift"
     layer = "full_data"
 
-    def __init__(self, params: Optional[Dict[str, Any]] = None):
-        super().__init__(params)
+    def __init__(self, calculator, params: Optional[Dict[str, Any]] = None):
+        super().__init__(calculator)
         self._params = params or {}
 
     def _apply_params(self, data: Dict[str, Any]) -> Dict[str, Any]:

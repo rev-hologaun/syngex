@@ -86,6 +86,21 @@ class IVGEXDivergence(BaseStrategy):
     strategy_id = "iv_gex_divergence"
     layer = "layer2"
 
+    def __init__(self, calculator):
+        super().__init__(calculator)
+        self._params = {
+            'price_percentile_threshold': PRICE_PERCENTILE_THRESHOLD,
+            'min_price_points': MIN_PRICE_POINTS,
+            'min_iv_points': MIN_IV_POINTS,
+            'min_positive_gamma': MIN_POSITIVE_GAMMA,
+            'iv_decline_ratio': IV_DECLINE_RATIO,
+            'stop_pct': STOP_PCT,
+            'target_risk_mult': TARGET_RISK_MULT,
+            'min_confidence': MIN_CONFIDENCE,
+            'max_confidence': MAX_CONFIDENCE,
+            'gamma_wall_threshold': 500000,
+        }
+
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """
         Evaluate current state for IV-GEX divergence.

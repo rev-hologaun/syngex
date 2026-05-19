@@ -87,8 +87,8 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
     strategy_id = "extrinsic_intrinsic_flow"
     layer = "full_data"
 
-    def __init__(self, params: Optional[Dict[str, Any]] = None):
-        super().__init__(params)
+    def __init__(self, calculator, params: Optional[Dict[str, Any]] = None):
+        super().__init__(calculator)
         self._params = params or {}
 
     def _apply_params(self, data: Dict[str, Any]) -> Dict[str, Any]:

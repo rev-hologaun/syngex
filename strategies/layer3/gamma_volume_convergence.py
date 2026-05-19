@@ -96,9 +96,9 @@ class GammaVolumeConvergence(BaseStrategy):
     strategy_id = "gamma_volume_convergence"
     layer = "layer3"
 
-    def __init__(self):
+    def __init__(self, calculator):
         """Initialize strategy with configurable parameters."""
-        super().__init__()
+        super().__init__(calculator)
         self._params = {
             'delta_accel_ratio': DEFAULT_DELTA_ACCEL_RATIO,
             'delta_accel_min_ratio': DEFAULT_DELTA_ACCEL_MIN_RATIO,

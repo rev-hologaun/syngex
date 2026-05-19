@@ -94,9 +94,9 @@ class IVSkewSqueeze(BaseStrategy):
     strategy_id = "iv_skew_squeeze"
     layer = "full_data"
 
-    def __init__(self):
+    def __init__(self, calculator):
         """Initialize strategy with configurable parameters."""
-        super().__init__()
+        super().__init__(calculator)
         self._params = {
             'skew_extreme_positive': DEFAULT_SKEW_EXTREME_POSITIVE,
             'skew_extreme_negative': DEFAULT_SKEW_EXTREME_NEGATIVE,
