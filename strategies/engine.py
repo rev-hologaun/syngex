@@ -201,6 +201,37 @@ class StrategyEngine:
         """Register a handler for output signals (e.g., Command Center push)."""
         self._signal_handlers.append(callback)
 
+    def _strategy_passes_regime_filter(
+        self, 
+        strategy: BaseStrategy, 
+        regime: str, 
+        data: Dict[str, Any]
+    ) -> bool:
+        """
+        Check if a strategy should run in the current regime.
+        
+        This is a pre-evaluation filter to avoid running strategies
+        that are known to only work in specific regimes.
+        
+        Args:
+            strategy: The strategy to check
+            regime: Current regime ("POSITIVE" or "NEGATIVE")
+            data: Market data dict
+            
+        Returns:
+            True if strategy should run, False if it should be skipped
+        """
+        # Default: run all strategies (they should handle regime internally)
+        # Subclasses can override this to add regime-specific logic
+        
+        # Check for explicit regime requirement in strategy metadata
+        # Many strategies already check regime internally and return [] if wrong
+        # This is just an optimization to skip evaluation entirely
+        
+        # For now, pass all strategies through - they handle regime internally
+        # This maintains backward compatibility
+        return True
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -266,6 +297,12 @@ class StrategyEngine:
         for strategy in self._strategies:
             if not strategy.enabled:
                 continue
+            
+            # Check regime compatibility before evaluating
+            regime = data.get("regime", "")
+            if not self._strategy_passes_regime_filter(strategy, regime, data):
+                continue
+            
             try:
                 # Inject params into data before evaluation
                 params = data.get("params", {})
@@ -306,7 +343,8 @@ class StrategyEngine:
                         "Strategy error",
                         correlation_id=self._correlation_id,
                         strategy_id=strategy.strategy_id,
-                        error=str(exc)
+                        error=str(exc),
+                        exc_info=True
                     )
                 else:
                     logger.error("Strategy %s error: %s", strategy.strategy_id, exc, exc_info=True)

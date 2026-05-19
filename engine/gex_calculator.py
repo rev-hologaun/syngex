@@ -11,14 +11,26 @@ Formula:
     Net Gamma at Strike K = Σ (Gamma_i × OpenInterest_i × Side_i)
 
 Where Side_i is +1 for calls and -1 for puts.
+
+Logging:
+    - Structured logging for GEX calculation events
+    - Symbol and strike info included in logs
+    - Error logging for data anomalies at ERROR level
 """
 
 from __future__ import annotations
 
 import logging
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+
+# Import structured logging helper
+try:
+    from config.logging_config import log_with_correlation
+except ImportError:
+    log_with_correlation = None  # Fallback if not available
 
 logger = logging.getLogger("Syngex.Engine.GEXCalculator")
 
@@ -138,8 +150,17 @@ class GEXCalculator:
         self._quote_count: int = 0
         self._net_gamma: float = 0.0
         self._net_gamma_dirty: bool = True
+        self._correlation_id = str(uuid.uuid4())[:8]  # Calculator instance correlation ID
 
-        logger.info("GEXCalculator initialized for %s", self.symbol)
+        if log_with_correlation:
+            log_with_correlation(
+                logger, logging.INFO,
+                "GEXCalculator initialized",
+                correlation_id=self._correlation_id,
+                symbol=self.symbol
+            )
+        else:
+            logger.info("GEXCalculator initialized for %s", self.symbol)
 
     # ------------------------------------------------------------------
     # Public API
@@ -202,7 +223,15 @@ class GEXCalculator:
                 return
 
         except Exception as exc:
-            logger.error("Error processing message: %s", exc, exc_info=True)
+            if log_with_correlation:
+                log_with_correlation(
+                    logger, logging.ERROR,
+                    "Error processing message",
+                    correlation_id=self._correlation_id,
+                    error=str(exc)
+                )
+            else:
+                logger.error("Error processing message: %s", exc, exc_info=True)
 
     def update_underlying_price(self, price: float) -> None:
         """Direct setter for underlying price (used for initial setup)."""
@@ -521,7 +550,15 @@ class GEXCalculator:
         """
         bucket = self._ladder.get(strike)
         if bucket is None:
-            logger.warning("No bucket for strike %.1f — OI update ignored", strike)
+            if log_with_correlation:
+                log_with_correlation(
+                    logger, logging.WARNING,
+                    "No bucket for strike, OI update ignored",
+                    correlation_id=self._correlation_id,
+                    strike=strike
+                )
+            else:
+                logger.warning("No bucket for strike %.1f — OI update ignored", strike)
             return
 
         # Recalculate gamma_oi products with real OI
@@ -537,7 +574,17 @@ class GEXCalculator:
             bucket.put_oi = put_oi
 
         self._net_gamma_dirty = True
-        logger.debug("Updated OI for strike %.1f: call=%.0f put=%.0f", strike, call_oi, put_oi)
+        if log_with_correlation:
+            log_with_correlation(
+                logger, logging.DEBUG,
+                "Updated OI for strike",
+                correlation_id=self._correlation_id,
+                strike=strike,
+                call_oi=call_oi,
+                put_oi=put_oi
+            )
+        else:
+            logger.debug("Updated OI for strike %.1f: call=%.0f put=%.0f", strike, call_oi, put_oi)
 
     def get_iv_by_strike_avg(self) -> Dict[float, float]:
         """Return average IV per strike for all strikes with data.
@@ -751,10 +798,19 @@ class GEXCalculator:
             strike = self._infer_strike_from_probability(prob_itm, delta)
 
         if strike is None or strike <= 0:
-            logger.debug(
-                "Cannot infer strike for delta=%.4f intrinsic=%.2f, skipping",
-                delta, intrinsic,
-            )
+            if log_with_correlation:
+                log_with_correlation(
+                    logger, logging.DEBUG,
+                    "Cannot infer strike, skipping",
+                    correlation_id=self._correlation_id,
+                    delta=delta,
+                    intrinsic=intrinsic
+                )
+            else:
+                logger.debug(
+                    "Cannot infer strike for delta=%.4f intrinsic=%.2f, skipping",
+                    delta, intrinsic,
+                )
             return
 
         # Open interest not in stream — default to 1.0

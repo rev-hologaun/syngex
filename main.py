@@ -1390,9 +1390,8 @@ async def main() -> None:
     except Exception as exc:
         log_with_correlation(
             logger, logging.CRITICAL,
-            "Pipeline failure",
+            f"Pipeline failure: {exc}",
             correlation_id=getattr(orchestrator, '_correlation_id', 'unknown'),
-            error=str(exc)
         )
     finally:
         await orchestrator.shutdown()

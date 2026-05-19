@@ -40,20 +40,17 @@ from strategies.rolling_keys import (
     KEY_VOLUME_UP_5M,
 )
 from strategies.utils import normalize_confidence
+from config.parameters import (
+    GAMMA_SQUEEZE_PIN_ATR_PCT as PIN_ATR_PCT,
+    GAMMA_SQUEEZE_WALL_PROXIMITY_PCT as WALL_PROXIMITY_PCT,
+    GAMMA_SQUEEZE_VOLUME_SURGE_MULT as VOLUME_SURGE_MULT,
+    GAMMA_SQUEEZE_MIN_WALL_GEX as MIN_WALL_GEX,
+    GAMMA_SQUEEZE_MIN_CONFIDENCE as MIN_CONFIDENCE,
+    GAMMA_SQUEEZE_TARGET_RISK_MULT as TARGET_RISK_MULT,
+    GAMMA_SQUEEZE_MIN_MASSIVE_WALL_GEX as MIN_MASSIVE_WALL_GEX,
+)
 
 logger = logging.getLogger("Syngex.Strategies.GammaSqueeze")
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-PIN_ATR_PCT = 0.003           # 0.3% — max range for pin detection
-WALL_PROXIMITY_PCT = 0.003    # 0.3% — price must be near wall for breakout
-VOLUME_SURGE_MULT = 1.5       # 1.5× average volume = confirmation
-MIN_WALL_GEX = 500000         # Minimum |GEX| for wall consideration
-MIN_CONFIDENCE = 0.50         # was 0.25
-TARGET_RISK_MULT = 2.0        # 2× risk for squeeze targets
-MIN_MASSIVE_WALL_GEX = 5_000_000  # Fallback threshold for POSITIVE regime filter
 
 
 class GammaSqueeze(BaseStrategy):
