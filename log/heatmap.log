@@ -298,3 +298,22 @@ Port 8211 is in use by another program. Either identify and stop that program, o
 192.168.50.30 - - [19/May/2026 05:09:52] "GET /socket.io/?EIO=4&transport=polling&t=Pv097Wf HTTP/1.1" 200 -
 192.168.50.30 - - [19/May/2026 05:09:52] "POST /socket.io/?EIO=4&transport=polling&t=Pv097i-&sid=E8Bis7xI-JAMrZ5LAAAC HTTP/1.1" 200 -
 192.168.50.30 - - [19/May/2026 05:09:52] "GET /socket.io/?EIO=4&transport=polling&t=Pv097i_&sid=E8Bis7xI-JAMrZ5LAAAC HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8211
+ * Running on http://192.168.50.97:8211
+[33mPress CTRL+C to quit[0m
+192.168.50.147 - - [19/May/2026 05:12:20] "GET /socket.io/?EIO=4&transport=polling&t=Pv09hRu HTTP/1.1" 200 -
+192.168.50.147 - - [19/May/2026 05:12:20] "POST /socket.io/?EIO=4&transport=polling&t=Pv09hS6&sid=FT1ADbt2YN3ASY_-AAAA HTTP/1.1" 200 -
+192.168.50.147 - - [19/May/2026 05:12:20] "GET /socket.io/?EIO=4&transport=polling&t=Pv09hS6.0&sid=FT1ADbt2YN3ASY_-AAAA HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8201
+ * Running on http://192.168.50.97:8201
+[33mPress CTRL+C to quit[0m
+192.168.50.30 - - [19/May/2026 05:12:49] "GET /socket.io/?EIO=4&transport=polling&t=Pv09o-s HTTP/1.1" 200 -
+192.168.50.30 - - [19/May/2026 05:12:49] "POST /socket.io/?EIO=4&transport=polling&t=Pv09o_A&sid=Mtr6fsibg_zsRNWlAAAA HTTP/1.1" 200 -
+192.168.50.30 - - [19/May/2026 05:12:49] "GET /socket.io/?EIO=4&transport=polling&t=Pv09o_B&sid=Mtr6fsibg_zsRNWlAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [19/May/2026 05:12:50] "GET /socket.io/?EIO=4&transport=polling&t=Pv09omg HTTP/1.1" 200 -
+192.168.50.147 - - [19/May/2026 05:12:50] "POST /socket.io/?EIO=4&transport=polling&t=Pv09omu&sid=Pxg6-G3l62gxqqeoAAAC HTTP/1.1" 200 -
+192.168.50.147 - - [19/May/2026 05:12:50] "GET /socket.io/?EIO=4&transport=polling&t=Pv09omu.0&sid=Pxg6-G3l62gxqqeoAAAC HTTP/1.1" 200 -

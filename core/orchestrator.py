@@ -348,8 +348,10 @@ class SyngexOrchestrator:
             # Start config watcher task
             config_task = asyncio.create_task(self._watch_config())
 
+            self._logger.info("[RUN LOOP] Entering main run loop...")
             while self._running:
                 now = time.monotonic()
+                self._logger.debug("[RUN LOOP] Iteration: now=%.2f profile_timer=%.2f interval=%ss", now, self._profile_timer, self.PROFILE_INTERVAL)
 
                 # Report Gamma Profile at intervals (using new engine)
                 if now - self._profile_timer >= self.PROFILE_INTERVAL:
