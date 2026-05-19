@@ -1,0 +1,1 @@
+"""Syngex test suite."""
