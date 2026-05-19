@@ -54,7 +54,7 @@ logger.addHandler(_handler)
 # ---------------------------------------------------------------------------
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = "syngex-heatmap-secret-key"
+app.config["SECRET_KEY"] = os.environ.get("HEATMAP_SECRET_KEY", "dev-only-key")
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 # In-memory cache of latest data
