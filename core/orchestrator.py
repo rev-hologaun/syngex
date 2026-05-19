@@ -362,6 +362,7 @@ class SyngexOrchestrator:
                         self._logger.info("[PROFILE] Calling report_profile()...")
                         self._strategy_engine_eval.report_profile(self._calculator, self.symbol)
                     self._profile_timer = now
+                self._logger.debug("[PROFILE TIMER] Updated to: %s", self._profile_timer)
 
                 # Export GEX state to shared file for Streamlit dashboard
                 if now - self._state_export_timer >= 1.0:
