@@ -37,6 +37,7 @@ from typing import Any, Dict, List, Optional
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_keys import KEY_ATM_DELTA_5M, KEY_ATM_IV_5M
+from strategies.utils import normalize_confidence
 
 logger = logging.getLogger("Syngex.Strategies.DeltaIVDivergence")
 
@@ -224,11 +225,11 @@ class DeltaIVDivergence(BaseStrategy):
         momentum_conf = 0.10 + 0.05 * min(1.0, trend_momentum / 2.0)
 
         # Normalize each component to [0,1] and average
-        norm_div = (div_conf - 0.20) / (0.30 - 0.20) if 0.30 != 0.20 else 1.0
-        norm_data = (data_conf - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
-        norm_gamma = (gamma_conf - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
-        norm_regime = (regime_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
-        norm_momentum = (momentum_conf - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
+        norm_div = normalize_confidence(div_conf, 0.20, 0.30)
+        norm_data = normalize_confidence(data_conf, 0.10, 0.15)
+        norm_gamma = normalize_confidence(gamma_conf, 0.10, 0.15)
+        norm_regime = normalize_confidence(regime_conf, 0.05, 0.10)
+        norm_momentum = normalize_confidence(momentum_conf, 0.10, 0.15)
 
         confidence = (norm_div + norm_data + norm_gamma + norm_regime + norm_momentum) / 5.0
         return min(1.0, max(0.0, confidence))

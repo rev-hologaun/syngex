@@ -41,6 +41,7 @@ from typing import Any, Dict, List, Optional
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_keys import KEY_EXTRINSIC_PROXY_5M, KEY_VOLUME_UP_5M, KEY_VOLUME_DOWN_5M
+from strategies.utils import normalize_confidence
 
 logger = logging.getLogger("Syngex.Strategies.ExtrinsicIntrinsicFlow")
 
@@ -496,10 +497,10 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         gamma_component = 0.15 + 0.05 * gamma_scaled
 
         # Normalize each component to [0,1] and average
-        norm_exp = (exp_component - 0.20) / (0.30 - 0.20) if 0.30 != 0.20 else 1.0
-        norm_vol = (vol_component - 0.20) / (0.25 - 0.20) if 0.25 != 0.20 else 1.0
-        norm_vol_dir = (vol_dir_component - 0.05) / (0.15 - 0.05) if 0.15 != 0.05 else 1.0
-        norm_gamma = (gamma_component - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
+        norm_exp = normalize_confidence(exp_component, 0.20, 0.30)
+        norm_vol = normalize_confidence(vol_component, 0.20, 0.25)
+        norm_vol_dir = normalize_confidence(vol_dir_component, 0.05, 0.15)
+        norm_gamma = normalize_confidence(gamma_component, 0.15, 0.20)
         confidence = (norm_exp + norm_vol + norm_vol_dir + norm_gamma) / 4.0
 
         return min(MAX_CONFIDENCE, max(0.0, confidence))
@@ -538,10 +539,10 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         gamma_component = 0.15 + 0.05 * gamma_scaled
 
         # Normalize each component to [0,1] and average
-        norm_exp = (exp_component - 0.20) / (0.30 - 0.20) if 0.30 != 0.20 else 1.0
-        norm_vol = (vol_component - 0.20) / (0.25 - 0.20) if 0.25 != 0.20 else 1.0
-        norm_vol_dir = (vol_dir_component - 0.05) / (0.15 - 0.05) if 0.15 != 0.05 else 1.0
-        norm_gamma = (gamma_component - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
+        norm_exp = normalize_confidence(exp_component, 0.20, 0.30)
+        norm_vol = normalize_confidence(vol_component, 0.20, 0.25)
+        norm_vol_dir = normalize_confidence(vol_dir_component, 0.05, 0.15)
+        norm_gamma = normalize_confidence(gamma_component, 0.15, 0.20)
         confidence = (norm_exp + norm_vol + norm_vol_dir + norm_gamma) / 4.0
 
         return min(MAX_CONFIDENCE, max(0.0, confidence))
@@ -595,10 +596,10 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         gamma_component = 0.15 + 0.05 * gamma_scaled
 
         # Normalize each component to [0,1] and average
-        norm_collapse = (collapse_component - 0.25) / (0.35 - 0.25) if 0.35 != 0.25 else 1.0
-        norm_vol_decline = (vol_decline_component - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
-        norm_vol_dir = (vol_dir_component - 0.05) / (0.15 - 0.05) if 0.15 != 0.05 else 1.0
-        norm_gamma = (gamma_component - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
+        norm_collapse = normalize_confidence(collapse_component, 0.25, 0.35)
+        norm_vol_decline = normalize_confidence(vol_decline_component, 0.15, 0.20)
+        norm_vol_dir = normalize_confidence(vol_dir_component, 0.05, 0.15)
+        norm_gamma = normalize_confidence(gamma_component, 0.15, 0.20)
         confidence = (norm_collapse + norm_vol_decline + norm_vol_dir + norm_gamma) / 4.0
 
         return min(MAX_CONFIDENCE, max(0.0, confidence))

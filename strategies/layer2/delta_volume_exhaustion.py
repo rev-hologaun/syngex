@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Optional
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_keys import KEY_PRICE_5M, KEY_TOTAL_DELTA_5M, KEY_VOLUME_5M
+from strategies.utils import normalize_confidence
 
 logger = logging.getLogger("Syngex.Strategies.DeltaVolumeExhaustion")
 
@@ -308,10 +309,10 @@ class DeltaVolumeExhaustion(BaseStrategy):
         gamma_conf = 0.05 + 0.05 * min(1.0, abs(net_gamma) / 1000000)
 
         # Normalize each component to [0,1] and average
-        norm_trend = (trend_conf - 0.25) / (0.35 - 0.25) if 0.35 != 0.25 else 1.0
-        norm_delta = delta_conf / 0.25 if 0.25 != 0 else 0.0
-        norm_vol = vol_conf / 0.20 if 0.20 != 0 else 0.0
-        norm_regime = (regime_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
-        norm_gamma = (gamma_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
+        norm_trend = normalize_confidence(trend_conf, 0.25, 0.35)
+        norm_delta = normalize_confidence(delta_conf, 0.0, 0.25)
+        norm_vol = normalize_confidence(vol_conf, 0.0, 0.20)
+        norm_regime = normalize_confidence(regime_conf, 0.05, 0.10)
+        norm_gamma = normalize_confidence(gamma_conf, 0.05, 0.10)
         confidence = (norm_trend + norm_delta + norm_vol + norm_regime + norm_gamma) / 5.0
         return min(1.0, max(0.0, confidence))

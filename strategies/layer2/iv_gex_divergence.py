@@ -38,6 +38,7 @@ from typing import Any, Dict, List, Optional
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_keys import KEY_PRICE_30M, KEY_TOTAL_DELTA_5M
+from strategies.utils import normalize_confidence
 
 logger = logging.getLogger("Syngex.Strategies.IVGEXDivergence")
 
@@ -343,11 +344,11 @@ class IVGEXDivergence(BaseStrategy):
             regime_conf = 0.10 if regime == "NEGATIVE" else 0.05
 
         # Normalize each component to [0,1] and average
-        norm_pct = (pct_conf - 0.20) / (0.30 - 0.20) if 0.30 != 0.20 else 1.0
-        norm_iv = (iv_conf - 0.20) / (0.25 - 0.20) if 0.25 != 0.20 else 1.0
-        norm_gamma = (gamma_conf - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
-        norm_wall = wall_conf / 0.10 if 0.10 != 0 else 0.0
-        norm_regime = (regime_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
+        norm_pct = normalize_confidence(pct_conf, 0.20, 0.30)
+        norm_iv = normalize_confidence(iv_conf, 0.20, 0.25)
+        norm_gamma = normalize_confidence(gamma_conf, 0.15, 0.20)
+        norm_wall = normalize_confidence(wall_conf, 0.0, 0.10)
+        norm_regime = normalize_confidence(regime_conf, 0.05, 0.10)
         confidence = (norm_pct + norm_iv + norm_gamma + norm_wall + norm_regime) / 5.0
         return min(MAX_CONFIDENCE, max(0.0, confidence))
 

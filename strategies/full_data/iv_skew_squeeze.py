@@ -46,6 +46,7 @@ from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_window import RollingWindow
 from strategies.rolling_keys import KEY_PRICE_5M, KEY_VOLUME_5M, KEY_IV_SKEW_5M
+from strategies.utils import normalize_confidence
 
 logger = logging.getLogger("Syngex.Strategies.IVSkewSqueeze")
 
@@ -508,16 +509,16 @@ class IVSkewSqueeze(BaseStrategy):
         else:
             vol_component = 0.10
 
-        # 5. Net gamma strength (0.15–0.15)
+        # 5. Net gamma strength (0.10–0.20)
         gamma_conf = min(1.0, net_gamma / 500000.0)
         gamma_component = 0.10 + 0.10 * gamma_conf
 
         # Normalize each component to [0,1] and average
-        norm_skew = (skew_component - 0.15) / (0.25 - 0.15) if 0.25 != 0.15 else 1.0
-        norm_stability = (stability_component - 0.15) / (0.25 - 0.15) if 0.25 != 0.15 else 1.0
-        norm_norm = (norm_component - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
-        norm_vol = (vol_component - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
-        norm_gamma = (gamma_component - 0.10) / (0.20 - 0.10) if 0.20 != 0.10 else 1.0
+        norm_skew = normalize_confidence(skew_component, 0.15, 0.25)
+        norm_stability = normalize_confidence(stability_component, 0.15, 0.25)
+        norm_norm = normalize_confidence(norm_component, 0.15, 0.20)
+        norm_vol = normalize_confidence(vol_component, 0.10, 0.15)
+        norm_gamma = normalize_confidence(gamma_component, 0.10, 0.20)
         confidence = (norm_skew + norm_stability + norm_norm + norm_vol + norm_gamma) / 5.0
 
         return min(MAX_CONFIDENCE, max(0.0, confidence))

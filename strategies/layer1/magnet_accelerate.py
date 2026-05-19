@@ -37,6 +37,7 @@ from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_keys import KEY_PRICE_5M
 from strategies.volume_filter import VolumeFilter
+from strategies.utils import normalize_confidence
 
 logger = logging.getLogger("Syngex.Strategies.MagnetAccelerate")
 
@@ -386,9 +387,9 @@ class MagnetAccelerate(BaseStrategy):
         momentum_conf = 0.1 + 0.1 * momentum
 
         # Normalize each component to [0,1] and average
-        norm_prox = (proximity - 0.2) / (0.4 - 0.2) if 0.4 != 0.2 else 1.0
-        norm_gamma = (gamma_strength - 0.2) / (0.5 - 0.2) if 0.5 != 0.2 else 1.0
-        norm_mom = (momentum_conf - 0.1) / (0.2 - 0.1) if 0.2 != 0.1 else 1.0
+        norm_prox = normalize_confidence(proximity, 0.2, 0.4)
+        norm_gamma = normalize_confidence(gamma_strength, 0.2, 0.5)
+        norm_mom = normalize_confidence(momentum_conf, 0.1, 0.2)
         return min(1.0, max(0.0, (norm_prox + norm_gamma + norm_mom) / 3.0))
 
     def _phase2_confidence(
@@ -408,7 +409,7 @@ class MagnetAccelerate(BaseStrategy):
         gamma_conf = 0.1 + 0.1 * min(1.0, abs(net_gamma) / 500000)
 
         # Normalize each component to [0,1] and average
-        norm_dist = (dist_conf - 0.2) / (0.3 - 0.2) if 0.3 != 0.2 else 1.0
-        norm_regime = (regime_conf - 0.15) / (0.3 - 0.15) if 0.3 != 0.15 else 1.0
-        norm_gamma = (gamma_conf - 0.1) / (0.2 - 0.1) if 0.2 != 0.1 else 1.0
+        norm_dist = normalize_confidence(dist_conf, 0.2, 0.3)
+        norm_regime = normalize_confidence(regime_conf, 0.15, 0.3)
+        norm_gamma = normalize_confidence(gamma_conf, 0.1, 0.2)
         return min(1.0, max(0.0, (norm_dist + norm_regime + norm_gamma) / 3.0))

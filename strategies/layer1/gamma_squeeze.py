@@ -39,6 +39,7 @@ from strategies.rolling_keys import (
     KEY_VOLUME_DOWN_5M,
     KEY_VOLUME_UP_5M,
 )
+from strategies.utils import normalize_confidence
 
 logger = logging.getLogger("Syngex.Strategies.GammaSqueeze")
 
@@ -498,8 +499,8 @@ class GammaSqueeze(BaseStrategy):
         volume_conf = 0.1  # No volume data in layer 1
 
         # Normalize each component to [0,1] and average
-        norm_wall = (wall_conf - 0.2) / (0.35 - 0.2) if 0.35 != 0.2 else 1.0
-        norm_gamma = (gamma_conf - 0.2) / (0.35 - 0.2) if 0.35 != 0.2 else 1.0
-        norm_risk = (risk_conf - 0.15) / (0.25 - 0.15) if 0.25 != 0.15 else 1.0
-        norm_vol = (volume_conf - 0.1) / (0.15 - 0.1) if 0.15 != 0.1 else 1.0
+        norm_wall = normalize_confidence(wall_conf, 0.2, 0.35)
+        norm_gamma = normalize_confidence(gamma_conf, 0.2, 0.35)
+        norm_risk = normalize_confidence(risk_conf, 0.15, 0.25)
+        norm_vol = normalize_confidence(volume_conf, 0.1, 0.15)
         return min(1.0, max(0.0, (norm_wall + norm_gamma + norm_risk + norm_vol) / 4.0))

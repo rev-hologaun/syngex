@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_keys import KEY_PRICE_5M, KEY_VOLUME_5M, KEY_VOLUME_UP_5M, KEY_VOLUME_DOWN_5M, KEY_TOTAL_DELTA_5M, KEY_TOTAL_GAMMA_5M
+from strategies.utils import normalize_confidence
 
 logger = logging.getLogger("Syngex.Strategies.GammaVolumeConvergence")
 
@@ -524,11 +525,11 @@ class GammaVolumeConvergence(BaseStrategy):
         wall_conf = self._wall_proximity_confidence(price, direction, gex_calc)
 
         # Normalize each component to [0,1] and average
-        norm_delta = (delta_conf - 0.20) / (0.30 - 0.20) if 0.30 != 0.20 else 1.0
-        norm_gamma = (gamma_conf - 0.20) / (0.30 - 0.20) if 0.30 != 0.20 else 1.0
-        norm_vol = (vol_conf - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
-        norm_regime = (regime_conf - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
-        norm_wall = (wall_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
+        norm_delta = normalize_confidence(delta_conf, 0.20, 0.30)
+        norm_gamma = normalize_confidence(gamma_conf, 0.20, 0.30)
+        norm_vol = normalize_confidence(vol_conf, 0.10, 0.15)
+        norm_regime = normalize_confidence(regime_conf, 0.10, 0.15)
+        norm_wall = normalize_confidence(wall_conf, 0.05, 0.10)
         confidence = (norm_delta + norm_gamma + norm_vol + norm_regime + norm_wall) / 5.0
         return min(MAX_CONFIDENCE, max(0.0, confidence))
 

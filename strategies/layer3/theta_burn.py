@@ -39,6 +39,7 @@ from typing import Any, Dict, List, Optional
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_keys import KEY_PRICE_5M, KEY_PRICE_30M, KEY_VOLUME_5M
+from strategies.utils import normalize_confidence
 
 logger = logging.getLogger("Syngex.Strategies.ThetaBurn")
 
@@ -677,11 +678,11 @@ class ThetaBurn(BaseStrategy):
         tod_conf = self._time_of_day_confidence(timestamp)
 
         # Normalize each component to [0,1] and average
-        norm_gamma = (gamma_conf - 0.15) / (0.25 - 0.15) if 0.25 != 0.15 else 1.0
-        norm_prox = (prox_conf - 0.15) / (0.25 - 0.15) if 0.25 != 0.15 else 1.0
-        norm_nar = (nar_conf - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
-        norm_reject = (rejection_conf - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
-        norm_tod = (tod_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
+        norm_gamma = normalize_confidence(gamma_conf, 0.15, 0.25)
+        norm_prox = normalize_confidence(prox_conf, 0.15, 0.25)
+        norm_nar = normalize_confidence(nar_conf, 0.10, 0.15)
+        norm_reject = normalize_confidence(rejection_conf, 0.15, 0.20)
+        norm_tod = normalize_confidence(tod_conf, 0.05, 0.10)
         confidence = (norm_gamma + norm_prox + norm_nar + norm_reject + norm_tod) / 5.0
         return min(MAX_CONFIDENCE, max(MIN_CONFIDENCE, confidence))
 

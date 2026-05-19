@@ -43,6 +43,7 @@ from typing import Any, Dict, List, Optional
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_keys import KEY_PRICE_5M, KEY_PRICE_30M
+from strategies.utils import normalize_confidence
 from strategies.volume_filter import VolumeFilter
 
 logger = logging.getLogger("Syngex.Strategies.ConfluenceReversal")
@@ -306,10 +307,10 @@ class ConfluenceReversal(BaseStrategy):
         trend_penalty = -0.05 if trend in ("UP", "DOWN") else 0.0
 
         # Normalize and average with base
-        norm_base = (confidence - 0.25) / (0.6 - 0.25) if 0.6 != 0.25 else 1.0
-        norm_gex = gex_bonus / 0.15 if 0.15 != 0 else 0.0
-        norm_tech = tech_bonus / 0.05 if 0.05 != 0 else 0.0
-        norm_regime = (regime_bonus + 0.10) / 0.25  # map [-0.10, +0.15] → [0, 1]
+        norm_base = normalize_confidence(confidence, 0.25, 0.6)
+        norm_gex = normalize_confidence(gex_bonus, 0.0, 0.15)
+        norm_tech = normalize_confidence(tech_bonus, 0.0, 0.05)
+        norm_regime = normalize_confidence(regime_bonus + 0.10, 0.0, 0.25)  # map [-0.10, +0.15] → [0, 1]
         confidence = (norm_base + norm_gex + norm_tech + norm_regime) / 4.0
         # Apply trend penalty
         confidence += trend_penalty
@@ -381,10 +382,10 @@ class ConfluenceReversal(BaseStrategy):
         trend_penalty = -0.05 if trend in ("UP", "DOWN") else 0.0
 
         # Normalize and average with base
-        norm_base = (confidence - 0.25) / (0.6 - 0.25) if 0.6 != 0.25 else 1.0
-        norm_gex = gex_bonus / 0.15 if 0.15 != 0 else 0.0
-        norm_tech = tech_bonus / 0.05 if 0.05 != 0 else 0.0
-        norm_regime = (regime_bonus + 0.10) / 0.25  # map [-0.10, +0.15] → [0, 1]
+        norm_base = normalize_confidence(confidence, 0.25, 0.6)
+        norm_gex = normalize_confidence(gex_bonus, 0.0, 0.15)
+        norm_tech = normalize_confidence(tech_bonus, 0.0, 0.05)
+        norm_regime = normalize_confidence(regime_bonus + 0.10, 0.0, 0.25)  # map [-0.10, +0.15] → [0, 1]
         confidence = (norm_base + norm_gex + norm_tech + norm_regime) / 4.0
         # Apply trend penalty
         confidence += trend_penalty

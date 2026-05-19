@@ -42,6 +42,7 @@ from typing import Any, Dict, List, Optional
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_keys import KEY_PRICE_5M, KEY_PRICE_30M, KEY_NET_GAMMA_5M
+from strategies.utils import normalize_confidence
 
 logger = logging.getLogger("Syngex.Strategies.GEXDivergence")
 
@@ -314,11 +315,11 @@ class GEXDivergence(BaseStrategy):
                 regime_conf = 0.1
 
         # Normalize each component to [0,1] and average
-        norm_price = (price_conf - 0.15) / (0.3 - 0.15) if 0.3 != 0.15 else 1.0
-        norm_gamma = (gamma_conf - 0.15) / (0.3 - 0.15) if 0.3 != 0.15 else 1.0
-        norm_balance = (balance_conf - 0.1) / (0.15 - 0.1) if 0.15 != 0.1 else 1.0
-        norm_data = data_conf / 0.1 if 0.1 != 0 else 0.0
-        norm_regime = regime_conf / 0.1 if 0.1 != 0 else 0.0
+        norm_price = normalize_confidence(price_conf, 0.15, 0.3)
+        norm_gamma = normalize_confidence(gamma_conf, 0.15, 0.3)
+        norm_balance = normalize_confidence(balance_conf, 0.1, 0.15)
+        norm_data = normalize_confidence(data_conf, 0.0, 0.1)
+        norm_regime = normalize_confidence(regime_conf, 0.0, 0.1)
         confidence = (norm_price + norm_gamma + norm_balance + norm_data + norm_regime) / 5.0
         return min(1.0, max(0.0, confidence))
 
