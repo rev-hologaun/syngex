@@ -410,8 +410,9 @@ class VolCompressionRange(BaseStrategy):
         self, rolling_data: Dict[str, Any]
     ) -> Optional[Any]:
         """Get the best available price rolling window."""
+        min_range_bars = self._params.get('min_range_bars', self.DEFAULT_MIN_RANGE_BARS)
         for key in (KEY_PRICE_5M, KEY_PRICE_30M):
             rw = rolling_data.get(key)
-            if rw is not None and rw.count >= MIN_RANGE_BARS:
+            if rw is not None and rw.count >= min_range_bars:
                 return rw
         return None
