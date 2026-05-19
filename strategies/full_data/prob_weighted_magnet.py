@@ -64,31 +64,33 @@ logger = logging.getLogger("Syngex.Strategies.ProbWeightedMagnet")
 # Constants
 # ---------------------------------------------------------------------------
 
+# Default parameter values - can be overridden via self._params
+
 # OI concentration threshold (relative units)
-MIN_OI_CONCENTRATION = 2.0          # Minimum total OI at a strike
+DEFAULT_MIN_OI_CONCENTRATION = 2.0          # Minimum total OI at a strike
 
 # Price consolidation: 5m range must be < this % of 30m range
-CONSOLIDATION_RATIO = 0.50          # 50%
+DEFAULT_CONSOLIDATION_RATIO = 0.50          # 50%
 
 # Delta acceleration: delta change must exceed this ratio
-DELTA_ACCEL_RATIO = 1.05            # 5% change in delta
+DEFAULT_DELTA_ACCEL_RATIO = 1.05            # 5% change in delta
 
 # Min net gamma for positive regime
-MIN_NET_GAMMA = 500000.0
+DEFAULT_MIN_NET_GAMMA = 500000.0
 
 # Stop and target
-STOP_PCT = 0.005                    # 0.5% stop
-TARGET_RISK_MULT = 1.5              # 1.5× risk for target
+DEFAULT_STOP_PCT = 0.005                    # 0.5% stop
+DEFAULT_TARGET_RISK_MULT = 1.5              # 1.5× risk for target
 
 # Min confidence
-MIN_CONFIDENCE = 0.25
-MAX_CONFIDENCE = 0.80               # v2 cap
+DEFAULT_MIN_CONFIDENCE = 0.25
+DEFAULT_MAX_CONFIDENCE = 0.80               # v2 cap
 
 # Min data points
-MIN_DATA_POINTS = 3
+DEFAULT_MIN_DATA_POINTS = 3
 
 # Volume trend check — these qualify as "no breakout yet"
-VALID_VOLUME_TRENDS = ("FLAT", "DOWN")
+DEFAULT_VALID_VOLUME_TRENDS = ("FLAT", "DOWN")
 
 
 class ProbWeightedMagnet(BaseStrategy):
@@ -106,6 +108,27 @@ class ProbWeightedMagnet(BaseStrategy):
     strategy_id = "prob_weighted_magnet"
     layer = "full_data"
 
+    def __init__(self):
+        """Initialize strategy with configurable parameters."""
+        super().__init__()
+        self._params = {
+            'min_oi_concentration': DEFAULT_MIN_OI_CONCENTRATION,
+            'consolidation_ratio': DEFAULT_CONSOLIDATION_RATIO,
+            'delta_accel_ratio': DEFAULT_DELTA_ACCEL_RATIO,
+            'min_net_gamma': DEFAULT_MIN_NET_GAMMA,
+            'stop_pct': DEFAULT_STOP_PCT,
+            'target_risk_mult': DEFAULT_TARGET_RISK_MULT,
+            'min_confidence': DEFAULT_MIN_CONFIDENCE,
+            'max_confidence': DEFAULT_MAX_CONFIDENCE,
+            'min_data_points': DEFAULT_MIN_DATA_POINTS,
+            'valid_volume_trends': DEFAULT_VALID_VOLUME_TRENDS,
+        }
+
+    def _apply_params(self, data: Dict[str, Any]) -> None:
+        """Apply parameter overrides from data dict if present."""
+        if 'params' in data:
+            self._params.update(data['params'])
+
     # ------------------------------------------------------------------
     # Core evaluation
     # ------------------------------------------------------------------
@@ -116,6 +139,9 @@ class ProbWeightedMagnet(BaseStrategy):
 
         Returns empty list when no stealth accumulation is detected.
         """
+        # Apply parameter overrides
+        self._apply_params(data)
+        
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
             return []
@@ -133,11 +159,12 @@ class ProbWeightedMagnet(BaseStrategy):
             return []
 
         # --- Price consolidation check ---
+        min_data_points = self._params.get('min_data_points', DEFAULT_MIN_DATA_POINTS)
         price_5m = rolling_data.get(KEY_PRICE_5M)
         price_30m = rolling_data.get(KEY_PRICE_30M)
         if price_5m is None or price_30m is None:
             return []
-        if price_5m.count < MIN_DATA_POINTS or price_30m.count < MIN_DATA_POINTS:
+        if price_5m.count < min_data_points or price_30m.count < min_data_points:
             return []
 
         # Consolidation: 5m range must be < 40% of 30m range
@@ -146,21 +173,25 @@ class ProbWeightedMagnet(BaseStrategy):
         if range_5m is None or range_30m is None or range_30m == 0:
             return []
         consolidation_ratio = range_5m / range_30m
-        if consolidation_ratio >= CONSOLIDATION_RATIO:
+        min_data_points = self._params.get('min_data_points', DEFAULT_MIN_DATA_POINTS)
+        consolidation_ratio_param = self._params.get('consolidation_ratio', DEFAULT_CONSOLIDATION_RATIO)
+        if consolidation_ratio >= consolidation_ratio_param:
             # Price not consolidating — could be a breakout already
             return []
 
         # --- Volume check ---
         volume_5m = rolling_data.get(KEY_VOLUME_5M)
-        if volume_5m is None or volume_5m.count < MIN_DATA_POINTS:
+        if volume_5m is None or volume_5m.count < min_data_points:
             return []
         vol_trend = volume_5m.trend
-        if vol_trend not in VALID_VOLUME_TRENDS:
+        valid_volume_trends = self._params.get('valid_volume_trends', DEFAULT_VALID_VOLUME_TRENDS)
+        if vol_trend not in valid_volume_trends:
             # Volume spiking up = breakout in progress, not accumulation
             return []
 
         # --- Net gamma check ---
-        if net_gamma < MIN_NET_GAMMA:
+        min_net_gamma = self._params.get('min_net_gamma', DEFAULT_MIN_NET_GAMMA)
+        if net_gamma < min_net_gamma:
             return []
 
         # --- Scan for magnet strikes ---
@@ -259,13 +290,16 @@ class ProbWeightedMagnet(BaseStrategy):
             consolidation_ratio, vol_trend, price_30m,
         )
 
-        if confidence < MIN_CONFIDENCE:
+        min_confidence = self._params.get('min_confidence', DEFAULT_MIN_CONFIDENCE)
+        if confidence < min_confidence:
             return None
 
         # Build signal
-        stop = price * (1 - STOP_PCT)
+        stop_pct = self._params.get('stop_pct', DEFAULT_STOP_PCT)
+        target_risk_mult = self._params.get('target_risk_mult', DEFAULT_TARGET_RISK_MULT)
+        stop = price * (1 - stop_pct)
         risk = price - stop
-        target_price = price + (risk * TARGET_RISK_MULT)
+        target_price = price + (risk * target_risk_mult)
 
         return Signal(
             direction=Direction.LONG,
@@ -292,8 +326,8 @@ class ProbWeightedMagnet(BaseStrategy):
                 "volume_trend": vol_trend,
                 "net_gamma": round(net_gamma, 2),
                 "qualifying_strikes": len(qualifying),
-                "stop_pct": STOP_PCT,
-                "target_risk_mult": TARGET_RISK_MULT,
+                "stop_pct": stop_pct,
+                "target_risk_mult": target_risk_mult,
                 "risk": round(risk, 2),
                 "risk_reward_ratio": round(abs(target_price - price) / risk, 2)
                     if risk > 0 else 0,
@@ -341,7 +375,8 @@ class ProbWeightedMagnet(BaseStrategy):
             call_oi = strike_data.get("call_oi", 0)
             put_oi = strike_data.get("put_oi", 0)
             total_oi = call_oi + put_oi
-            if total_oi < MIN_OI_CONCENTRATION:
+            min_oi_concentration = self._params.get('min_oi_concentration', DEFAULT_MIN_OI_CONCENTRATION)
+            if total_oi < min_oi_concentration:
                 continue
 
             # For puts above price, falling put delta = ProbITM falling = distribution
@@ -377,13 +412,16 @@ class ProbWeightedMagnet(BaseStrategy):
             consolidation_ratio, vol_trend, price_30m,
         )
 
-        if confidence < MIN_CONFIDENCE:
+        min_confidence = self._params.get('min_confidence', DEFAULT_MIN_CONFIDENCE)
+        if confidence < min_confidence:
             return None
 
         # Build signal
-        stop = price * (1 + STOP_PCT)
+        stop_pct = self._params.get('stop_pct', DEFAULT_STOP_PCT)
+        target_risk_mult = self._params.get('target_risk_mult', DEFAULT_TARGET_RISK_MULT)
+        stop = price * (1 + stop_pct)
         risk = stop - price
-        target_price = price - (risk * TARGET_RISK_MULT)
+        target_price = price - (risk * target_risk_mult)
 
         return Signal(
             direction=Direction.SHORT,
@@ -410,8 +448,8 @@ class ProbWeightedMagnet(BaseStrategy):
                 "volume_trend": vol_trend,
                 "net_gamma": round(net_gamma, 2),
                 "qualifying_strikes": len(qualifying),
-                "stop_pct": STOP_PCT,
-                "target_risk_mult": TARGET_RISK_MULT,
+                "stop_pct": stop_pct,
+                "target_risk_mult": target_risk_mult,
                 "risk": round(risk, 2),
                 "risk_reward_ratio": round(abs(target_price - price) / risk, 2)
                     if risk > 0 else 0,
@@ -446,11 +484,17 @@ class ProbWeightedMagnet(BaseStrategy):
         total_oi = target["total_oi"]
         net_delta = target["net_delta"]
         distance_pct = target["distance_pct"]
+        
+        # Get parameters
+        min_oi_concentration = self._params.get('min_oi_concentration', DEFAULT_MIN_OI_CONCENTRATION)
+        delta_accel_ratio = self._params.get('delta_accel_ratio', DEFAULT_DELTA_ACCEL_RATIO)
+        consolidation_ratio_param = self._params.get('consolidation_ratio', DEFAULT_CONSOLIDATION_RATIO)
+        max_confidence = self._params.get('max_confidence', DEFAULT_MAX_CONFIDENCE)
 
         # 1. OI concentration (0.20–0.30)
         #    Normalize against max OI in qualifying set
-        # Scale: MIN_OI_CONCENTRATION = baseline, 10× that = full weight
-        oi_scaled = min(1.0, (total_oi - MIN_OI_CONCENTRATION) / (MIN_OI_CONCENTRATION * 9))
+        # Scale: min_oi_concentration = baseline, 10× that = full weight
+        oi_scaled = min(1.0, (total_oi - min_oi_concentration) / (min_oi_concentration * 9))
         oi_component = 0.20 + 0.10 * oi_scaled
 
         # 2. Delta acceleration (0.15–0.25)
@@ -461,15 +505,15 @@ class ProbWeightedMagnet(BaseStrategy):
         if len(qualifying) > 1:
             avg_delta = sum(s["net_delta"] for s in qualifying) / len(qualifying)
             accel_ratio = net_delta / avg_delta if avg_delta > 0 else 1.0
-            accel_scaled = min(1.0, (accel_ratio - 1.0) / (DELTA_ACCEL_RATIO - 1.0 + 0.5))
+            accel_scaled = min(1.0, (accel_ratio - 1.0) / (delta_accel_ratio - 1.0 + 0.5))
             delta_component = 0.15 + 0.10 * min(1.0, (delta_scaled + accel_scaled) / 2)
         else:
             delta_component = 0.15 + 0.10 * delta_scaled
 
         # 3. Price consolidation tightness (0.15–0.20)
         #    Tighter consolidation = more coiled = higher confidence
-        #    consolidation_ratio < 0.40 required; closer to 0 = tighter
-        cons_scaled = 1.0 - (consolidation_ratio / CONSOLIDATION_RATIO)
+        #    consolidation_ratio < consolidation_ratio_param required; closer to 0 = tighter
+        cons_scaled = 1.0 - (consolidation_ratio / consolidation_ratio_param)
         cons_component = 0.15 + 0.05 * max(0, cons_scaled)
 
         # 4. Volume profile (0.10–0.15)
@@ -496,4 +540,4 @@ class ProbWeightedMagnet(BaseStrategy):
             + dist_component
         )
 
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        return min(max_confidence, max(0.0, confidence))

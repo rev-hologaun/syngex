@@ -47,17 +47,20 @@ from strategies.utils import normalize_confidence
 logger = logging.getLogger("Syngex.Strategies.GEXDivergence")
 
 # ---------------------------------------------------------------------------
-# Constants
+# Default Fallback Constants
+# These are used ONLY if config/strategies.yaml is missing values.
+# The actual values should be configured in strategies.yaml under
+# layer1.gex_divergence.params
 # ---------------------------------------------------------------------------
 
-DIVERGENCE_MIN_SLOPE = 0.0005   # Minimum slope magnitude (0.05% — catches subtler divergences)
-DIVERGENCE_WINDOW = 30           # Number of points for slope calculation
-CONFIRMATION_CANDLE_PCT = 0.002  # 0.2% candle for confirmation
-MIN_CONFIDENCE = 0.25            # Minimum confidence to emit signal
-STOP_PCT = 0.005                 # 0.5% stop
-TARGET_RISK_MULT = 1.5           # 1.5× risk for target
-MIN_DATA_POINTS = 15             # Minimum data points for slope calculation
-MIN_TOTAL_GEX = 1000000.0        # 1M — minimum GEX wall strength
+DEFAULT_DIVERGENCE_MIN_SLOPE = 0.0005   # Minimum slope magnitude (0.05% — catches subtler divergences)
+DEFAULT_DIVERGENCE_WINDOW = 30           # Number of points for slope calculation
+DEFAULT_CONFIRMATION_CANDLE_PCT = 0.002  # 0.2% candle for confirmation
+DEFAULT_MIN_CONFIDENCE = 0.25            # Minimum confidence to emit signal
+DEFAULT_STOP_PCT = 0.005                 # 0.5% stop
+DEFAULT_TARGET_RISK_MULT = 1.5           # 1.5× risk for target
+DEFAULT_MIN_DATA_POINTS = 15             # Minimum data points for slope calculation
+DEFAULT_MIN_TOTAL_GEX = 1000000.0        # 1M — minimum GEX wall strength
 
 
 class GEXDivergence(BaseStrategy):
@@ -83,6 +86,19 @@ class GEXDivergence(BaseStrategy):
         Returns empty list when divergence is not detected or data
         is insufficient.
         """
+        # Apply config params from data dict
+        self._apply_params(data)
+
+        # Extract params with fallback defaults
+        divergence_min_slope = self._params.get('divergence_min_slope', DEFAULT_DIVERGENCE_MIN_SLOPE)
+        divergence_window = self._params.get('divergence_window', DEFAULT_DIVERGENCE_WINDOW)
+        confirmation_candle_pct = self._params.get('confirmation_candle_pct', DEFAULT_CONFIRMATION_CANDLE_PCT)
+        min_confidence = self._params.get('min_confidence', DEFAULT_MIN_CONFIDENCE)
+        stop_pct = self._params.get('stop_pct', DEFAULT_STOP_PCT)
+        target_risk_mult = self._params.get('target_risk_mult', DEFAULT_TARGET_RISK_MULT)
+        min_data_points = self._params.get('min_data_points', DEFAULT_MIN_DATA_POINTS)
+        min_total_gex = self._params.get('min_total_gex', DEFAULT_MIN_TOTAL_GEX)
+
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
             return []
@@ -96,12 +112,12 @@ class GEXDivergence(BaseStrategy):
 
         # Get price rolling window
         price_window = self._get_price_window(rolling_data)
-        if price_window is None or price_window.count < MIN_DATA_POINTS:
+        if price_window is None or price_window.count < min_data_points:
             return []
 
         # Get net_gamma rolling window — this is critical
-        gamma_window = self._get_gamma_window(rolling_data)
-        if gamma_window is None or gamma_window.count < MIN_DATA_POINTS:
+        gamma_window = self._get_gamma_window(rolling_data, min_data_points)
+        if gamma_window is None or gamma_window.count < min_data_points:
             return []  # No gamma data — skip gracefully
 
         # Calculate slopes
@@ -117,9 +133,9 @@ class GEXDivergence(BaseStrategy):
             return []  # Same direction — no divergence
 
         # Both slopes must exceed minimum magnitude
-        if abs(price_slope) < DIVERGENCE_MIN_SLOPE:
+        if abs(price_slope) < divergence_min_slope:
             return []
-        if abs(gamma_slope) < DIVERGENCE_MIN_SLOPE:
+        if abs(gamma_slope) < divergence_min_slope:
             return []
 
         # Determine divergence type
@@ -139,7 +155,7 @@ class GEXDivergence(BaseStrategy):
 
         # Get confirmation from last price movement
         price_change = self._get_price_change(price_window)
-        confirmed = self._check_confirmation(price_change, divergence_type)
+        confirmed = self._check_confirmation(price_change, divergence_type, confirmation_candle_pct)
         if not confirmed:
             return []  # No confirmation candle
 
@@ -149,14 +165,14 @@ class GEXDivergence(BaseStrategy):
             price_window, gamma_window, regime, confirmed,
             regime_misaligned
         )
-        if confidence < MIN_CONFIDENCE:
+        if confidence < min_confidence:
             return []
 
         # GEX wall strength gate: divergence on thin walls is worthless
         try:
             summary = gex_calc.get_summary()
             net_gamma_val = summary.get("net_gamma", 0.0)
-            if abs(net_gamma_val) < MIN_TOTAL_GEX:
+            if abs(net_gamma_val) < min_total_gex:
                 return []  # GEX walls too weak for a reliable signal
         except Exception:
             return []  # Can't assess GEX strength — skip
@@ -164,13 +180,13 @@ class GEXDivergence(BaseStrategy):
         # Build signal
         if divergence_type == "bearish":
             direction = Direction.SHORT
-            stop = underlying_price * (1 + STOP_PCT)
-            target = underlying_price * (1 - STOP_PCT * TARGET_RISK_MULT)
+            stop = underlying_price * (1 + stop_pct)
+            target = underlying_price * (1 - stop_pct * target_risk_mult)
             reason_suffix = "price rising but GEX walls evaporating"
         else:
             direction = Direction.LONG
-            stop = underlying_price * (1 - STOP_PCT)
-            target = underlying_price * (1 + STOP_PCT * TARGET_RISK_MULT)
+            stop = underlying_price * (1 - stop_pct)
+            target = underlying_price * (1 + stop_pct * target_risk_mult)
             reason_suffix = "price falling but GEX walls strengthening"
 
         risk = abs(underlying_price - stop)
@@ -246,6 +262,7 @@ class GEXDivergence(BaseStrategy):
         self,
         price_change: Optional[float],
         divergence_type: str,
+        confirmation_candle_pct: float,
     ) -> bool:
         """
         Check if the latest price movement confirms the divergence signal.
@@ -259,10 +276,10 @@ class GEXDivergence(BaseStrategy):
         if divergence_type == "bearish":
             # Price should not be strongly rising
             # Allow small upticks (noise) but reject strong rallies
-            return price_change < CONFIRMATION_CANDLE_PCT * 3
+            return price_change < confirmation_candle_pct * 3
         else:
             # Price should not be strongly falling
-            return price_change > -CONFIRMATION_CANDLE_PCT * 3
+            return price_change > -confirmation_candle_pct * 3
 
     # ------------------------------------------------------------------
     # Confidence computation
@@ -338,7 +355,7 @@ class GEXDivergence(BaseStrategy):
         return None
 
     def _get_gamma_window(
-        self, rolling_data: Dict[str, Any]
+        self, rolling_data: Dict[str, Any], min_data_points: int
     ) -> Optional[Any]:
         """
         Get the net_gamma rolling window.
@@ -348,6 +365,6 @@ class GEXDivergence(BaseStrategy):
         """
         for key in (KEY_NET_GAMMA_5M,):
             rw = rolling_data.get(key)
-            if rw is not None and rw.count >= MIN_DATA_POINTS:
+            if rw is not None and rw.count >= min_data_points:
                 return rw
         return None

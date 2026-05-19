@@ -112,6 +112,12 @@ class SyngexOrchestrator:
         self._signal_timer: float = 0.0
         self._state_export_timer: float = 0.0
 
+        # Backpressure mechanism
+        self._last_processing_time: float = 0.0
+        self._target_processing_time: float = 0.2  # 200ms target
+        self._backpressure_factor: float = 1.0
+        self._backpressure_events: int = 0
+
         # Shared data file for Streamlit dashboard (symbol-specific)
         self._data_dir = Path(__file__).parent.parent / "data"
 
@@ -374,7 +380,8 @@ class SyngexOrchestrator:
             config_task = asyncio.create_task(self._watch_config())
 
             while self._running:
-                now = time.monotonic()
+                loop_start = time.monotonic()
+                now = loop_start
 
                 # Report Gamma Profile at intervals (using new engine)
                 profile_check = now - self._profile_timer >= self.PROFILE_INTERVAL
@@ -443,7 +450,44 @@ class SyngexOrchestrator:
                     )
                     break
 
-                await asyncio.sleep(0.25)
+                # Track processing time and apply backpressure
+                processing_time = time.monotonic() - loop_start
+                self._last_processing_time = processing_time
+                
+                # Calculate adaptive sleep with backpressure
+                if processing_time > self._target_processing_time:
+                    # We're falling behind - increase sleep slightly to give system a chance to catch up
+                    old_factor = self._backpressure_factor
+                    self._backpressure_factor = min(2.0, self._backpressure_factor * 1.1)
+                    self._backpressure_events += 1
+                    
+                    if self._backpressure_factor != old_factor:
+                        log_with_correlation(
+                            self._logger, logging.WARNING,
+                            "Backpressure activated - processing behind target",
+                            correlation_id=self._correlation_id,
+                            processing_time_ms=round(processing_time * 1000, 2),
+                            target_time_ms=round(self._target_processing_time * 1000, 2),
+                            backpressure_factor=round(self._backpressure_factor, 3)
+                        )
+                else:
+                    # Processing is fast - can reduce backpressure
+                    old_factor = self._backpressure_factor
+                    self._backpressure_factor = max(1.0, self._backpressure_factor * 0.9)
+                    
+                    if self._backpressure_factor != old_factor:
+                        log_with_correlation(
+                            self._logger, logging.INFO,
+                            "Backpressure reduced - processing within target",
+                            correlation_id=self._correlation_id,
+                            processing_time_ms=round(processing_time * 1000, 2),
+                            backpressure_factor=round(self._backpressure_factor, 3)
+                        )
+                
+                # Adaptive sleep
+                base_sleep = 0.25  # 250ms base
+                adaptive_sleep = base_sleep * self._backpressure_factor
+                await asyncio.sleep(adaptive_sleep)
         finally:
             config_task.cancel()
             self._dashboard_service.stop()

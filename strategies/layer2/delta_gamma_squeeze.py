@@ -67,6 +67,19 @@ class DeltaGammaSqueeze(BaseStrategy):
     strategy_id = "delta_gamma_squeeze"
     layer = "layer2"
 
+    def __init__(self):
+        super().__init__()
+        self._params = {
+            'wall_proximity_pct': WALL_PROXIMITY_PCT,
+            'delta_accel_ratio': DELTA_ACCEL_RATIO,
+            'volume_spike_ratio': VOLUME_SPIKE_RATIO,
+            'min_wall_gex': MIN_WALL_GEX,
+            'min_data_points': MIN_DATA_POINTS,
+            'min_confidence': MIN_CONFIDENCE,
+            'stop_below_wall_pct': STOP_BELOW_WALL_PCT,
+            'target_risk_mult': TARGET_RISK_MULT,
+        }
+
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """
         Evaluate current state for gamma squeeze setup (bidirectional).
@@ -74,6 +87,9 @@ class DeltaGammaSqueeze(BaseStrategy):
         Returns signals for both LONG (call wall above) and SHORT
         (put wall below) when conditions are met.
         """
+        # Apply params from data if available
+        self._apply_params(data)
+        
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
             return []
@@ -190,7 +206,7 @@ class DeltaGammaSqueeze(BaseStrategy):
             distance_pct, accel_ratio, vol_spike, price_trend,
             wall_gex, regime, net_gamma, direction,
         )
-        if confidence < MIN_CONFIDENCE:
+        if confidence < self._params.get('min_confidence', MIN_CONFIDENCE):
             return None
 
         # Add trend from price window
@@ -199,9 +215,11 @@ class DeltaGammaSqueeze(BaseStrategy):
 
         # Build signal with direction-specific entry/stop/target
         entry = price
-        stop = entry * (1 - STOP_BELOW_WALL_PCT) if direction == "LONG" else entry * (1 + STOP_BELOW_WALL_PCT)
+        stop_pct = self._params.get('stop_below_wall_pct', STOP_BELOW_WALL_PCT)
+        target_mult = self._params.get('target_risk_mult', TARGET_RISK_MULT)
+        stop = entry * (1 - stop_pct) if direction == "LONG" else entry * (1 + stop_pct)
         risk = abs(entry - stop)
-        target = entry + (risk * TARGET_RISK_MULT) if direction == "LONG" else entry - (risk * TARGET_RISK_MULT)
+        target = entry + (risk * target_mult) if direction == "LONG" else entry - (risk * target_mult)
         direction_enum = Direction.LONG if direction == "LONG" else Direction.SHORT
 
         return Signal(
@@ -247,7 +265,7 @@ class DeltaGammaSqueeze(BaseStrategy):
         avg. > 1.0 means accelerating.
         """
         window = rolling_data.get(KEY_WALL_DELTA_5M)
-        if window is None or window.count < MIN_DATA_POINTS:
+        if window is None or window.count < self._params.get('min_data_points', MIN_DATA_POINTS):
             return None
 
         rolling_avg = window.mean
@@ -275,7 +293,7 @@ class DeltaGammaSqueeze(BaseStrategy):
         if current is None or avg is None or avg == 0:
             return False
 
-        return current > avg * VOLUME_SPIKE_RATIO
+        return current > avg * self._params.get('volume_spike_ratio', VOLUME_SPIKE_RATIO)
 
     def _check_price_momentum(self, rolling_data: Dict[str, Any]) -> str:
         """Check price momentum from rolling window."""
@@ -302,7 +320,7 @@ class DeltaGammaSqueeze(BaseStrategy):
         """
         # 1. Proximity to wall (0.25–0.35)
         # Closer = higher confidence
-        proximity_conf = 0.25 + 0.10 * (1 - distance_pct / WALL_PROXIMITY_PCT)
+        proximity_conf = 0.25 + 0.10 * (1 - distance_pct / self._params.get('wall_proximity_pct', WALL_PROXIMITY_PCT))
 
         # 2. Delta acceleration (0.20–0.30)
         # Higher ratio = more urgency

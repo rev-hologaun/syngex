@@ -43,17 +43,20 @@ from strategies.rolling_keys import KEY_PRICE_5M, KEY_PRICE_30M
 logger = logging.getLogger("Syngex.Strategies.GEXImbalance")
 
 # ---------------------------------------------------------------------------
-# Constants
+# Default Fallback Constants
+# These are used ONLY if config/strategies.yaml is missing values.
+# The actual values should be configured in strategies.yaml under
+# layer1.gex_imbalance.params
 # ---------------------------------------------------------------------------
 
-PUT_HEAVY_RATIO = 0.5        # < 0.5 → long bias
-CALL_HEAVY_RATIO = 0.65      # > 0.65 → short bias
-STRONG_PUT_RATIO = 0.25      # very strong long signal
-STRONG_CALL_RATIO = 0.75     # very strong short signal
-MIN_MESSAGES = 20            # minimum data points for signal quality
-STOP_VOL_MULT = 2.5          # stop = 2.5x rolling price std dev
-TARGET_RISK_MULT = 1.5       # target = 1.5x stop distance
-MIN_CONFIDENCE = 0.55        # Minimum confidence to emit signal
+DEFAULT_PUT_HEAVY_RATIO = 0.5        # < 0.5 → long bias
+DEFAULT_CALL_HEAVY_RATIO = 0.65      # > 0.65 → short bias
+DEFAULT_STRONG_PUT_RATIO = 0.25      # very strong long signal
+DEFAULT_STRONG_CALL_RATIO = 0.75     # very strong short signal
+DEFAULT_MIN_MESSAGES = 20            # minimum data points for signal quality
+DEFAULT_STOP_VOL_MULT = 2.5          # stop = 2.5x rolling price std dev
+DEFAULT_TARGET_RISK_MULT = 1.5       # target = 1.5x stop distance
+DEFAULT_MIN_CONFIDENCE = 0.55        # Minimum confidence to emit signal
 
 
 class GEXImbalance(BaseStrategy):
@@ -75,6 +78,19 @@ class GEXImbalance(BaseStrategy):
 
         Returns empty list when ratio is neutral or data is insufficient.
         """
+        # Apply config params from data dict
+        self._apply_params(data)
+
+        # Extract params with fallback defaults
+        put_heavy_ratio = self._params.get('put_heavy_ratio', DEFAULT_PUT_HEAVY_RATIO)
+        call_heavy_ratio = self._params.get('call_heavy_ratio', DEFAULT_CALL_HEAVY_RATIO)
+        strong_put_ratio = self._params.get('strong_put_ratio', DEFAULT_STRONG_PUT_RATIO)
+        strong_call_ratio = self._params.get('strong_call_ratio', DEFAULT_STRONG_CALL_RATIO)
+        min_messages = self._params.get('min_messages', DEFAULT_MIN_MESSAGES)
+        stop_vol_mult = self._params.get('stop_vol_mult', DEFAULT_STOP_VOL_MULT)
+        target_risk_mult = self._params.get('target_risk_mult', DEFAULT_TARGET_RISK_MULT)
+        min_confidence = self._params.get('min_confidence', DEFAULT_MIN_CONFIDENCE)
+
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
             return []
@@ -89,7 +105,7 @@ class GEXImbalance(BaseStrategy):
         total_msgs = summary.get("total_messages", 0)
 
         # Require minimum data quality
-        if total_msgs < MIN_MESSAGES:
+        if total_msgs < min_messages:
             return []
 
         # Calculate call and put GEX from greeks summary
@@ -100,7 +116,7 @@ class GEXImbalance(BaseStrategy):
         ratio = call_gex / put_gex if put_gex > 0 else 0.0
 
         # Determine bias direction
-        bias, bias_strength = self._classify_bias(ratio, call_gex, put_gex)
+        bias, bias_strength = self._classify_bias(ratio, call_gex, put_gex, put_heavy_ratio, call_heavy_ratio, strong_put_ratio, strong_call_ratio)
         if bias is None:
             return []  # Neutral zone — no signal
 
@@ -115,9 +131,10 @@ class GEXImbalance(BaseStrategy):
 
         # Compute confidence
         confidence = self._compute_confidence(
-            ratio, bias_strength, bias, regime, total_msgs, vwap_confirmed
+            ratio, bias_strength, bias, regime, total_msgs, vwap_confirmed,
+            put_heavy_ratio, call_heavy_ratio, strong_put_ratio, strong_call_ratio
         )
-        if confidence < MIN_CONFIDENCE:
+        if confidence < min_confidence:
             return []
 
         # Build volatility-based stop/target
@@ -125,7 +142,7 @@ class GEXImbalance(BaseStrategy):
         if price_window and price_window.count >= 10 and price_window.std is not None:
             vol = price_window.std
             if vol > 0:
-                stop_distance = vol * STOP_VOL_MULT
+                stop_distance = vol * stop_vol_mult
             else:
                 stop_distance = underlying_price * 0.005  # fallback: 0.5%
         else:
@@ -133,12 +150,12 @@ class GEXImbalance(BaseStrategy):
 
         if bias == "LONG":
             stop = underlying_price - stop_distance
-            target = underlying_price + stop_distance * TARGET_RISK_MULT
+            target = underlying_price + stop_distance * target_risk_mult
             direction = Direction.LONG
             side_label = "put-heavy"
         else:
             stop = underlying_price + stop_distance
-            target = underlying_price - stop_distance * TARGET_RISK_MULT
+            target = underlying_price - stop_distance * target_risk_mult
             direction = Direction.SHORT
             side_label = "call-heavy"
 
@@ -208,7 +225,9 @@ class GEXImbalance(BaseStrategy):
     # ------------------------------------------------------------------
 
     def _classify_bias(
-        self, ratio: float, call_gex: float, put_gex: float
+        self, ratio: float, call_gex: float, put_gex: float,
+        put_heavy_ratio: float, call_heavy_ratio: float,
+        strong_put_ratio: float, strong_call_ratio: float
     ) -> tuple:
         """
         Classify the GEX imbalance into LONG bias, SHORT bias, or neutral.
@@ -220,15 +239,15 @@ class GEXImbalance(BaseStrategy):
             return (None, 0.0)
 
         # Put-heavy → LONG bias
-        if ratio < PUT_HEAVY_RATIO:
+        if ratio < put_heavy_ratio:
             # Strength: how far below threshold
-            strength = min(1.0, (PUT_HEAVY_RATIO - ratio) / PUT_HEAVY_RATIO)
+            strength = min(1.0, (put_heavy_ratio - ratio) / put_heavy_ratio)
             return ("LONG", strength)
 
         # Call-heavy → SHORT bias
-        if ratio > CALL_HEAVY_RATIO:
+        if ratio > call_heavy_ratio:
             # Normalize against realistic upper bound (3.0 = calls 3x puts)
-            strength = min(1.0, (ratio - CALL_HEAVY_RATIO) / (3.0 - CALL_HEAVY_RATIO))
+            strength = min(1.0, (ratio - call_heavy_ratio) / (3.0 - call_heavy_ratio))
             return ("SHORT", strength)
 
         # Neutral zone
@@ -283,6 +302,10 @@ class GEXImbalance(BaseStrategy):
         regime: str,
         total_msgs: int,
         vwap_confirmed: bool,
+        put_heavy_ratio: float,
+        call_heavy_ratio: float,
+        strong_put_ratio: float,
+        strong_call_ratio: float,
     ) -> float:
         """
         Combine ratio extremity, regime alignment, and data quality into confidence.
@@ -291,18 +314,18 @@ class GEXImbalance(BaseStrategy):
         """
         # Ratio extremity: how far from neutral (0.4–0.6)
         # Strong signals (near 0 or 1) get higher confidence
-        if ratio < PUT_HEAVY_RATIO:
+        if ratio < put_heavy_ratio:
             # Put-heavy: closer to 0 = stronger
-            if ratio <= STRONG_PUT_RATIO:
+            if ratio <= strong_put_ratio:
                 ratio_conf = 0.8
             else:
-                ratio_conf = 0.4 + 0.4 * (1 - ratio / PUT_HEAVY_RATIO)
-        elif ratio > CALL_HEAVY_RATIO:
+                ratio_conf = 0.4 + 0.4 * (1 - ratio / put_heavy_ratio)
+        elif ratio > call_heavy_ratio:
             # Call-heavy: higher ratio = stronger (normalize against 3.0 upper bound)
-            if ratio >= STRONG_CALL_RATIO * 3:  # ~2.25 → strong
+            if ratio >= strong_call_ratio * 3:  # ~2.25 → strong
                 ratio_conf = 0.8
             else:
-                ratio_conf = 0.4 + 0.4 * min(1.0, (ratio - CALL_HEAVY_RATIO) / (3.0 - CALL_HEAVY_RATIO))
+                ratio_conf = 0.4 + 0.4 * min(1.0, (ratio - call_heavy_ratio) / (3.0 - call_heavy_ratio))
         else:
             ratio_conf = 0.0
 

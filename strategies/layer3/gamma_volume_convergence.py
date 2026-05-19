@@ -38,43 +38,43 @@ logger = logging.getLogger("Syngex.Strategies.GammaVolumeConvergence")
 # Constants
 # ---------------------------------------------------------------------------
 
-# Delta acceleration threshold: current total_delta must exceed rolling avg
-# by this ratio (15% above rolling average)
-DELTA_ACCEL_RATIO = 1.10
+# Configuration parameters - can be overridden via self._params
+# Default values provided for standalone operation
+DEFAULT_DELTA_ACCEL_RATIO = 1.10
 
 # Delta acceleration lower bound for SHORT: current total_delta must be
 # above this ratio of rolling avg (ensures delta is declining, not negative).
 # A ratio of 0.30 means delta is still 30% of avg — declining but positive.
 # Ratios below this indicate delta has flipped negative, which is a different
 # market regime (not "declining delta" but "collapsed/negative delta").
-DELTA_ACCEL_MIN_RATIO = 0.30
+DEFAULT_DELTA_ACCEL_MIN_RATIO = 0.30
 
 # Gamma spike threshold: current total_gamma must exceed rolling avg by
 # this ratio (20% above rolling average)
-GAMMA_SPIKE_RATIO = 1.15
+DEFAULT_GAMMA_SPIKE_RATIO = 1.15
 
 # Volume spike threshold: current volume must exceed rolling avg by this
 # ratio (20% above rolling average)
-VOLUME_SPIKE_RATIO = 1.15
+DEFAULT_VOLUME_SPIKE_RATIO = 1.15
 
 # Stop loss: 0.5% against entry
-STOP_PCT = 0.005
+DEFAULT_STOP_PCT = 0.005
 
 # Take profit: 1.0% from entry (2:1 risk/reward)
-TARGET_PCT = 0.010
+DEFAULT_TARGET_PCT = 0.010
 
 # Minimum confidence to emit a signal
-MIN_CONFIDENCE = 0.25
+DEFAULT_MIN_CONFIDENCE = 0.25
 
 # Maximum confidence — micro-signals shouldn't carry max conviction
-MAX_CONFIDENCE = 0.90
+DEFAULT_MAX_CONFIDENCE = 0.90
 
 # Minimum data points in rolling windows before trusting signals
-MIN_DATA_POINTS = 3
+DEFAULT_MIN_DATA_POINTS = 3
 
 # Price trend confirmation thresholds (over 5m window)
-PRICE_UP_THRESHOLD = 0.001       # 0.1% rise over 5m window
-PRICE_DOWN_THRESHOLD = -0.001    # 0.1% drop over 5m window
+DEFAULT_PRICE_UP_THRESHOLD = 0.001       # 0.1% rise over 5m window
+DEFAULT_PRICE_DOWN_THRESHOLD = -0.001    # 0.1% drop over 5m window
 
 
 class GammaVolumeConvergence(BaseStrategy):
@@ -96,12 +96,36 @@ class GammaVolumeConvergence(BaseStrategy):
     strategy_id = "gamma_volume_convergence"
     layer = "layer3"
 
+    def __init__(self):
+        """Initialize strategy with configurable parameters."""
+        super().__init__()
+        self._params = {
+            'delta_accel_ratio': DEFAULT_DELTA_ACCEL_RATIO,
+            'delta_accel_min_ratio': DEFAULT_DELTA_ACCEL_MIN_RATIO,
+            'gamma_spike_ratio': DEFAULT_GAMMA_SPIKE_RATIO,
+            'volume_spike_ratio': DEFAULT_VOLUME_SPIKE_RATIO,
+            'stop_pct': DEFAULT_STOP_PCT,
+            'target_pct': DEFAULT_TARGET_PCT,
+            'min_confidence': DEFAULT_MIN_CONFIDENCE,
+            'max_confidence': DEFAULT_MAX_CONFIDENCE,
+            'min_data_points': DEFAULT_MIN_DATA_POINTS,
+            'price_up_threshold': DEFAULT_PRICE_UP_THRESHOLD,
+            'price_down_threshold': DEFAULT_PRICE_DOWN_THRESHOLD,
+        }
+
+    def _apply_params(self, data: Dict[str, Any]) -> None:
+        """Apply parameter overrides from data dict if present."""
+        if 'params' in data:
+            self._params.update(data['params'])
+
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """
         Evaluate current state for gamma-volume convergence signals.
 
         Returns empty list when no ignition signal is detected.
         """
+        # Apply parameter overrides
+        self._apply_params(data)
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
             return []
@@ -174,15 +198,22 @@ class GammaVolumeConvergence(BaseStrategy):
 
         # Check gamma spike
         gamma_spike = self._check_gamma_spike(rolling_data)
-        if gamma_spike is None or gamma_spike < GAMMA_SPIKE_RATIO:
+        if gamma_spike is None or gamma_spike < self._params['gamma_spike_ratio']:
             return None
 
         # Check VolumeUp spike
-        if not self._check_volume_spike(rolling_data, "volume_up_5m"):
+        if not self._check_volume_spike(
+            rolling_data, "volume_up_5m",
+            self._params['volume_spike_ratio'], self._params['min_data_points']
+        ):
             return None
 
         # Check price trend is UP
-        if self._check_price_trend(rolling_data) != "UP":
+        if self._check_price_trend(
+            rolling_data,
+            self._params['price_up_threshold'],
+            self._params['price_down_threshold'],
+        ) != "UP":
             return None
 
         # All conditions met — compute confidence and build signal
@@ -190,13 +221,13 @@ class GammaVolumeConvergence(BaseStrategy):
             price, atm_strike, delta_accel, gamma_spike,
             rolling_data, "LONG", net_gamma, gex_calc,
         )
-        if confidence < MIN_CONFIDENCE:
+        if confidence < self._params['min_confidence']:
             return None
 
         # Build signal with quick-scalp parameters
         entry = price
-        stop = entry * (1 - STOP_PCT)
-        target = entry * (1 + TARGET_PCT)
+        stop = entry * (1 - self._params['stop_pct'])
+        target = entry * (1 + self._params['target_pct'])
 
         # Get wall proximity for metadata
         walls = self._safe_get_walls(gex_calc)
@@ -272,20 +303,27 @@ class GammaVolumeConvergence(BaseStrategy):
         # For SHORT, we want delta declining but still positive:
         # DELTA_ACCEL_MIN_RATIO <= ratio < 0.85
         # This ensures delta is actively declining (not collapsed or negative).
-        if delta_accel >= 0.85 or delta_accel < DELTA_ACCEL_MIN_RATIO:
+        if delta_accel >= 0.85 or delta_accel < self._params['delta_accel_min_ratio']:
             return None
 
         # Check gamma spike (same for both directions)
         gamma_spike = self._check_gamma_spike(rolling_data)
-        if gamma_spike is None or gamma_spike < GAMMA_SPIKE_RATIO:
+        if gamma_spike is None or gamma_spike < self._params['gamma_spike_ratio']:
             return None
 
         # Check VolumeDown spike
-        if not self._check_volume_spike(rolling_data, "volume_down_5m"):
+        if not self._check_volume_spike(
+            rolling_data, "volume_down_5m",
+            self._params['volume_spike_ratio'], self._params['min_data_points']
+        ):
             return None
 
         # Check price trend is DOWN
-        if self._check_price_trend(rolling_data) != "DOWN":
+        if self._check_price_trend(
+            rolling_data,
+            self._params['price_up_threshold'],
+            self._params['price_down_threshold'],
+        ) != "DOWN":
             return None
 
         # All conditions met — compute confidence and build signal
@@ -293,13 +331,13 @@ class GammaVolumeConvergence(BaseStrategy):
             price, atm_strike, delta_accel, gamma_spike,
             rolling_data, "SHORT", net_gamma, gex_calc,
         )
-        if confidence < MIN_CONFIDENCE:
+        if confidence < self._params['min_confidence']:
             return None
 
         # Build signal with quick-scalp parameters
         entry = price
-        stop = entry * (1 + STOP_PCT)
-        target = entry * (1 - TARGET_PCT)
+        stop = entry * (1 + self._params['stop_pct'])
+        target = entry * (1 - self._params['target_pct'])
 
         # Get wall proximity for metadata
         walls = self._safe_get_walls(gex_calc)
@@ -377,7 +415,7 @@ class GammaVolumeConvergence(BaseStrategy):
             None  = insufficient data
         """
         window = rolling_data.get(KEY_TOTAL_DELTA_5M)
-        if window is None or window.count < MIN_DATA_POINTS:
+        if window is None or window.count < self._params['min_data_points']:
             return None
 
         rolling_avg = window.mean
@@ -418,6 +456,8 @@ class GammaVolumeConvergence(BaseStrategy):
     def _check_volume_spike(
         rolling_data: Dict[str, Any],
         key: str,
+        volume_spike_ratio: float,
+        min_data_points: int,
     ) -> bool:
         """
         Check if the specified volume window is spiking above
@@ -425,9 +465,11 @@ class GammaVolumeConvergence(BaseStrategy):
 
         Args:
             key: Rolling window key (e.g. "volume_up_5m", "volume_down_5m")
+            volume_spike_ratio: Threshold ratio for spike detection
+            min_data_points: Minimum data points required
         """
         window = rolling_data.get(key)
-        if window is None or window.count < MIN_DATA_POINTS:
+        if window is None or window.count < min_data_points:
             return False
 
         current = window.latest
@@ -435,10 +477,14 @@ class GammaVolumeConvergence(BaseStrategy):
         if current is None or avg is None or avg == 0:
             return False
 
-        return current > avg * VOLUME_SPIKE_RATIO
+        return current > avg * volume_spike_ratio
 
     @staticmethod
-    def _check_price_trend(rolling_data: Dict[str, Any]) -> str:
+    def _check_price_trend(
+        rolling_data: Dict[str, Any],
+        price_up_threshold: float,
+        price_down_threshold: float,
+    ) -> str:
         """
         Check price trend from the rolling window.
 
@@ -455,9 +501,9 @@ class GammaVolumeConvergence(BaseStrategy):
 
         # Fallback: check change_pct directly
         if window.change_pct is not None:
-            if window.change_pct > PRICE_UP_THRESHOLD:
+            if window.change_pct > price_up_threshold:
                 return "UP"
-            elif window.change_pct < PRICE_DOWN_THRESHOLD:
+            elif window.change_pct < price_down_threshold:
                 return "DOWN"
 
         return "FLAT"
@@ -495,7 +541,7 @@ class GammaVolumeConvergence(BaseStrategy):
             # so that ratio=0.85 → deviation=0.15 (low conf),
             # ratio=0.30 → deviation=0.70 (high conf)
             deviation = 1.0 - delta_accel
-            max_deviation = 1.0 - DELTA_ACCEL_MIN_RATIO  # = 0.70
+            max_deviation = 1.0 - self._params['delta_accel_min_ratio']  # = 0.70
             delta_conf = 0.20 + 0.10 * min(1.0, deviation / max_deviation)
 
         # 2. Gamma spike component (0.20–0.30)
@@ -531,7 +577,7 @@ class GammaVolumeConvergence(BaseStrategy):
         norm_regime = normalize_confidence(regime_conf, 0.10, 0.15)
         norm_wall = normalize_confidence(wall_conf, 0.05, 0.10)
         confidence = (norm_delta + norm_gamma + norm_vol + norm_regime + norm_wall) / 5.0
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        return min(self._params['max_confidence'], max(0.0, confidence))
 
     def _wall_proximity_confidence(
         self,

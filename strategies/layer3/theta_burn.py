@@ -79,12 +79,38 @@ class ThetaBurn(BaseStrategy):
     strategy_id = "theta_burn"
     layer = "layer3"
 
+    def __init__(self):
+        """Initialize strategy with configurable parameters."""
+        super().__init__()
+        self._params = {
+            'min_net_gamma': MIN_NET_GAMMA,
+            'wall_proximity_pct': WALL_PROXIMITY_PCT,
+            'stop_past_wall_pct': STOP_PAST_WALL_PCT,
+            'min_target_pct': MIN_TARGET_PCT,
+            'max_target_pct': MAX_TARGET_PCT,
+            'range_narrowness_ratio': RANGE_NARROWNESS_RATIO,
+            'divergence_volume_threshold': DIVERGENCE_VOLUME_THRESHOLD,
+            'min_confidence': MIN_CONFIDENCE,
+            'max_confidence': MAX_CONFIDENCE,
+            'min_data_points': MIN_DATA_POINTS,
+            'gamma_strength_high': GAMMA_STRENGTH_HIGH,
+            'midnight_utc_start': MIDNIGHT_UTC_START,
+            'midnight_utc_end': MIDNIGHT_UTC_END,
+        }
+
+    def _apply_params(self, data: Dict[str, Any]) -> None:
+        """Apply parameter overrides from data dict if present."""
+        if 'params' in data:
+            self._params.update(data['params'])
+
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """
         Evaluate current state for theta-burn pinning signals.
 
         Returns empty list when no pinning setup is detected.
         """
+        # Apply parameter overrides
+        self._apply_params(data)
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
             return []
@@ -103,7 +129,7 @@ class ThetaBurn(BaseStrategy):
             return []
 
         # Net gamma must be strongly positive
-        if net_gamma < MIN_NET_GAMMA:
+        if net_gamma < self._params['min_net_gamma']:
             return []
 
         # Validate rolling data availability
@@ -119,15 +145,15 @@ class ThetaBurn(BaseStrategy):
             return []
 
         if (
-            price_5m.count < MIN_DATA_POINTS
-            or price_30m.count < MIN_DATA_POINTS
-            or volume_5m.count < MIN_DATA_POINTS
+            price_5m.count < self._params['min_data_points']
+            or price_30m.count < self._params['min_data_points']
+            or volume_5m.count < self._params['min_data_points']
         ):
             return []
 
         # Check range narrowness: 5m range must be < 30% of 30m range
         range_ratio = self._check_range_narrowness(price_5m, price_30m)
-        if range_ratio is None or range_ratio >= RANGE_NARROWNESS_RATIO:
+        if range_ratio is None or range_ratio >= self._params['range_narrowness_ratio']:
             # Range not compressed enough — no pinning effect
             return []
 
@@ -198,7 +224,7 @@ class ThetaBurn(BaseStrategy):
 
         # Check proximity: price must be within WALL_PROXIMITY_PCT above wall
         distance_pct = (price - wall_strike) / price
-        if distance_pct < 0 or distance_pct > WALL_PROXIMITY_PCT:
+        if distance_pct < 0 or distance_pct > self._params['wall_proximity_pct']:
             return None
 
         # Check rejection signal
@@ -214,7 +240,7 @@ class ThetaBurn(BaseStrategy):
             distance_pct, rejection_score, rejection_type,
             range_ratio, timestamp, "LONG",
         )
-        if confidence < MIN_CONFIDENCE:
+        if confidence < self._params['min_confidence']:
             return None
 
         # Build signal
@@ -222,7 +248,7 @@ class ThetaBurn(BaseStrategy):
         trend = price_window.trend if price_window else "UNKNOWN"
 
         entry = price
-        stop = wall_strike * (1 - STOP_PAST_WALL_PCT)
+        stop = wall_strike * (1 - self._params['stop_past_wall_pct'])
         risk = entry - stop
 
         # Target: midpoint between wall and next wall above (or ATM)
@@ -303,7 +329,7 @@ class ThetaBurn(BaseStrategy):
 
         # Check proximity: price must be within WALL_PROXIMITY_PCT below wall
         distance_pct = (wall_strike - price) / price
-        if distance_pct < 0 or distance_pct > WALL_PROXIMITY_PCT:
+        if distance_pct < 0 or distance_pct > self._params['wall_proximity_pct']:
             return None
 
         # Check rejection signal
@@ -319,7 +345,7 @@ class ThetaBurn(BaseStrategy):
             distance_pct, rejection_score, rejection_type,
             range_ratio, timestamp, "SHORT",
         )
-        if confidence < MIN_CONFIDENCE:
+        if confidence < self._params['min_confidence']:
             return None
 
         # Build signal
@@ -327,7 +353,7 @@ class ThetaBurn(BaseStrategy):
         trend = price_window.trend if price_window else "UNKNOWN"
 
         entry = price
-        stop = wall_strike * (1 + STOP_PAST_WALL_PCT)
+        stop = wall_strike * (1 + self._params['stop_past_wall_pct'])
         risk = stop - entry
 
         # Target: midpoint between wall and next wall below (or ATM)
@@ -458,12 +484,12 @@ class ThetaBurn(BaseStrategy):
 
         # Price must be near the wall
         proximity = abs(latest - wall_strike) / wall_strike
-        if proximity > WALL_PROXIMITY_PCT * 2:
+        if proximity > self._params['wall_proximity_pct'] * 2:
             return None
 
         # Volume declining vs rolling average
         vol_ratio = vol_latest / vol_avg
-        if vol_ratio >= DIVERGENCE_VOLUME_THRESHOLD:
+        if vol_ratio >= self._params['divergence_volume_threshold']:
             return None
 
         # Score: lower volume = stronger divergence signal
@@ -616,25 +642,25 @@ class ThetaBurn(BaseStrategy):
         # 1. Gamma strength component (0.15–0.25)
         # Use absolute net_gamma as proxy for gamma strength
         gamma_strength = abs(wall_net_gamma) if wall_net_gamma != 0 else abs(wall_gex)
-        gamma_conf = 0.15 + 0.10 * min(1.0, gamma_strength / GAMMA_STRENGTH_HIGH)
+        gamma_conf = 0.15 + 0.10 * min(1.0, gamma_strength / self._params['gamma_strength_high'])
 
         # 2. Wall proximity component (0.15–0.25)
         # At 0% distance = 0.25, at WALL_PROXIMITY_PCT = 0.15
         if distance_pct <= 0:
             prox_conf = 0.25
-        elif distance_pct >= WALL_PROXIMITY_PCT:
+        elif distance_pct >= self._params['wall_proximity_pct']:
             prox_conf = 0.15
         else:
-            prox_conf = 0.25 - 0.10 * (distance_pct / WALL_PROXIMITY_PCT)
+            prox_conf = 0.25 - 0.10 * (distance_pct / self._params['wall_proximity_pct'])
 
         # 3. Range narrowness component (0.10–0.15)
         # Tighter range (lower ratio) = stronger pinning effect
         if range_ratio <= 0:
             nar_conf = 0.15
-        elif range_ratio >= RANGE_NARROWNESS_RATIO:
+        elif range_ratio >= self._params['range_narrowness_ratio']:
             nar_conf = 0.10
         else:
-            nar_conf = 0.15 - 0.05 * (range_ratio / RANGE_NARROWNESS_RATIO)
+            nar_conf = 0.15 - 0.05 * (range_ratio / self._params['range_narrowness_ratio'])
 
         # 4. Rejection signal component (0.15–0.20)
         # Volume divergence > price position > candle pattern
@@ -657,10 +683,11 @@ class ThetaBurn(BaseStrategy):
         norm_reject = normalize_confidence(rejection_conf, 0.15, 0.20)
         norm_tod = normalize_confidence(tod_conf, 0.05, 0.10)
         confidence = (norm_gamma + norm_prox + norm_nar + norm_reject + norm_tod) / 5.0
-        return min(MAX_CONFIDENCE, max(MIN_CONFIDENCE, confidence))
+        return min(self._params['max_confidence'], max(self._params['min_confidence'], confidence))
+        confidence = (norm_gamma + norm_prox + norm_nar + norm_reject + norm_tod) / 5.0
+        return min(self._params['max_confidence'], max(self._params['min_confidence'], confidence))
 
-    @staticmethod
-    def _time_of_day_confidence(timestamp: float) -> float:
+    def _time_of_day_confidence(self, timestamp: float) -> float:
         """
         Compute confidence bonus from time of day.
 
@@ -673,7 +700,7 @@ class ThetaBurn(BaseStrategy):
         # Extract UTC hour from Unix timestamp
         utc_hour = (timestamp % 86400) / 3600
 
-        if MIDNIGHT_UTC_START <= utc_hour <= MIDNIGHT_UTC_END:
+        if self._params['midnight_utc_start'] <= utc_hour <= self._params['midnight_utc_end']:
             return 0.10  # Midday lull bonus
         return 0.05  # Off-hours baseline
 
@@ -707,9 +734,9 @@ class ThetaBurn(BaseStrategy):
                 next_wall = min(candidates, key=lambda w: w["strike"])
                 midpoint = (wall_strike + next_wall["strike"]) / 2
                 # Ensure target is above price
-                target = max(price + (price * MIN_TARGET_PCT), midpoint)
+                target = max(price + (price * self._params['min_target_pct']), midpoint)
                 # Cap at MAX_TARGET_PCT
-                max_target = price * (1 + MAX_TARGET_PCT)
+                max_target = price * (1 + self._params['max_target_pct'])
                 return min(target, max_target)
         else:
             # Find nearest wall below the Call wall
@@ -718,9 +745,9 @@ class ThetaBurn(BaseStrategy):
                 next_wall = max(candidates, key=lambda w: w["strike"])
                 midpoint = (wall_strike + next_wall["strike"]) / 2
                 # Ensure target is below price
-                target = min(price - (price * MIN_TARGET_PCT), midpoint)
+                target = min(price - (price * self._params['min_target_pct']), midpoint)
                 # Cap at MAX_TARGET_PCT
-                min_target = price * (1 - MAX_TARGET_PCT)
+                min_target = price * (1 - self._params['max_target_pct'])
                 return max(target, min_target)
 
         # Fallback: use risk-based target (0.2-0.4% from entry)
@@ -729,22 +756,21 @@ class ThetaBurn(BaseStrategy):
 
         if direction == "above":
             target = price + risk
-            max_target = price * (1 + MAX_TARGET_PCT)
-            return max(price + (price * MIN_TARGET_PCT), min(target, max_target))
+            max_target = price * (1 + self._params['max_target_pct'])
+            return max(price + (price * self._params['min_target_pct']), min(target, max_target))
         else:
             target = price - risk
-            min_target = price * (1 - MAX_TARGET_PCT)
-            return min(price - (price * MIN_TARGET_PCT), max(target, min_target))
+            min_target = price * (1 - self._params['max_target_pct'])
+            return min(price - (price * self._params['min_target_pct']), max(target, min_target))
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _safe_get_walls(gex_calc: Any) -> List[Dict[str, Any]]:
+    def _safe_get_walls(self, gex_calc: Any) -> List[Dict[str, Any]]:
         """Safely retrieve gamma walls, returning empty list on error."""
         try:
-            return gex_calc.get_gamma_walls(threshold=MIN_NET_GAMMA)
+            return gex_calc.get_gamma_walls(threshold=self._params['min_net_gamma'])
         except Exception as exc:
             logger.debug("ThetaBurn: failed to get gamma walls: %s", exc)
             return []

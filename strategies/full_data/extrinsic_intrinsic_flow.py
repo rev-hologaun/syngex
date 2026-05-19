@@ -46,31 +46,18 @@ from strategies.utils import normalize_confidence
 logger = logging.getLogger("Syngex.Strategies.ExtrinsicIntrinsicFlow")
 
 # ---------------------------------------------------------------------------
-# Constants
+# Default constants (can be overridden via params)
 # ---------------------------------------------------------------------------
 
-# Extrinsic expansion threshold: current > rolling avg by this %
-EXTRINSIC_EXPANSION_THRESHOLD = 0.03    # 3% expansion
-
-# Extrinsic collapse threshold: current < rolling avg by this %
-EXTRINSIC_COLLAPSE_THRESHOLD = 0.10     # 10% collapse
-
-# Volume spike threshold for new money
-VOLUME_SPIKE_RATIO = 1.30               # 130% of avg (1.3×)
-
-# Min net gamma for positive regime
-MIN_NET_GAMMA = 500000.0
-
-# Stop and target
-STOP_PCT = 0.005                        # 0.5% stop
-TARGET_PCT = 0.008                      # 0.8% target (1.6:1 R:R)
-
-# Min confidence
-MIN_CONFIDENCE = 0.25
-MAX_CONFIDENCE = 0.80                   # v2 cap
-
-# Min data points — need more data for extrinsic tracking
-MIN_DATA_POINTS = 5
+DEFAULT_EXTRINSIC_EXPANSION_THRESHOLD = 0.03    # 3% expansion
+DEFAULT_EXTRINSIC_COLLAPSE_THRESHOLD = 0.10     # 10% collapse
+DEFAULT_VOLUME_SPIKE_RATIO = 1.30               # 130% of avg (1.3×)
+DEFAULT_MIN_NET_GAMMA = 500000.0
+DEFAULT_STOP_PCT = 0.005                        # 0.5% stop
+DEFAULT_TARGET_PCT = 0.008                      # 0.8% target (1.6:1 R:R)
+DEFAULT_MIN_CONFIDENCE = 0.25
+DEFAULT_MAX_CONFIDENCE = 0.80                   # v2 cap
+DEFAULT_MIN_DATA_POINTS = 5
 
 # Volume trend filters
 VALID_VOLUME_TREND_LONG = ["UP"]
@@ -100,6 +87,23 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
     strategy_id = "extrinsic_intrinsic_flow"
     layer = "full_data"
 
+    def __init__(self, params: Optional[Dict[str, Any]] = None):
+        super().__init__(params)
+        self._params = params or {}
+
+    def _apply_params(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply params to data dict and return updated data."""
+        data["extrinsic_expansion_threshold"] = self._params.get("extrinsic_expansion_threshold", DEFAULT_EXTRINSIC_EXPANSION_THRESHOLD)
+        data["extrinsic_collapse_threshold"] = self._params.get("extrinsic_collapse_threshold", DEFAULT_EXTRINSIC_COLLAPSE_THRESHOLD)
+        data["volume_spike_ratio"] = self._params.get("volume_spike_ratio", DEFAULT_VOLUME_SPIKE_RATIO)
+        data["min_net_gamma"] = self._params.get("min_net_gamma", DEFAULT_MIN_NET_GAMMA)
+        data["stop_pct"] = self._params.get("stop_pct", DEFAULT_STOP_PCT)
+        data["target_pct"] = self._params.get("target_pct", DEFAULT_TARGET_PCT)
+        data["min_confidence"] = self._params.get("min_confidence", DEFAULT_MIN_CONFIDENCE)
+        data["max_confidence"] = self._params.get("max_confidence", DEFAULT_MAX_CONFIDENCE)
+        data["min_data_points"] = self._params.get("min_data_points", DEFAULT_MIN_DATA_POINTS)
+        return data
+
     # ------------------------------------------------------------------
     # Core evaluation
     # ------------------------------------------------------------------
@@ -110,6 +114,9 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
 
         Returns empty list when no conviction signal is detected.
         """
+        # Apply params to data
+        data = self._apply_params(data)
+
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
             return []
@@ -127,14 +134,14 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
             return []
 
         # --- Net gamma check ---
-        if net_gamma < MIN_NET_GAMMA:
+        if net_gamma < data.get("min_net_gamma", DEFAULT_MIN_NET_GAMMA):
             return []
 
         # --- Use main.py's populated extrinsic window ---
         extrinsic_window = rolling_data.get(KEY_EXTRINSIC_PROXY_5M)
         if extrinsic_window is None:
             return []
-        if extrinsic_window.count < MIN_DATA_POINTS:
+        if extrinsic_window.count < data.get("min_data_points", DEFAULT_MIN_DATA_POINTS):
             return []
 
         extrinsic_mean = extrinsic_window.mean
@@ -153,7 +160,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         volume_down_5m = rolling_data.get(KEY_VOLUME_DOWN_5M)
         if volume_up_5m is None or volume_down_5m is None:
             return []
-        if volume_up_5m.count < MIN_DATA_POINTS or volume_down_5m.count < MIN_DATA_POINTS:
+        if volume_up_5m.count < data.get("min_data_points", DEFAULT_MIN_DATA_POINTS) or volume_down_5m.count < data.get("min_data_points", DEFAULT_MIN_DATA_POINTS):
             return []
 
         # Volume spike ratio: compare latest to rolling mean
@@ -215,24 +222,24 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         - Net gamma positive
         """
         # Extrinsic must be expanding
-        if extrinsic_change_pct < EXTRINSIC_EXPANSION_THRESHOLD:
+        if extrinsic_change_pct < data.get("extrinsic_expansion_threshold", DEFAULT_EXTRINSIC_EXPANSION_THRESHOLD):
             return None
 
         # Volume must be spiking
-        if vol_ratio is None or vol_ratio < VOLUME_SPIKE_RATIO:
+        if vol_ratio is None or vol_ratio < data.get("volume_spike_ratio", DEFAULT_VOLUME_SPIKE_RATIO):
             return None
 
         # Volume trend must confirm bullish direction
-        if vol_trend not in VALID_VOLUME_TREND_LONG:
+        if vol_trend not in ["UP"]:
             return None
 
         # Compute confidence
         confidence = self._compute_long_confidence(
             extrinsic_change_pct, vol_ratio, vol_trend,
-            net_gamma, price,
+            net_gamma, price, data,
         )
 
-        if confidence < MIN_CONFIDENCE:
+        if confidence < data.get("min_confidence", DEFAULT_MIN_CONFIDENCE):
             return None
 
         # Extract trend from price window for metadata
@@ -241,8 +248,10 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         trend = price_window.trend if price_window else "UNKNOWN"
 
         # Build signal
-        stop = price * (1 - STOP_PCT)
-        target = price * (1 + TARGET_PCT)
+        stop_pct = data.get("stop_pct", DEFAULT_STOP_PCT)
+        target_pct = data.get("target_pct", DEFAULT_TARGET_PCT)
+        stop = price * (1 - stop_pct)
+        target = price * (1 + target_pct)
 
         return Signal(
             direction=Direction.LONG,
@@ -294,24 +303,24 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         - Net gamma positive
         """
         # Extrinsic must be expanding
-        if extrinsic_change_pct < EXTRINSIC_EXPANSION_THRESHOLD:
+        if extrinsic_change_pct < data.get("extrinsic_expansion_threshold", DEFAULT_EXTRINSIC_EXPANSION_THRESHOLD):
             return None
 
         # Volume must be spiking
-        if vol_ratio is None or vol_ratio < VOLUME_SPIKE_RATIO:
+        if vol_ratio is None or vol_ratio < data.get("volume_spike_ratio", DEFAULT_VOLUME_SPIKE_RATIO):
             return None
 
         # Volume trend must confirm bearish direction
-        if vol_trend not in VALID_VOLUME_TREND_SHORT:
+        if vol_trend not in ["DOWN"]:
             return None
 
         # Compute confidence
         confidence = self._compute_short_confidence(
             extrinsic_change_pct, vol_ratio, vol_trend,
-            net_gamma, price,
+            net_gamma, price, data,
         )
 
-        if confidence < MIN_CONFIDENCE:
+        if confidence < data.get("min_confidence", DEFAULT_MIN_CONFIDENCE):
             return None
 
         # Extract trend from price window for metadata
@@ -320,8 +329,10 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         trend = price_window.trend if price_window else "UNKNOWN"
 
         # Build signal
-        stop = price * (1 + STOP_PCT)
-        target = price * (1 - TARGET_PCT)
+        stop_pct = data.get("stop_pct", DEFAULT_STOP_PCT)
+        target_pct = data.get("target_pct", DEFAULT_TARGET_PCT)
+        stop = price * (1 + stop_pct)
+        target = price * (1 - target_pct)
 
         return Signal(
             direction=Direction.SHORT,
@@ -342,8 +353,8 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
                 "volume_trend": vol_trend,
                 "trend": trend,
                 "net_gamma": round(net_gamma, 2),
-                "stop_pct": STOP_PCT,
-                "target_pct": TARGET_PCT,
+                "stop_pct": data.get("stop_pct", DEFAULT_STOP_PCT),
+                "target_pct": data.get("target_pct", DEFAULT_TARGET_PCT),
                 "risk_reward_ratio": round(
                     abs(target - price) / (stop - price), 2
                 ),
@@ -377,11 +388,11 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         - If volume was FLAT → fade based on recent price momentum
         """
         # Extrinsic must be collapsing
-        if extrinsic_change_pct > -EXTRINSIC_COLLAPSE_THRESHOLD:
+        if extrinsic_change_pct > -data.get("extrinsic_collapse_threshold", DEFAULT_EXTRINSIC_COLLAPSE_THRESHOLD):
             return None
 
         # Volume must be declining or flat
-        if vol_trend not in VALID_VOLUME_TREND_FADE:
+        if vol_trend not in ["DOWN", "FLAT"]:
             return None
 
         # Determine fade direction
@@ -404,10 +415,10 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         # Compute confidence
         confidence = self._compute_fade_confidence(
             extrinsic_change_pct, vol_ratio, vol_trend,
-            net_gamma, price,
+            net_gamma, price, data,
         )
 
-        if confidence < MIN_CONFIDENCE:
+        if confidence < data.get("min_confidence", DEFAULT_MIN_CONFIDENCE):
             return None
 
         # Extract trend from price window for metadata
@@ -416,12 +427,14 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         trend = price_window.trend if price_window else "UNKNOWN"
 
         # Build signal
+        stop_pct = data.get("stop_pct", DEFAULT_STOP_PCT)
+        target_pct = data.get("target_pct", DEFAULT_TARGET_PCT)
         if fade_direction == Direction.LONG:
-            stop = price * (1 + STOP_PCT)
-            target = price * (1 + TARGET_PCT)
+            stop = price * (1 + stop_pct)
+            target = price * (1 + target_pct)
         else:
-            stop = price * (1 - STOP_PCT)
-            target = price * (1 - TARGET_PCT)
+            stop = price * (1 - stop_pct)
+            target = price * (1 - target_pct)
 
         return Signal(
             direction=fade_direction,
@@ -443,8 +456,8 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
                 "trend": trend,
                 "fade_direction": fade_direction.value,
                 "net_gamma": round(net_gamma, 2),
-                "stop_pct": STOP_PCT,
-                "target_pct": TARGET_PCT,
+                "stop_pct": data.get("stop_pct", DEFAULT_STOP_PCT),
+                "target_pct": data.get("target_pct", DEFAULT_TARGET_PCT),
                 "risk_reward_ratio": round(
                     abs(target - price) / abs(stop - price), 2
                 ),
@@ -462,6 +475,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         vol_trend: str,
         net_gamma: float,
         price: float,
+        data: Dict[str, Any],
     ) -> float:
         """
         Compute confidence for LONG (extrinsic expansion + bullish volume).
@@ -474,14 +488,16 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         """
         # 1. Extrinsic expansion magnitude (0.20–0.30)
         #    Extrapolate: 5% = baseline, 20%+ = max weight
-        exp_scaled = min(1.0, (extrinsic_change_pct - EXTRINSIC_EXPANSION_THRESHOLD)
-                         / (EXTRINSIC_EXPANSION_THRESHOLD * 3))
+        exp_threshold = data.get("extrinsic_expansion_threshold", DEFAULT_EXTRINSIC_EXPANSION_THRESHOLD)
+        exp_scaled = min(1.0, (extrinsic_change_pct - exp_threshold)
+                         / (exp_threshold * 3))
         exp_component = 0.20 + 0.10 * exp_scaled
 
         # 2. Volume spike magnitude (0.20–0.25)
         #    1.5× = baseline, 3×+ = max weight
-        vol_scaled = min(1.0, (vol_ratio - VOLUME_SPIKE_RATIO)
-                         / (VOLUME_SPIKE_RATIO))
+        vol_spike = data.get("volume_spike_ratio", DEFAULT_VOLUME_SPIKE_RATIO)
+        vol_scaled = min(1.0, (vol_ratio - vol_spike)
+                         / (vol_spike))
         vol_component = 0.20 + 0.05 * vol_scaled
 
         # 3. Volume direction alignment (0.10–0.15)
@@ -493,7 +509,8 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
 
         # 4. Net gamma strength (0.15–0.20)
         #    Higher positive gamma = stronger positive regime
-        gamma_scaled = min(1.0, net_gamma / (MIN_NET_GAMMA * 4))
+        min_gamma = data.get("min_net_gamma", DEFAULT_MIN_NET_GAMMA)
+        gamma_scaled = min(1.0, net_gamma / (min_gamma * 4))
         gamma_component = 0.15 + 0.05 * gamma_scaled
 
         # Normalize each component to [0,1] and average
@@ -503,7 +520,8 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         norm_gamma = normalize_confidence(gamma_component, 0.15, 0.20)
         confidence = (norm_exp + norm_vol + norm_vol_dir + norm_gamma) / 4.0
 
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        max_conf = data.get("max_confidence", DEFAULT_MAX_CONFIDENCE)
+        return min(max_conf, max(0.0, confidence))
 
     def _compute_short_confidence(
         self,
@@ -512,6 +530,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         vol_trend: str,
         net_gamma: float,
         price: float,
+        data: Dict[str, Any],
     ) -> float:
         """
         Compute confidence for SHORT (extrinsic expansion + bearish volume).
@@ -519,13 +538,15 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         Same factors as LONG but for bearish direction.
         """
         # 1. Extrinsic expansion magnitude (0.20–0.30)
-        exp_scaled = min(1.0, (extrinsic_change_pct - EXTRINSIC_EXPANSION_THRESHOLD)
-                         / (EXTRINSIC_EXPANSION_THRESHOLD * 3))
+        exp_threshold = data.get("extrinsic_expansion_threshold", DEFAULT_EXTRINSIC_EXPANSION_THRESHOLD)
+        exp_scaled = min(1.0, (extrinsic_change_pct - exp_threshold)
+                         / (exp_threshold * 3))
         exp_component = 0.20 + 0.10 * exp_scaled
 
         # 2. Volume spike magnitude (0.20–0.25)
-        vol_scaled = min(1.0, (vol_ratio - VOLUME_SPIKE_RATIO)
-                         / (VOLUME_SPIKE_RATIO))
+        vol_spike = data.get("volume_spike_ratio", DEFAULT_VOLUME_SPIKE_RATIO)
+        vol_scaled = min(1.0, (vol_ratio - vol_spike)
+                         / (vol_spike))
         vol_component = 0.20 + 0.05 * vol_scaled
 
         # 3. Volume direction alignment (0.10–0.15)
@@ -535,7 +556,8 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
             vol_dir_component = 0.05
 
         # 4. Net gamma strength (0.15–0.20)
-        gamma_scaled = min(1.0, net_gamma / (MIN_NET_GAMMA * 4))
+        min_gamma = data.get("min_net_gamma", DEFAULT_MIN_NET_GAMMA)
+        gamma_scaled = min(1.0, net_gamma / (min_gamma * 4))
         gamma_component = 0.15 + 0.05 * gamma_scaled
 
         # Normalize each component to [0,1] and average
@@ -545,7 +567,8 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         norm_gamma = normalize_confidence(gamma_component, 0.15, 0.20)
         confidence = (norm_exp + norm_vol + norm_vol_dir + norm_gamma) / 4.0
 
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        max_conf = data.get("max_confidence", DEFAULT_MAX_CONFIDENCE)
+        return min(max_conf, max(0.0, confidence))
 
     def _compute_fade_confidence(
         self,
@@ -554,6 +577,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         vol_trend: str,
         net_gamma: float,
         price: float,
+        data: Dict[str, Any],
     ) -> float:
         """
         Compute confidence for FADE (extrinsic collapse).
@@ -567,9 +591,10 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         # 1. Extrinsic collapse magnitude (0.25–0.35)
         #    10% = baseline, 25%+ = max weight
         #    Use absolute value since change is negative
+        collapse_threshold = data.get("extrinsic_collapse_threshold", DEFAULT_EXTRINSIC_COLLAPSE_THRESHOLD)
         collapse_magnitude = abs(extrinsic_change_pct)
-        collapse_scaled = min(1.0, (collapse_magnitude - EXTRINSIC_COLLAPSE_THRESHOLD)
-                              / (EXTRINSIC_COLLAPSE_THRESHOLD * 1.5))
+        collapse_scaled = min(1.0, (collapse_magnitude - collapse_threshold)
+                              / (collapse_threshold * 1.5))
         collapse_component = 0.25 + 0.10 * collapse_scaled
 
         # 2. Volume decline (0.15–0.20)
@@ -592,7 +617,8 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
 
         # 4. Net gamma strength (0.15–0.20)
         #    Higher positive gamma = stronger range environment (good for fades)
-        gamma_scaled = min(1.0, net_gamma / (MIN_NET_GAMMA * 4))
+        min_gamma = data.get("min_net_gamma", DEFAULT_MIN_NET_GAMMA)
+        gamma_scaled = min(1.0, net_gamma / (min_gamma * 4))
         gamma_component = 0.15 + 0.05 * gamma_scaled
 
         # Normalize each component to [0,1] and average
@@ -602,7 +628,8 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         norm_gamma = normalize_confidence(gamma_component, 0.15, 0.20)
         confidence = (norm_collapse + norm_vol_decline + norm_vol_dir + norm_gamma) / 4.0
 
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        max_conf = data.get("max_confidence", DEFAULT_MAX_CONFIDENCE)
+        return min(max_conf, max(0.0, confidence))
 
     # ------------------------------------------------------------------
     # Helpers

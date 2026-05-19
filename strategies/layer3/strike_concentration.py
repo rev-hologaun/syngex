@@ -58,34 +58,37 @@ logger = logging.getLogger("Syngex.Strategies.StrikeConcentration")
 # Constants
 # ---------------------------------------------------------------------------
 
+# Configuration parameters - can be overridden via self._params
+# Default values provided for standalone operation
+
 # How many top OI strikes to track
-TOP_OI_STRIKES_COUNT = 3
+DEFAULT_TOP_OI_STRIKES_COUNT = 3
 
 # Bounce proximity: price must be within this % of the strike
-BOUNCE_PROXIMITY_PCT = 0.005  # 0.5%
+DEFAULT_BOUNCE_PROXIMITY_PCT = 0.005  # 0.5%
 
 # Slice confirmation: candle body must be > this % of total range
-SLICE_BODY_RATIO = 0.3  # 30% body
+DEFAULT_SLICE_BODY_RATIO = 0.3  # 30% body
 
 # Volume spike for slice confirmation
-SLICE_VOLUME_RATIO = 1.20  # 20% above rolling avg
+DEFAULT_SLICE_VOLUME_RATIO = 1.20  # 20% above rolling avg
 
 # Divergence detection: volume on reversal candle must be < this % of rolling avg
-DIVERGENCE_VOLUME_THRESHOLD = 0.80  # Volume < 80% of avg = declining
+DEFAULT_DIVERGENCE_VOLUME_THRESHOLD = 0.80  # Volume < 80% of avg = declining
 
 # Stop loss
-STOP_PCT_BOUNCE = 0.003  # 0.3% beyond the strike for bounces
-STOP_PCT_SLICE = 0.003  # 0.3% against entry for slices
+DEFAULT_STOP_PCT_BOUNCE = 0.003  # 0.3% beyond the strike for bounces
+DEFAULT_STOP_PCT_SLICE = 0.003  # 0.3% against entry for slices
 
 # Target
-TARGET_RISK_MULT = 1.5  # 1.5× risk for bounce targets
+DEFAULT_TARGET_RISK_MULT = 1.5  # 1.5× risk for bounce targets
 
 # Min confidence
-MIN_CONFIDENCE = 0.25
-MAX_CONFIDENCE = 0.85  # Micro-signal cap
+DEFAULT_MIN_CONFIDENCE = 0.25
+DEFAULT_MAX_CONFIDENCE = 0.85  # Micro-signal cap
 
 # Min data points
-MIN_DATA_POINTS = 3
+DEFAULT_MIN_DATA_POINTS = 3
 
 
 class StrikeConcentration(BaseStrategy):
@@ -110,12 +113,36 @@ class StrikeConcentration(BaseStrategy):
     strategy_id = "strike_concentration"
     layer = "layer3"
 
+    def __init__(self):
+        """Initialize strategy with configurable parameters."""
+        super().__init__()
+        self._params = {
+            'top_oi_strikes_count': DEFAULT_TOP_OI_STRIKES_COUNT,
+            'bounce_proximity_pct': DEFAULT_BOUNCE_PROXIMITY_PCT,
+            'slice_body_ratio': DEFAULT_SLICE_BODY_RATIO,
+            'slice_volume_ratio': DEFAULT_SLICE_VOLUME_RATIO,
+            'divergence_volume_threshold': DEFAULT_DIVERGENCE_VOLUME_THRESHOLD,
+            'stop_pct_bounce': DEFAULT_STOP_PCT_BOUNCE,
+            'stop_pct_slice': DEFAULT_STOP_PCT_SLICE,
+            'target_risk_mult': DEFAULT_TARGET_RISK_MULT,
+            'min_confidence': DEFAULT_MIN_CONFIDENCE,
+            'max_confidence': DEFAULT_MAX_CONFIDENCE,
+            'min_data_points': DEFAULT_MIN_DATA_POINTS,
+        }
+
+    def _apply_params(self, data: Dict[str, Any]) -> None:
+        """Apply parameter overrides from data dict if present."""
+        if 'params' in data:
+            self._params.update(data['params'])
+
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """
         Evaluate current state for strike concentration bounce/slice signals.
 
         Returns empty list when no signal is detected.
         """
+        # Apply parameter overrides
+        self._apply_params(data)
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
             return []
@@ -142,12 +169,12 @@ class StrikeConcentration(BaseStrategy):
         if (
             price_window is None
             or vol_window is None
-            or price_window.count < MIN_DATA_POINTS
-            or vol_window.count < MIN_DATA_POINTS
+            or price_window.count < self._params['min_data_points']
+            or vol_window.count < self._params['min_data_points']
         ):
             return []
 
-        # Identify top 3 OI strikes
+        # Identify top OI strikes
         top_strikes = self._get_top_oi_strikes(greeks_summary)
         if len(top_strikes) < 1:
             return []
@@ -220,7 +247,7 @@ class StrikeConcentration(BaseStrategy):
 
         # Check proximity: price within 0.5% of strike
         proximity = abs(price - put_strike) / put_strike
-        if proximity > BOUNCE_PROXIMITY_PCT:
+        if proximity > self._params['bounce_proximity_pct']:
             return None
 
         # Check bullish reversal signal
@@ -233,12 +260,12 @@ class StrikeConcentration(BaseStrategy):
             price, put_strike, rank, total_oi,
             rolling_data, "LONG", net_gamma,
         )
-        if confidence < MIN_CONFIDENCE:
+        if confidence < self._params['min_confidence']:
             return None
 
         # Entry at current price, stop beyond the Put strike (below)
         entry = price
-        stop = put_strike * (1 - STOP_PCT_BOUNCE)
+        stop = put_strike * (1 - self._params['stop_pct_bounce'])
         risk = entry - stop
 
         # Target = midpoint between this strike and next strike above
@@ -308,7 +335,7 @@ class StrikeConcentration(BaseStrategy):
 
         # Check proximity: price within 0.5% of strike
         proximity = abs(call_strike - price) / call_strike
-        if proximity > BOUNCE_PROXIMITY_PCT:
+        if proximity > self._params['bounce_proximity_pct']:
             return None
 
         # Check bearish reversal signal
@@ -321,12 +348,12 @@ class StrikeConcentration(BaseStrategy):
             price, call_strike, rank, total_oi,
             rolling_data, "SHORT", net_gamma,
         )
-        if confidence < MIN_CONFIDENCE:
+        if confidence < self._params['min_confidence']:
             return None
 
         # Entry at current price, stop beyond the Call strike (above)
         entry = price
-        stop = call_strike * (1 + STOP_PCT_BOUNCE)
+        stop = call_strike * (1 + self._params['stop_pct_bounce'])
         risk = stop - entry
 
         # Target = midpoint between this strike and next strike below
@@ -396,7 +423,7 @@ class StrikeConcentration(BaseStrategy):
 
         # Check strong candle: body > 30% of range
         body_ratio = self._get_candle_body_ratio(rolling_data)
-        if body_ratio is None or body_ratio < SLICE_BODY_RATIO:
+        if body_ratio is None or body_ratio < self._params['slice_body_ratio']:
             return None
 
         # Check volume spike: current > rolling avg by ≥20%
@@ -412,12 +439,12 @@ class StrikeConcentration(BaseStrategy):
             price, call_strike, rank, total_oi,
             rolling_data, body_ratio, "LONG", net_gamma,
         )
-        if confidence < MIN_CONFIDENCE:
+        if confidence < self._params['min_confidence']:
             return None
 
         # Entry at current price, stop 0.3% below entry
         entry = price
-        stop = entry * (1 - STOP_PCT_SLICE)
+        stop = entry * (1 - self._params['stop_pct_slice'])
         risk = entry - stop
 
         # Target = next strike above
@@ -488,7 +515,7 @@ class StrikeConcentration(BaseStrategy):
 
         # Check strong candle: body > 30% of range
         body_ratio = self._get_candle_body_ratio(rolling_data)
-        if body_ratio is None or body_ratio < SLICE_BODY_RATIO:
+        if body_ratio is None or body_ratio < self._params['slice_body_ratio']:
             return None
 
         # Check volume spike: current > rolling avg by ≥20%
@@ -504,12 +531,12 @@ class StrikeConcentration(BaseStrategy):
             price, put_strike, rank, total_oi,
             rolling_data, body_ratio, "SHORT", net_gamma,
         )
-        if confidence < MIN_CONFIDENCE:
+        if confidence < self._params['min_confidence']:
             return None
 
         # Entry at current price, stop 0.3% above entry
         entry = price
-        stop = entry * (1 + STOP_PCT_SLICE)
+        stop = entry * (1 + self._params['stop_pct_slice'])
         risk = stop - entry
 
         # Target = next strike below
@@ -638,12 +665,12 @@ class StrikeConcentration(BaseStrategy):
 
         # Price is near the strike (within proximity)
         proximity = abs(window_latest - strike) / strike
-        if proximity > BOUNCE_PROXIMITY_PCT * 2:
+        if proximity > self._params['bounce_proximity_pct'] * 2:
             return False
 
         # Volume declining on the latest candle vs rolling avg
         vol_ratio = vol_latest / vol_avg
-        return vol_ratio < DIVERGENCE_VOLUME_THRESHOLD
+        return vol_ratio < self._params['divergence_volume_threshold']
 
     @staticmethod
     def _check_bearish_divergence(
@@ -667,12 +694,12 @@ class StrikeConcentration(BaseStrategy):
 
         # Price is near the strike (within proximity)
         proximity = abs(window_latest - strike) / strike
-        if proximity > BOUNCE_PROXIMITY_PCT * 2:
+        if proximity > self._params['bounce_proximity_pct'] * 2:
             return False
 
         # Volume declining on the latest candle vs rolling avg
         vol_ratio = vol_latest / vol_avg
-        return vol_ratio < DIVERGENCE_VOLUME_THRESHOLD
+        return vol_ratio < self._params['divergence_volume_threshold']
 
     @staticmethod
     def _check_bullish_candlestick(price_window: Any) -> bool:
@@ -752,7 +779,7 @@ class StrikeConcentration(BaseStrategy):
             low = window min
         """
         window = rolling_data.get(KEY_PRICE_5M)
-        if window is None or window.count < MIN_DATA_POINTS:
+        if window is None or window.count < self._params['min_data_points']:
             return None
 
         latest = window.latest
@@ -783,7 +810,7 @@ class StrikeConcentration(BaseStrategy):
     def _check_volume_spike(rolling_data: Dict[str, Any]) -> bool:
         """Check if current volume exceeds rolling average by ≥20%."""
         window = rolling_data.get(KEY_VOLUME_5M)
-        if window is None or window.count < MIN_DATA_POINTS:
+        if window is None or window.count < self._params['min_data_points']:
             return False
 
         current = window.latest
@@ -791,7 +818,7 @@ class StrikeConcentration(BaseStrategy):
         if current is None or avg is None or avg == 0:
             return False
 
-        return current >= avg * SLICE_VOLUME_RATIO
+        return current >= avg * self._params['slice_volume_ratio']
 
     @staticmethod
     def _check_delta_positive_at_strike(
@@ -863,7 +890,7 @@ class StrikeConcentration(BaseStrategy):
 
         # Sort by total OI descending, take top N
         strike_oi_list.sort(key=lambda x: x[1], reverse=True)
-        top = strike_oi_list[:TOP_OI_STRIKES_COUNT]
+        top = strike_oi_list[:self._params['top_oi_strikes_count']]
 
         # Assign ranks
         return [(strike, rank + 1, total_oi) for rank, (strike, total_oi) in enumerate(top)]
@@ -928,7 +955,7 @@ class StrikeConcentration(BaseStrategy):
                 return target
 
         # Fallback: use risk-based target
-        return price + (risk * TARGET_RISK_MULT) if risk > 0 else price
+        return price + (risk * self._params['target_risk_mult']) if risk > 0 else price
 
     @staticmethod
     def _compute_slice_target(
@@ -955,7 +982,7 @@ class StrikeConcentration(BaseStrategy):
                 return max(candidates, key=lambda s: s[0])[0]
 
         # Fallback: use risk-based target
-        return current_strike + (risk * TARGET_RISK_MULT) if risk > 0 else current_strike
+        return current_strike + (risk * self._params['target_risk_mult']) if risk > 0 else current_strike
 
     # ------------------------------------------------------------------
     # Confidence Computation
@@ -986,14 +1013,14 @@ class StrikeConcentration(BaseStrategy):
         rank_conf = max(0.20, 0.30 - 0.05 * (rank - 1))
 
         # 2. Proximity component (0.15–0.25)
-        # At 0% distance = 0.25, at 0.3% distance = 0.15
+        # At 0% distance = 0.25, at BOUNCE_PROXIMITY_PCT = 0.15
         proximity = abs(price - strike) / strike
         if proximity <= 0:
             prox_conf = 0.25
-        elif proximity >= BOUNCE_PROXIMITY_PCT:
+        elif proximity >= self._params['bounce_proximity_pct']:
             prox_conf = 0.15
         else:
-            prox_conf = 0.25 - 0.10 * (proximity / BOUNCE_PROXIMITY_PCT)
+            prox_conf = 0.25 - 0.10 * (proximity / self._params['bounce_proximity_pct'])
 
         # 3. Signal strength (0.15–0.20)
         # Approximate from volume profile
@@ -1024,7 +1051,7 @@ class StrikeConcentration(BaseStrategy):
         norm_regime = (regime_conf - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
         norm_oi = (oi_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
         confidence = (norm_rank + norm_prox + norm_signal + norm_regime + norm_oi) / 5.0
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        return min(self._params['max_confidence'], max(0.0, confidence))
 
     def _compute_slice_confidence(
         self,
@@ -1052,7 +1079,7 @@ class StrikeConcentration(BaseStrategy):
 
         # 2. Body ratio component (0.20–0.30)
         # body_ratio = 0.5 → 0.20, body_ratio = 1.0 → 0.30
-        body_conf = 0.20 + 0.10 * min(1.0, (body_ratio - SLICE_BODY_RATIO) / 0.5)
+        body_conf = 0.20 + 0.10 * min(1.0, (body_ratio - self._params['slice_body_ratio']) / 0.5)
 
         # 3. Volume spike component (0.15–0.20)
         vol_window = rolling_data.get(KEY_VOLUME_5M)
@@ -1076,4 +1103,4 @@ class StrikeConcentration(BaseStrategy):
         norm_regime = (regime_conf - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
         norm_oi = (oi_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
         confidence = (norm_rank + norm_body + norm_vol + norm_regime + norm_oi) / 5.0
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        return min(self._params['max_confidence'], max(0.0, confidence))

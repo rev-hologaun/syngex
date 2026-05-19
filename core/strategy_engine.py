@@ -35,6 +35,11 @@ class StrategyEvaluationEngine:
         self._logger = logger
         self._correlation_id = correlation_id
 
+        # Circuit breaker for consecutive errors
+        self._error_count: int = 0
+        self._max_consecutive_errors: int = 10
+        self._last_error_time: float = 0.0
+
     def evaluate_strategies(self, orchestrator_ref: Any) -> None:
         """Run the full strategy evaluation loop.
 
@@ -45,60 +50,86 @@ class StrategyEvaluationEngine:
         if not self._gex_calculator or not self._strategy_engine or not self._gamma_filter:
             return
 
-        summary = self._gex_calculator.get_summary()
-        net_gamma = summary["net_gamma"]
-        flip = self._gex_calculator.get_gamma_flip()
-        price = summary["underlying_price"]
+        try:
+            summary = self._gex_calculator.get_summary()
+            net_gamma = summary["net_gamma"]
+            flip = self._gex_calculator.get_gamma_flip()
+            price = summary["underlying_price"]
 
-        # Update regime filter
-        # Check regime filter
-        if not self._gamma_filter.check_regime(net_gamma, flip, price):
-            return  # Blocked - transitioning regime
+            # Update regime filter
+            # Check regime filter
+            if not self._gamma_filter.check_regime(net_gamma, flip, price):
+                return  # Blocked - transitioning regime
 
-        # Build data snapshot for strategies
-        data = {
-            "underlying_price": price,
-            "symbol": orchestrator_ref.symbol,
-            "gex_calculator": self._gex_calculator,
-            "rolling_data": orchestrator_ref._rolling_data,
-            "timestamp": time.time(),
-            "regime": self._gamma_filter._regime.value,
-            "net_gamma": net_gamma,
-            "gamma_flip": flip,
-            "greeks_summary": self._gex_calculator.get_greeks_summary(),
-        }
+            # Build data snapshot for strategies
+            data = {
+                "underlying_price": price,
+                "symbol": orchestrator_ref.symbol,
+                "gex_calculator": self._gex_calculator,
+                "rolling_data": orchestrator_ref._rolling_data,
+                "timestamp": time.time(),
+                "regime": self._gamma_filter._regime.value,
+                "net_gamma": net_gamma,
+                "gamma_flip": flip,
+                "greeks_summary": self._gex_calculator.get_greeks_summary(),
+            }
 
-        # Inject per-strategy config params into data dict
-        strategy_params: Dict[str, Dict[str, Any]] = {}
-        for layer in ["layer1", "layer2", "layer3", "full_data"]:
-            layer_config = orchestrator_ref._strategy_config.get(layer, {})
-            for strat_name, strat_cfg in layer_config.items():
-                if strat_cfg.get("enabled", True):
-                    params = strat_cfg.get("params", {})
-                    strategy_params[strat_name] = params
-        data["params"] = strategy_params
+            # Inject per-strategy config params into data dict
+            strategy_params: Dict[str, Dict[str, Any]] = {}
+            for layer in ["layer1", "layer2", "layer3", "full_data"]:
+                layer_config = orchestrator_ref._strategy_config.get(layer, {})
+                for strat_name, strat_cfg in layer_config.items():
+                    if strat_cfg.get("enabled", True):
+                        params = strat_cfg.get("params", {})
+                        strategy_params[strat_name] = params
+            data["params"] = strategy_params
 
-        # Run evaluation
-        signals = self._strategy_engine.process(data)
+            # Run evaluation
+            signals = self._strategy_engine.process(data)
 
-        if signals:
-            # Track new signals for outcome resolution
-            if self._signal_tracker:
+            if signals:
+                # Track new signals for outcome resolution
+                if self._signal_tracker:
+                    for s in signals:
+                        self._signal_tracker.track(s.to_dict())
+
                 for s in signals:
-                    self._signal_tracker.track(s.to_dict())
-
-            for s in signals:
-                if self._logger:
-                    from config.logging_config import log_with_correlation
-                    log_with_correlation(
-                        self._logger, logging.INFO,
-                        "SIGNAL",
-                        correlation_id=self._correlation_id,
-                        strategy_id=s.strategy_id,
-                        direction=s.direction.value,
-                        confidence=s.confidence,
-                        reason=s.reason
-                    )
+                    if self._logger:
+                        from config.logging_config import log_with_correlation
+                        log_with_correlation(
+                            self._logger, logging.INFO,
+                            "SIGNAL",
+                            correlation_id=self._correlation_id,
+                            strategy_id=s.strategy_id,
+                            direction=s.direction.value,
+                            confidence=s.confidence,
+                            reason=s.reason
+                        )
+            
+            # Reset error count on successful processing
+            if self._error_count > 0:
+                self._error_count = 0
+        except Exception as exc:
+            # Increment error count for circuit breaker
+            self._error_count += 1
+            self._last_error_time = time.time()
+            
+            if self._logger:
+                from config.logging_config import log_with_correlation
+                log_with_correlation(
+                    self._logger, logging.ERROR,
+                    "Error in strategy evaluation",
+                    correlation_id=self._correlation_id,
+                    error=str(exc),
+                    error_count=self._error_count
+                )
+            
+            # Circuit breaker: trigger critical alert after threshold
+            if self._error_count >= self._max_consecutive_errors:
+                self._logger.critical(
+                    f"CIRCUIT BREAKER: {self._error_count} consecutive errors in strategy evaluation",
+                    extra={"correlation_id": self._correlation_id}
+                )
 
     def build_last_trigger(self, signal_tracker: SignalTracker) -> Dict[str, Dict[str, Any]]:
         """Build last_trigger data for each strategy from open + resolved signals.

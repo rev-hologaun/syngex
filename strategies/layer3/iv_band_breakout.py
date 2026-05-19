@@ -47,33 +47,36 @@ logger = logging.getLogger("Syngex.Strategies.IVBandBreakout")
 # Constants
 # ---------------------------------------------------------------------------
 
+# Configuration parameters - can be overridden via self._params
+# Default values provided for standalone operation
+
 # Delta acceleration threshold: current delta must be below rolling avg
 # by this ratio (< 1.0 means deceleration = coiling signal)
-DELTA_DECEL_RATIO = 0.95  # Delta must be below rolling avg
+DEFAULT_DELTA_DECEL_RATIO = 0.95  # Delta must be below rolling avg
 
 # IV compression: IV must be in bottom 25% of its 30m range
 # (checked via RollingWindow.is_in_bottom_quartile)
 
 # Price compression: high-low range must be < 30% of rolling mean range
-PRICE_COMPRESSION_RATIO = 0.40
+DEFAULT_PRICE_COMPRESSION_RATIO = 0.40
 
 # Minimum price move to count as breakout (0.05%)
-BREAKOUT_MOVE_PCT = 0.0005
+DEFAULT_BREAKOUT_MOVE_PCT = 0.0005
 
 # Volume confirmation
-VOLUME_TREND_REQUIRED = True
+DEFAULT_VOLUME_TREND_REQUIRED = True
 
 # Stop and target
-STOP_PCT = 0.005              # 0.5% stop
-TARGET_PCT = 0.010            # 1.0% target (2:1 R:R)
+DEFAULT_STOP_PCT = 0.005              # 0.5% stop
+DEFAULT_TARGET_PCT = 0.010            # 1.0% target (2:1 R:R)
 
 # Min confidence
-MIN_CONFIDENCE = 0.25
-MAX_CONFIDENCE = 0.85         # Micro-signal cap
+DEFAULT_MIN_CONFIDENCE = 0.25
+DEFAULT_MAX_CONFIDENCE = 0.85         # Micro-signal cap
 
 # Min data points
-MIN_DATA_POINTS = 5           # Need enough data for stats
-MIN_IV_DATA_POINTS = 3        # Minimum for IV window
+DEFAULT_MIN_DATA_POINTS = 5           # Need enough data for stats
+DEFAULT_MIN_IV_DATA_POINTS = 3        # Minimum for IV window
 
 
 class IVBandBreakout(BaseStrategy):
@@ -96,6 +99,27 @@ class IVBandBreakout(BaseStrategy):
     strategy_id = "iv_band_breakout"
     layer = "layer3"
 
+    def __init__(self):
+        """Initialize strategy with configurable parameters."""
+        super().__init__()
+        self._params = {
+            'delta_decel_ratio': DEFAULT_DELTA_DECEL_RATIO,
+            'price_compression_ratio': DEFAULT_PRICE_COMPRESSION_RATIO,
+            'breakout_move_pct': DEFAULT_BREAKOUT_MOVE_PCT,
+            'volume_trend_required': DEFAULT_VOLUME_TREND_REQUIRED,
+            'stop_pct': DEFAULT_STOP_PCT,
+            'target_pct': DEFAULT_TARGET_PCT,
+            'min_confidence': DEFAULT_MIN_CONFIDENCE,
+            'max_confidence': DEFAULT_MAX_CONFIDENCE,
+            'min_data_points': DEFAULT_MIN_DATA_POINTS,
+            'min_iv_data_points': DEFAULT_MIN_IV_DATA_POINTS,
+        }
+
+    def _apply_params(self, data: Dict[str, Any]) -> None:
+        """Apply parameter overrides from data dict if present."""
+        if 'params' in data:
+            self._params.update(data['params'])
+
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """
         Evaluate current state for IV band breakout signals.
@@ -103,6 +127,8 @@ class IVBandBreakout(BaseStrategy):
         Returns empty list when no compression-to-expansion transition
         is detected.
         """
+        # Apply parameter overrides
+        self._apply_params(data)
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
             return []
@@ -184,11 +210,13 @@ class IVBandBreakout(BaseStrategy):
 
         # 3. Delta coiling check (proxy for theta decay)
         delta_decel = self._check_delta_coiling(rolling_data)
-        if delta_decel is None or delta_decel >= DELTA_DECEL_RATIO:
+        if delta_decel is None or delta_decel >= self._params['delta_decel_ratio']:
             return None
 
         # 4. Price breakout above recent high
-        if not self._check_breakout_high(rolling_data):
+        if not self._check_breakout_high(
+            rolling_data, self._params['breakout_move_pct']
+        ):
             return None
 
         # 5. Volume trending UP (call volume)
@@ -207,13 +235,13 @@ class IVBandBreakout(BaseStrategy):
         confidence = self._compute_long_confidence(
             iv_depth, rolling_data, delta_decel, vol_trend, net_gamma,
         )
-        if confidence < MIN_CONFIDENCE:
+        if confidence < self._params['min_confidence']:
             return None
 
         # Build signal
         entry = price
-        stop = entry * (1 - STOP_PCT)
-        target = entry * (1 + TARGET_PCT)
+        stop = entry * (1 - self._params['stop_pct'])
+        target = entry * (1 + self._params['target_pct'])
 
         price_window = rolling_data.get(KEY_PRICE_5M)
         trend = price_window.trend if price_window else "UNKNOWN"
@@ -291,11 +319,13 @@ class IVBandBreakout(BaseStrategy):
 
         # 3. Delta coiling check (proxy for theta decay)
         delta_decel = self._check_delta_coiling(rolling_data)
-        if delta_decel is None or delta_decel >= DELTA_DECEL_RATIO:
+        if delta_decel is None or delta_decel >= self._params['delta_decel_ratio']:
             return None
 
         # 4. Price breakout below recent low
-        if not self._check_breakout_low(rolling_data):
+        if not self._check_breakout_low(
+            rolling_data, self._params['breakout_move_pct']
+        ):
             return None
 
         # 5. Volume trending DOWN (put volume)
@@ -314,13 +344,13 @@ class IVBandBreakout(BaseStrategy):
         confidence = self._compute_short_confidence(
             iv_depth, rolling_data, delta_decel, vol_trend, net_gamma,
         )
-        if confidence < MIN_CONFIDENCE:
+        if confidence < self._params['min_confidence']:
             return None
 
         # Build signal
         entry = price
-        stop = entry * (1 + STOP_PCT)
-        target = entry * (1 - TARGET_PCT)
+        stop = entry * (1 + self._params['stop_pct'])
+        target = entry * (1 - self._params['target_pct'])
 
         price_window = rolling_data.get(KEY_PRICE_5M)
         trend = price_window.trend if price_window else "UNKNOWN"
@@ -381,7 +411,7 @@ class IVBandBreakout(BaseStrategy):
         """
         key = f"iv_{atm_strike}_5m"
         iv_window = rolling_data.get(key)
-        if iv_window is None or iv_window.count < MIN_IV_DATA_POINTS:
+        if iv_window is None or iv_window.count < self._params['min_iv_data_points']:
             return False, 0.0
 
         iv_latest = iv_window.latest
@@ -407,7 +437,7 @@ class IVBandBreakout(BaseStrategy):
         Tighter range = more coiled = higher breakout probability.
         """
         window = rolling_data.get(KEY_PRICE_5M)
-        if window is None or window.count < MIN_DATA_POINTS:
+        if window is None or window.count < self._params['min_data_points']:
             return False
 
         current_range = window.range
@@ -417,7 +447,7 @@ class IVBandBreakout(BaseStrategy):
             return False
 
         compression_ratio = current_range / (std * 2)
-        return compression_ratio < PRICE_COMPRESSION_RATIO
+        return compression_ratio < self._params['price_compression_ratio']
 
     @staticmethod
     def _get_price_compression_ratio(rolling_data: Dict[str, Any]) -> float:
@@ -449,7 +479,7 @@ class IVBandBreakout(BaseStrategy):
             >= 1.0 = not coiling
         """
         window = rolling_data.get(KEY_TOTAL_DELTA_5M)
-        if window is None or window.count < MIN_DATA_POINTS:
+        if window is None or window.count < self._params['min_data_points']:
             return None
 
         rolling_avg = window.mean
@@ -463,12 +493,15 @@ class IVBandBreakout(BaseStrategy):
         return current / rolling_avg
 
     @staticmethod
-    def _check_breakout_high(rolling_data: Dict[str, Any]) -> bool:
+    def _check_breakout_high(
+        rolling_data: Dict[str, Any],
+        breakout_move_pct: float,
+    ) -> bool:
         """
         Check if price has broken above the recent high.
 
         Latest price must be above the rolling window max by at least
-        BREAKOUT_MOVE_PCT.
+        breakout_move_pct.
         """
         window = rolling_data.get(KEY_PRICE_5M)
         if window is None or window.count < 3:
@@ -486,15 +519,18 @@ class IVBandBreakout(BaseStrategy):
 
         # Must have moved enough to count as breakout
         move_pct = (latest - window_max) / window_max
-        return move_pct >= BREAKOUT_MOVE_PCT
+        return move_pct >= breakout_move_pct
 
     @staticmethod
-    def _check_breakout_low(rolling_data: Dict[str, Any]) -> bool:
+    def _check_breakout_low(
+        rolling_data: Dict[str, Any],
+        breakout_move_pct: float,
+    ) -> bool:
         """
         Check if price has broken below the recent low.
 
         Latest price must be below the rolling window min by at least
-        BREAKOUT_MOVE_PCT.
+        breakout_move_pct.
         """
         window = rolling_data.get(KEY_PRICE_5M)
         if window is None or window.count < 3:
@@ -512,7 +548,7 @@ class IVBandBreakout(BaseStrategy):
 
         # Must have moved enough to count as breakout
         move_pct = (window_min - latest) / window_min
-        return move_pct >= BREAKOUT_MOVE_PCT
+        return move_pct >= breakout_move_pct
 
     @staticmethod
     def _check_atm_delta_positive(gex_calc: Any, atm_strike: float) -> bool:
@@ -575,8 +611,8 @@ class IVBandBreakout(BaseStrategy):
 
         # 3. Delta deceleration (0.05–0.10)
         # More negative ratio = more coiling = higher confidence
-        deviation = max(0, DELTA_DECEL_RATIO - delta_decel)
-        delta_conf = 0.05 + 0.05 * min(1.0, deviation / DELTA_DECEL_RATIO)
+        deviation = max(0, self._params['delta_decel_ratio'] - delta_decel)
+        delta_conf = 0.05 + 0.05 * min(1.0, deviation / self._params['delta_decel_ratio'])
 
         # 4. Volume confirmation (0.05–0.10)
         vol_conf = 0.10 if vol_trend == "UP" else 0.05
@@ -592,7 +628,7 @@ class IVBandBreakout(BaseStrategy):
         norm_vol = normalize_confidence(vol_conf, 0.05, 0.10)
         norm_regime = normalize_confidence(regime_conf, 0.0, 0.10)
         confidence = (norm_iv + norm_comp + norm_delta + norm_vol + norm_regime) / 5.0
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        return min(self._params['max_confidence'], max(0.0, confidence))
 
     def _compute_short_confidence(
         self,
@@ -624,8 +660,8 @@ class IVBandBreakout(BaseStrategy):
         compression_conf = 0.15 * (1 - ratio)
 
         # 3. Delta deceleration (0.05–0.10)
-        deviation = max(0, DELTA_DECEL_RATIO - delta_decel)
-        delta_conf = 0.05 + 0.05 * min(1.0, deviation / DELTA_DECEL_RATIO)
+        deviation = max(0, self._params['delta_decel_ratio'] - delta_decel)
+        delta_conf = 0.05 + 0.05 * min(1.0, deviation / self._params['delta_decel_ratio'])
 
         # 4. Volume confirmation (0.05–0.10)
         vol_conf = 0.10 if vol_trend == "DOWN" else 0.05
@@ -640,4 +676,4 @@ class IVBandBreakout(BaseStrategy):
         norm_vol = normalize_confidence(vol_conf, 0.05, 0.10)
         norm_regime = normalize_confidence(regime_conf, 0.0, 0.10)
         confidence = (norm_iv + norm_comp + norm_delta + norm_vol + norm_regime) / 5.0
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        return min(self._params['max_confidence'], max(0.0, confidence))

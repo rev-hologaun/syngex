@@ -42,16 +42,19 @@ from strategies.volume_filter import VolumeFilter
 logger = logging.getLogger("Syngex.Strategies.VolCompressionRange")
 
 # ---------------------------------------------------------------------------
-# Constants
+# Default Fallback Constants
+# These are used ONLY if config/strategies.yaml is missing values.
+# The actual values should be configured in strategies.yaml under
+# layer1.vol_compression_range.params
 # ---------------------------------------------------------------------------
 
-COMPRESSION_PCT = 0.003       # 0.3% max range for compression
-MIN_RANGE_BARS = 20           # Minimum data points in rolling window
-WALL_EDGE_PROXIMITY = 0.004   # 0.4% from wall for edge trade
-MIN_CONFIDENCE = 0.45         # Minimum confidence to emit signal
-STOP_PCT = 0.006              # 0.6% stop (wider for scalping)
-TARGET_RISK_MULT = 1.5        # 1.5× risk for target
-STD_THRESHOLD = 0.002         # Max std of price for compression
+DEFAULT_COMPRESSION_PCT = 0.003       # 0.3% max range for compression
+DEFAULT_MIN_RANGE_BARS = 20           # Minimum data points in rolling window
+DEFAULT_WALL_EDGE_PROXIMITY = 0.004   # 0.4% from wall for edge trade
+DEFAULT_MIN_CONFIDENCE = 0.45         # Minimum confidence to emit signal
+DEFAULT_STOP_PCT = 0.006              # 0.6% stop (wider for scalping)
+DEFAULT_TARGET_RISK_MULT = 1.5        # 1.5× risk for target
+DEFAULT_STD_THRESHOLD = 0.002         # Max std of price for compression
 
 
 class VolCompressionRange(BaseStrategy):
@@ -73,6 +76,18 @@ class VolCompressionRange(BaseStrategy):
         Returns empty list when not in positive gamma regime or no
         compression detected.
         """
+        # Apply config params from data dict
+        self._apply_params(data)
+
+        # Extract params with fallback defaults
+        compression_pct = self._params.get('compression_pct', DEFAULT_COMPRESSION_PCT)
+        min_range_bars = self._params.get('min_range_bars', DEFAULT_MIN_RANGE_BARS)
+        wall_edge_proximity = self._params.get('wall_edge_proximity', DEFAULT_WALL_EDGE_PROXIMITY)
+        min_confidence = self._params.get('min_confidence', DEFAULT_MIN_CONFIDENCE)
+        stop_pct = self._params.get('stop_pct', DEFAULT_STOP_PCT)
+        target_risk_mult = self._params.get('target_risk_mult', DEFAULT_TARGET_RISK_MULT)
+        std_threshold = self._params.get('std_threshold', DEFAULT_STD_THRESHOLD)
+
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
             return []
@@ -89,17 +104,17 @@ class VolCompressionRange(BaseStrategy):
             return []
 
         # Volume confirmation filter
-        vol_filter = VolumeFilter.evaluate(rolling_data, MIN_CONFIDENCE)
+        vol_filter = VolumeFilter.evaluate(rolling_data, min_confidence)
         if not vol_filter["recommended"]:
             return []
 
         # Get the best price rolling window
         price_window = self._get_price_window(rolling_data)
-        if price_window is None or price_window.count < MIN_RANGE_BARS:
+        if price_window is None or price_window.count < min_range_bars:
             return []
 
         # Check for compression
-        is_compressed = self._check_compression(price_window, underlying_price)
+        is_compressed = self._check_compression(price_window, underlying_price, compression_pct, std_threshold)
         if not is_compressed:
             return []
 
@@ -108,14 +123,16 @@ class VolCompressionRange(BaseStrategy):
         # Check range edges
         if price_window.max is not None:
             sig = self._check_upper_edge(
-                price_window, underlying_price, gex_calc, regime
+                price_window, underlying_price, gex_calc, regime,
+                wall_edge_proximity, stop_pct, target_risk_mult, min_confidence
             )
             if sig:
                 signals.append(sig)
 
         if price_window.min is not None:
             sig = self._check_lower_edge(
-                price_window, underlying_price, gex_calc, regime
+                price_window, underlying_price, gex_calc, regime,
+                wall_edge_proximity, stop_pct, target_risk_mult, min_confidence
             )
             if sig:
                 signals.append(sig)
@@ -130,22 +147,24 @@ class VolCompressionRange(BaseStrategy):
         self,
         price_window: Any,
         price: float,
+        compression_pct: float,
+        std_threshold: float,
     ) -> bool:
         """
         Check if price is in a compressed range.
 
         Two criteria (either one suffices):
-        1. Range (max - min) < COMPRESSION_PCT of price
-        2. Rolling std < STD_THRESHOLD
+        1. Range (max - min) < compression_pct of price
+        2. Rolling std < std_threshold
         """
         # Range check
         rng = price_window.range
-        if rng is not None and rng / price <= COMPRESSION_PCT:
+        if rng is not None and rng / price <= compression_pct:
             return True
 
         # Std check
         std = price_window.std
-        if std is not None and std / price <= STD_THRESHOLD:
+        if std is not None and std / price <= std_threshold:
             return True
 
         return False
@@ -160,6 +179,10 @@ class VolCompressionRange(BaseStrategy):
         price: float,
         gex_calc: Any,
         regime: str,
+        wall_edge_proximity: float,
+        stop_pct: float,
+        target_risk_mult: float,
+        min_confidence: float,
     ) -> Optional[Signal]:
         """
         Check if price is near the upper edge of the range with a call wall.
@@ -187,7 +210,7 @@ class VolCompressionRange(BaseStrategy):
         nearest_wall = min(call_walls, key=lambda w: w["strike"])
         wall_distance = (nearest_wall["strike"] - price) / price
 
-        if wall_distance > WALL_EDGE_PROXIMITY:
+        if wall_distance > wall_edge_proximity:
             return None  # Wall too far
 
         # Compute confidence
@@ -195,13 +218,13 @@ class VolCompressionRange(BaseStrategy):
             position_in_range, wall_distance, nearest_wall["gex"],
             rng / price, price_window.count, "short"
         )
-        if confidence < MIN_CONFIDENCE:
+        if confidence < min_confidence:
             return None
 
         # Stop above the wall (range edge)
-        stop = nearest_wall["strike"] * (1 + STOP_PCT)
+        stop = nearest_wall["strike"] * (1 + stop_pct)
         risk = stop - price
-        target = price - risk * TARGET_RISK_MULT
+        target = price - risk * target_risk_mult
         if risk <= 0:
             return None
 
@@ -241,6 +264,10 @@ class VolCompressionRange(BaseStrategy):
         price: float,
         gex_calc: Any,
         regime: str,
+        wall_edge_proximity: float,
+        stop_pct: float,
+        target_risk_mult: float,
+        min_confidence: float,
     ) -> Optional[Signal]:
         """
         Check if price is near the lower edge of the range with a put wall.
@@ -269,7 +296,7 @@ class VolCompressionRange(BaseStrategy):
         is_put_wall = nearest_wall.get("side") == "put"
         wall_distance = (price - nearest_wall["strike"]) / price
 
-        if wall_distance > WALL_EDGE_PROXIMITY:
+        if wall_distance > wall_edge_proximity:
             return None  # Wall too far
 
         # Compute confidence
@@ -277,13 +304,13 @@ class VolCompressionRange(BaseStrategy):
             position_in_range, wall_distance, nearest_wall["gex"],
             rng / price, price_window.count, "long", is_put_wall=is_put_wall
         )
-        if confidence < MIN_CONFIDENCE:
+        if confidence < min_confidence:
             return None
 
         # Stop below the wall (range edge)
-        stop = nearest_wall["strike"] * (1 - STOP_PCT)
+        stop = nearest_wall["strike"] * (1 - stop_pct)
         risk = price - stop
-        target = price + risk * TARGET_RISK_MULT
+        target = price + risk * target_risk_mult
         if risk <= 0:
             return None
 
@@ -353,7 +380,7 @@ class VolCompressionRange(BaseStrategy):
         wall_conf = 0.2 + 0.1 * (1 - wall_distance / WALL_EDGE_PROXIMITY)
 
         # Range tightness: tighter range = higher confidence
-        tightness_conf = 0.1 + 0.1 * max(0, 1 - range_pct / COMPRESSION_PCT)
+        tightness_conf = 0.1 + 0.1 * max(0, 1 - range_pct / compression_pct)
 
         # Wall strength
         strength_conf = 0.1 + 0.1 * min(1.0, abs(wall_gex) / 5_000_000)

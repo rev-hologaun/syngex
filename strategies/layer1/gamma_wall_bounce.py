@@ -36,15 +36,18 @@ from strategies.volume_filter import VolumeFilter
 logger = logging.getLogger("Syngex.Strategies.GammaWallBounce")
 
 # ---------------------------------------------------------------------------
-# Constants
+# Default Fallback Constants
+# These are used ONLY if config/strategies.yaml is missing values.
+# The actual values should be configured in strategies.yaml under
+# layer1.gamma_wall_bounce.params
 # ---------------------------------------------------------------------------
 
-WALL_PROXIMITY_PCT = 0.005       # 0.5% — how close price must be to wall
-STOP_PAST_WALL_PCT = 0.004       # 0.4% — stop beyond the wall
-TARGET_RISK_MULT = 1.5           # 1.5× risk for target
-MIN_WALL_GEX = 500000            # Minimum |GEX| to consider a wall
-MIN_CONFIDENCE = 0.25            # Minimum confidence to emit signal
-MAX_CONFIDENCE = 0.85            # Hard cap — wall bounce alone can't be max conviction
+DEFAULT_WALL_PROXIMITY_PCT = 0.005       # 0.5% — how close price must be to wall
+DEFAULT_STOP_PAST_WALL_PCT = 0.004       # 0.4% — stop beyond the wall
+DEFAULT_TARGET_RISK_MULT = 1.5           # 1.5× risk for target
+DEFAULT_MIN_WALL_GEX = 500000            # Minimum |GEX| to consider a wall
+DEFAULT_MIN_CONFIDENCE = 0.25            # Minimum confidence to emit signal
+DEFAULT_MAX_CONFIDENCE = 0.85            # Hard cap — wall bounce alone can't be max conviction
 
 
 class GammaWallBounce(BaseStrategy):
@@ -65,6 +68,17 @@ class GammaWallBounce(BaseStrategy):
 
         Returns empty list when no wall rejection is detected.
         """
+        # Apply config params from data dict
+        self._apply_params(data)
+
+        # Extract params with fallback defaults
+        wall_proximity_pct = self._params.get('wall_proximity_pct', DEFAULT_WALL_PROXIMITY_PCT)
+        stop_past_wall_pct = self._params.get('stop_past_wall_pct', DEFAULT_STOP_PAST_WALL_PCT)
+        target_risk_mult = self._params.get('target_risk_mult', DEFAULT_TARGET_RISK_MULT)
+        min_wall_gex = self._params.get('min_wall_gex', DEFAULT_MIN_WALL_GEX)
+        min_confidence = self._params.get('min_confidence', DEFAULT_MIN_CONFIDENCE)
+        max_confidence = self._params.get('max_confidence', DEFAULT_MAX_CONFIDENCE)
+
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
             return []
@@ -76,12 +90,12 @@ class GammaWallBounce(BaseStrategy):
         rolling_data = data.get("rolling_data")
 
         # Global volume filter — wall bounce is mean-reversion, needs volume conviction
-        vol_check = VolumeFilter.evaluate(rolling_data, MIN_CONFIDENCE)
+        vol_check = VolumeFilter.evaluate(rolling_data, min_confidence)
         if not vol_check["recommended"]:
             return []
 
         # Get walls above and below price
-        walls = gex_calc.get_gamma_walls(threshold=MIN_WALL_GEX)
+        walls = gex_calc.get_gamma_walls(threshold=min_wall_gex)
         if not walls:
             return []
 
@@ -125,12 +139,12 @@ class GammaWallBounce(BaseStrategy):
         wall_strike = wall["strike"]
         wall_gex = wall["gex"]
 
-        # Check proximity: price must be within WALL_PROXIMITY_PCT below wall
+        # Check proximity: price must be within wall_proximity_pct below wall
         distance_pct = (wall_strike - price) / price
         if distance_pct < 0:
             # Price already above the wall — no bounce setup
             return None
-        if distance_pct > WALL_PROXIMITY_PCT:
+        if distance_pct > wall_proximity_pct:
             # Too far from wall
             return None
 
@@ -142,7 +156,7 @@ class GammaWallBounce(BaseStrategy):
 
         # Check velocity: if price is crossing the wall at high speed,
         # the wall is permeable — skip the signal
-        if not self._check_velocity(price, wall_strike, rolling_data, "call"):
+        if not self._check_velocity(price, wall_strike, rolling_data, "call", velocity_threshold=0.005):
             return None
 
         # Get trend from rolling data
@@ -151,15 +165,16 @@ class GammaWallBounce(BaseStrategy):
 
         # Calculate confidence
         confidence = self._compute_confidence(
-            distance_pct, wall_gex, rejection_score, "call", regime
+            distance_pct, wall_gex, rejection_score, "call", regime,
+            wall_proximity_pct, min_wall_gex, max_confidence
         )
-        if confidence < MIN_CONFIDENCE:
+        if confidence < min_confidence:
             return None
 
         # Build signal
-        stop = wall_strike * (1 + STOP_PAST_WALL_PCT)
+        stop = wall_strike * (1 + stop_past_wall_pct)
         risk = stop - price
-        target = price - (risk * TARGET_RISK_MULT)
+        target = price - (risk * target_risk_mult)
 
         # Also consider midpoint to next wall as target
         target = self._better_target(price, target, stop, all_walls, "call")
@@ -207,12 +222,12 @@ class GammaWallBounce(BaseStrategy):
         wall_strike = wall["strike"]
         wall_gex = wall["gex"]
 
-        # Check proximity: price must be within WALL_PROXIMITY_PCT above wall
+        # Check proximity: price must be within wall_proximity_pct above wall
         distance_pct = (price - wall_strike) / price
         if distance_pct < 0:
             # Price already below the wall
             return None
-        if distance_pct > WALL_PROXIMITY_PCT:
+        if distance_pct > wall_proximity_pct:
             return None
 
         rejection_score = self._rejection_score(wall, price, all_walls, rolling_data)
@@ -221,7 +236,7 @@ class GammaWallBounce(BaseStrategy):
 
         # Check velocity: if price is crossing the wall at high speed,
         # the wall is permeable — skip the signal
-        if not self._check_velocity(price, wall_strike, rolling_data, "put"):
+        if not self._check_velocity(price, wall_strike, rolling_data, "put", velocity_threshold=0.005):
             return None
 
         # Get trend from rolling data
@@ -229,14 +244,15 @@ class GammaWallBounce(BaseStrategy):
         trend = pw.trend if pw else "UNKNOWN"
 
         confidence = self._compute_confidence(
-            distance_pct, abs(wall_gex), rejection_score, "put", regime
+            distance_pct, abs(wall_gex), rejection_score, "put", regime,
+            wall_proximity_pct, min_wall_gex, max_confidence
         )
-        if confidence < MIN_CONFIDENCE:
+        if confidence < min_confidence:
             return None
 
-        stop = wall_strike * (1 - STOP_PAST_WALL_PCT)
+        stop = wall_strike * (1 - stop_past_wall_pct)
         risk = price - stop
-        target = price + (risk * TARGET_RISK_MULT)
+        target = price + (risk * target_risk_mult)
 
         target = self._better_target(price, target, stop, all_walls, "put")
 
@@ -309,8 +325,8 @@ class GammaWallBounce(BaseStrategy):
         distance_pct = abs(wall_strike - price) / price
         if distance_pct < 0.0005:
             base_score = 0.3
-        elif distance_pct < WALL_PROXIMITY_PCT:
-            base_score = 0.5 + 0.5 * (1 - distance_pct / WALL_PROXIMITY_PCT)
+        elif distance_pct < wall_proximity_pct:
+            base_score = 0.5 + 0.5 * (1 - distance_pct / wall_proximity_pct)
         else:
             return 0.0
         if rolling_data:
@@ -340,6 +356,9 @@ class GammaWallBounce(BaseStrategy):
         rejection_score: float,
         side: str,
         regime: str = "",
+        wall_proximity_pct: float = DEFAULT_WALL_PROXIMITY_PCT,
+        min_wall_gex: float = DEFAULT_MIN_WALL_GEX,
+        max_confidence: float = DEFAULT_MAX_CONFIDENCE,
     ) -> float:
         """
         Combine proximity, wall strength, and rejection into confidence.
@@ -347,11 +366,11 @@ class GammaWallBounce(BaseStrategy):
         Returns 0.0–1.0.
         """
         # Proximity component: closer = higher confidence (0.3–0.5)
-        proximity_conf = 0.3 + 0.2 * (1 - distance_pct / WALL_PROXIMITY_PCT)
+        proximity_conf = 0.3 + 0.2 * (1 - distance_pct / wall_proximity_pct)
 
         # Wall strength component: higher GEX = higher confidence (0.2–0.3)
-        # Normalize: 500k = low, 5M+ = high
-        strength_conf = 0.2 + 0.3 * min(1.0, gex_magnitude / 5_000_000)
+        # Normalize: min_wall_gex = low, min_wall_gex*10 = high
+        strength_conf = 0.2 + 0.3 * min(1.0, gex_magnitude / (min_wall_gex * 10))
 
         # Rejection component: 0.2–0.3
         rejection_conf = 0.2 + 0.1 * rejection_score
@@ -369,7 +388,7 @@ class GammaWallBounce(BaseStrategy):
             regime_bonus = -0.10  # misaligned regime — still fire but penalize
         norm_regime = regime_bonus / 0.15 if regime_bonus > 0 else 0.0
         confidence = (norm_prox + norm_strength + norm_reject + norm_regime) / 4.0
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        return min(max_confidence, max(0.0, confidence))
 
     def _better_target(
         self,

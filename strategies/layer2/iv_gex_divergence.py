@@ -43,7 +43,7 @@ from strategies.utils import normalize_confidence
 logger = logging.getLogger("Syngex.Strategies.IVGEXDivergence")
 
 # ---------------------------------------------------------------------------
-# Constants
+# Constants (can be overridden via params)
 # ---------------------------------------------------------------------------
 
 # Price must be at or above this percentile of 30m window
@@ -92,6 +92,10 @@ class IVGEXDivergence(BaseStrategy):
 
         Returns signals list — may contain SHORT, LONG, both, or empty.
         """
+
+        # Apply params to data for parameterized thresholds
+        data = self._apply_params(data)
+
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
             return []
@@ -112,8 +116,9 @@ class IVGEXDivergence(BaseStrategy):
             iv_crashing, iv_atm, iv_decline = self._check_iv_crashing(
                 gex_calc, rolling_data, underlying_price,
             )
-            if iv_crashing and net_gamma > MIN_POSITIVE_GAMMA:
-                walls = gex_calc.get_gamma_walls(threshold=500000)
+            if iv_crashing and net_gamma > self._params.get('min_positive_gamma', MIN_POSITIVE_GAMMA):
+                gamma_threshold = self._params.get('gamma_wall_threshold', 500000)
+                walls = gex_calc.get_gamma_walls(threshold=gamma_threshold)
                 wall_above = None
                 for wall in walls:
                     if wall["strike"] > underlying_price and wall["side"] == "call":
@@ -124,7 +129,7 @@ class IVGEXDivergence(BaseStrategy):
                     price_high, iv_decline, net_gamma,
                     wall_above, regime, "SHORT",
                 )
-                if confidence >= MIN_CONFIDENCE:
+                if confidence >= self._params.get('min_confidence', MIN_CONFIDENCE):
                     sig = self._build_signal(
                         signal_type="SHORT",
                         price=underlying_price,
@@ -146,8 +151,9 @@ class IVGEXDivergence(BaseStrategy):
             iv_expanding, iv_atm, iv_expand = self._check_iv_expanding(
                 gex_calc, rolling_data, underlying_price,
             )
-            if iv_expanding and net_gamma < -MIN_POSITIVE_GAMMA:
-                walls = gex_calc.get_gamma_walls(threshold=500000)
+            if iv_expanding and net_gamma < -self._params.get('min_positive_gamma', MIN_POSITIVE_GAMMA):
+                gamma_threshold = self._params.get('gamma_wall_threshold', 500000)
+                walls = gex_calc.get_gamma_walls(threshold=gamma_threshold)
                 wall_below = None
                 for wall in walls:
                     if wall["strike"] < underlying_price and wall["side"] == "put":
@@ -158,7 +164,7 @@ class IVGEXDivergence(BaseStrategy):
                     price_low, iv_expand, net_gamma,
                     wall_below, regime, "LONG",
                 )
-                if confidence >= MIN_CONFIDENCE:
+                if confidence >= self._params.get('min_confidence', MIN_CONFIDENCE):
                     sig = self._build_signal(
                         signal_type="LONG",
                         price=underlying_price,
@@ -184,7 +190,7 @@ class IVGEXDivergence(BaseStrategy):
         or 0.0 if conditions not met.
         """
         window = rolling_data.get(KEY_PRICE_30M)
-        if window is None or window.count < MIN_PRICE_POINTS:
+        if window is None or window.count < self._params.get('min_price_points', MIN_PRICE_POINTS):
             return 0.0
 
         latest = window.latest
@@ -196,7 +202,7 @@ class IVGEXDivergence(BaseStrategy):
             return 0.0
 
         # Price must be in top 25% of range
-        if percentile >= PRICE_PERCENTILE_THRESHOLD:
+        if percentile >= self._params.get('price_percentile_threshold', PRICE_PERCENTILE_THRESHOLD):
             return percentile
 
         return 0.0
@@ -209,7 +215,7 @@ class IVGEXDivergence(BaseStrategy):
         or 0.0 if conditions not met.
         """
         window = rolling_data.get(KEY_PRICE_30M)
-        if window is None or window.count < MIN_PRICE_POINTS:
+        if window is None or window.count < self._params.get('min_price_points', MIN_PRICE_POINTS):
             return 0.0
 
         latest = window.latest
@@ -221,7 +227,7 @@ class IVGEXDivergence(BaseStrategy):
             return 0.0
 
         # Price must be in bottom 25% of range (percentile <= 0.25)
-        if percentile <= (1.0 - PRICE_PERCENTILE_THRESHOLD):  # <= 0.25
+        if percentile <= (1.0 - self._params.get('price_percentile_threshold', PRICE_PERCENTILE_THRESHOLD)):  # <= 0.25
             # Return "lowness" score — 0.25 at p25, 1.0 at p0
             return 1.0 - percentile  # 0.75 at p25, 1.0 at p0
 
@@ -250,7 +256,7 @@ class IVGEXDivergence(BaseStrategy):
 
         # Check IV rolling window
         iv_window = rolling_data.get(f"iv_{atm_strike}_5m")
-        if iv_window is None or iv_window.count < MIN_IV_POINTS:
+        if iv_window is None or iv_window.count < self._params.get('min_iv_points', MIN_IV_POINTS):
             # No IV data available — cannot evaluate
             return False, None, 0.0
 
@@ -260,7 +266,8 @@ class IVGEXDivergence(BaseStrategy):
             return False, None, 0.0
 
         decline = 1.0 - (latest / avg)
-        is_crashing = latest < avg * IV_DECLINE_RATIO
+        iv_decline_ratio = self._params.get('iv_decline_ratio', IV_DECLINE_RATIO)
+        is_crashing = latest < avg * iv_decline_ratio
 
         return is_crashing, current_iv, decline
 
@@ -287,7 +294,7 @@ class IVGEXDivergence(BaseStrategy):
 
         # Check IV rolling window
         iv_window = rolling_data.get(f"iv_{atm_strike}_5m")
-        if iv_window is None or iv_window.count < MIN_IV_POINTS:
+        if iv_window is None or iv_window.count < self._params.get('min_iv_points', MIN_IV_POINTS):
             # No IV data available — cannot evaluate
             return False, None, 0.0
 
@@ -298,7 +305,8 @@ class IVGEXDivergence(BaseStrategy):
 
         expansion = (latest / avg) - 1.0
         # IV expanding: latest above rolling avg by inverse of decline ratio
-        is_expanding = latest > avg / IV_DECLINE_RATIO
+        iv_decline_ratio = self._params.get('iv_decline_ratio', IV_DECLINE_RATIO)
+        is_expanding = latest > avg / iv_decline_ratio
 
         return is_expanding, current_iv, expansion
 
@@ -350,7 +358,7 @@ class IVGEXDivergence(BaseStrategy):
         norm_wall = normalize_confidence(wall_conf, 0.0, 0.10)
         norm_regime = normalize_confidence(regime_conf, 0.05, 0.10)
         confidence = (norm_pct + norm_iv + norm_gamma + norm_wall + norm_regime) / 5.0
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        return min(self._params.get('max_confidence', MAX_CONFIDENCE), max(0.0, confidence))
 
     def _build_signal(
         self,
@@ -369,11 +377,11 @@ class IVGEXDivergence(BaseStrategy):
         entry = price
 
         if signal_type == "SHORT":
-            stop = entry * (1 + STOP_PCT)
+            stop = entry * (1 + self._params.get('stop_pct', STOP_PCT))
             risk = stop - entry
             price_window = rolling_data.get(KEY_PRICE_30M)
             rolling_mean = price_window.mean if price_window else entry
-            target = entry - (entry - rolling_mean) * TARGET_RISK_MULT
+            target = entry - (entry - rolling_mean) * self._params.get('target_risk_mult', TARGET_RISK_MULT)
             target = max(target, stop - risk * 0.1)
 
             wall_info = ""
@@ -409,11 +417,11 @@ class IVGEXDivergence(BaseStrategy):
                 },
             )
         else:  # LONG
-            stop = entry * (1 - STOP_PCT)
+            stop = entry * (1 - self._params.get('stop_pct', STOP_PCT))
             risk = entry - stop
             price_window = rolling_data.get(KEY_PRICE_30M)
             rolling_mean = price_window.mean if price_window else entry
-            target = entry + (rolling_mean - entry) * TARGET_RISK_MULT
+            target = entry + (rolling_mean - entry) * self._params.get('target_risk_mult', TARGET_RISK_MULT)
             target = min(target, stop + risk * 0.1)
 
             wall_info = ""

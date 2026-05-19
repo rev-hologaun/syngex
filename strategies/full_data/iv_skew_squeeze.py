@@ -55,29 +55,29 @@ logger = logging.getLogger("Syngex.Strategies.IVSkewSqueeze")
 # ---------------------------------------------------------------------------
 
 # IV Skew thresholds
-SKEW_EXTREME_POSITIVE = 0.20       # Calls 20%+ more expensive (euphoria)
-SKEW_EXTREME_NEGATIVE = -0.07      # Puts 7%+ more expensive (panic)
+DEFAULT_SKEW_EXTREME_POSITIVE = 0.20       # Calls 20%+ more expensive (euphoria)
+DEFAULT_SKEW_EXTREME_NEGATIVE = -0.07      # Puts 7%+ more expensive (panic)
 
 # Price stability: price change must be < this % over 5m
-PRICE_STABLE_THRESHOLD = 0.005     # 0.5% change max
+DEFAULT_PRICE_STABLE_THRESHOLD = 0.005     # 0.5% change max
 
 # Min net gamma for positive regime confirmation
-MIN_NET_GAMMA = 500000.0  # 500k — matches other strategies' thresholds
+DEFAULT_MIN_NET_GAMMA = 500000.0  # 500k — matches other strategies' thresholds
 
 # Stop and target
-STOP_PCT = 0.005                   # 0.5% stop
-TARGET_PCT = 0.008                 # 0.8% target (1.6:1 R:R)
+DEFAULT_STOP_PCT = 0.005                   # 0.5% stop
+DEFAULT_TARGET_PCT = 0.008                 # 0.8% target (1.6:1 R:R)
 
 # Min confidence
-MIN_CONFIDENCE = 0.25
-MAX_CONFIDENCE = 0.80              # v2 strategies cap
+DEFAULT_MIN_CONFIDENCE = 0.25
+DEFAULT_MAX_CONFIDENCE = 0.80              # v2 strategies cap
 
 # Min data points
-MIN_DATA_POINTS = 5                # Need data for basic checks
-MIN_SKEW_DATA_POINTS = 5           # Minimum for skew rolling window
+DEFAULT_MIN_DATA_POINTS = 5                # Need data for basic checks
+DEFAULT_MIN_SKEW_DATA_POINTS = 5           # Minimum for skew rolling window
 
 # Volume spike check
-VOLUME_SPIKE_THRESHOLD = 1.5       # Volume > 1.5× avg = spike
+DEFAULT_VOLUME_SPIKE_THRESHOLD = 1.5       # Volume > 1.5× avg = spike
 
 class IVSkewSqueeze(BaseStrategy):
     """
@@ -94,12 +94,37 @@ class IVSkewSqueeze(BaseStrategy):
     strategy_id = "iv_skew_squeeze"
     layer = "full_data"
 
+    def __init__(self):
+        """Initialize strategy with configurable parameters."""
+        super().__init__()
+        self._params = {
+            'skew_extreme_positive': DEFAULT_SKEW_EXTREME_POSITIVE,
+            'skew_extreme_negative': DEFAULT_SKEW_EXTREME_NEGATIVE,
+            'price_stable_threshold': DEFAULT_PRICE_STABLE_THRESHOLD,
+            'min_net_gamma': DEFAULT_MIN_NET_GAMMA,
+            'stop_pct': DEFAULT_STOP_PCT,
+            'target_pct': DEFAULT_TARGET_PCT,
+            'min_confidence': DEFAULT_MIN_CONFIDENCE,
+            'max_confidence': DEFAULT_MAX_CONFIDENCE,
+            'min_data_points': DEFAULT_MIN_DATA_POINTS,
+            'min_skew_data_points': DEFAULT_MIN_SKEW_DATA_POINTS,
+            'volume_spike_threshold': DEFAULT_VOLUME_SPIKE_THRESHOLD,
+        }
+
+    def _apply_params(self, data: Dict[str, Any]) -> None:
+        """Apply parameter overrides from data dict if present."""
+        if 'params' in data:
+            self._params.update(data['params'])
+
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """
         Evaluate current state and return skew-squeeze signals.
 
         Returns empty list when no skew extreme is detected.
         """
+        # Apply parameter overrides
+        self._apply_params(data)
+        
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
             return []
@@ -126,12 +151,14 @@ class IVSkewSqueeze(BaseStrategy):
             return []
 
         # Check minimum data points
-        if skew_window.count < MIN_SKEW_DATA_POINTS:
+        min_skew_points = self._params.get('min_skew_data_points', DEFAULT_MIN_SKEW_DATA_POINTS)
+        if skew_window.count < min_skew_points:
             return []
 
         # --- Get price data ---
+        min_data_points = self._params.get('min_data_points', DEFAULT_MIN_DATA_POINTS)
         price_window = rolling_data.get(KEY_PRICE_5M)
-        if price_window is None or price_window.count < MIN_DATA_POINTS:
+        if price_window is None or price_window.count < min_data_points:
             return []
 
         price_change_pct = price_window.change_pct
@@ -140,11 +167,12 @@ class IVSkewSqueeze(BaseStrategy):
 
         # --- Get volume data ---
         volume_window = rolling_data.get(KEY_VOLUME_5M)
-        if volume_window is None or volume_window.count < MIN_DATA_POINTS:
+        if volume_window is None or volume_window.count < min_data_points:
             return []
 
         # --- Get net gamma ---
-        if net_gamma < MIN_NET_GAMMA:
+        min_net_gamma = self._params.get('min_net_gamma', DEFAULT_MIN_NET_GAMMA)
+        if net_gamma < min_net_gamma:
             return []
 
         # --- Check for LONG (panic overblown) ---
@@ -189,14 +217,16 @@ class IVSkewSqueeze(BaseStrategy):
         and skew will normalize (move toward zero from negative), pulling price up.
         """
         # Skew must be extremely negative (panic)
-        if current_skew >= SKEW_EXTREME_NEGATIVE:
+        skew_extreme_negative = self._params.get('skew_extreme_negative', DEFAULT_SKEW_EXTREME_NEGATIVE)
+        if current_skew >= skew_extreme_negative:
             return None
 
         # Price must NOT be breaking down — stable or rising
         price_change = price_window.change_pct
         if price_change is None:
             return None
-        if price_change < -PRICE_STABLE_THRESHOLD:
+        price_stable_threshold = self._params.get('price_stable_threshold', DEFAULT_PRICE_STABLE_THRESHOLD)
+        if price_change < -price_stable_threshold:
             # Price is actually breaking down — panic may be justified
             return None
 
@@ -220,12 +250,15 @@ class IVSkewSqueeze(BaseStrategy):
             volume_window, net_gamma, price,
         )
 
-        if confidence < MIN_CONFIDENCE:
+        min_confidence = self._params.get('min_confidence', DEFAULT_MIN_CONFIDENCE)
+        if confidence < min_confidence:
             return None
 
         # Build signal
-        stop = price * (1 - STOP_PCT)
-        target = price * (1 + TARGET_PCT)
+        stop_pct = self._params.get('stop_pct', DEFAULT_STOP_PCT)
+        target_pct = self._params.get('target_pct', DEFAULT_TARGET_PCT)
+        stop = price * (1 - stop_pct)
+        target = price * (1 + target_pct)
 
         rolling_data = data.get("rolling_data", {})
         price_window_meta = rolling_data.get(KEY_PRICE_5M)
@@ -251,8 +284,8 @@ class IVSkewSqueeze(BaseStrategy):
                 "net_gamma": round(net_gamma, 2),
                 "volume_ratio": self._get_volume_ratio(volume_window),
                 "skew_normalizing": True,
-                "stop_pct": STOP_PCT,
-                "target_pct": TARGET_PCT,
+                "stop_pct": stop_pct,
+                "target_pct": target_pct,
                 "risk_reward_ratio": round(abs(target - price) / (price - stop), 2)
                     if (price - stop) > 0 else 0,
                 "trend": trend,
@@ -281,14 +314,16 @@ class IVSkewSqueeze(BaseStrategy):
         and skew will normalize (move toward zero from positive), pulling price down.
         """
         # Skew must be extremely positive (euphoria)
-        if current_skew <= SKEW_EXTREME_POSITIVE:
+        skew_extreme_positive = self._params.get('skew_extreme_positive', DEFAULT_SKEW_EXTREME_POSITIVE)
+        if current_skew <= skew_extreme_positive:
             return None
 
         # Price must NOT be breaking out — stable or falling
         price_change = price_window.change_pct
         if price_change is None:
             return None
-        if price_change > PRICE_STABLE_THRESHOLD:
+        price_stable_threshold = self._params.get('price_stable_threshold', DEFAULT_PRICE_STABLE_THRESHOLD)
+        if price_change > price_stable_threshold:
             # Price is actually breaking out — euphoria may be justified
             return None
 
@@ -313,12 +348,15 @@ class IVSkewSqueeze(BaseStrategy):
             volume_window, net_gamma, price,
         )
 
-        if confidence < MIN_CONFIDENCE:
+        min_confidence = self._params.get('min_confidence', DEFAULT_MIN_CONFIDENCE)
+        if confidence < min_confidence:
             return None
 
         # Build signal
-        stop = price * (1 + STOP_PCT)
-        target = price * (1 - TARGET_PCT)
+        stop_pct = self._params.get('stop_pct', DEFAULT_STOP_PCT)
+        target_pct = self._params.get('target_pct', DEFAULT_TARGET_PCT)
+        stop = price * (1 + stop_pct)
+        target = price * (1 - target_pct)
 
         rolling_data = data.get("rolling_data", {})
         price_window_meta = rolling_data.get(KEY_PRICE_5M)
@@ -344,8 +382,8 @@ class IVSkewSqueeze(BaseStrategy):
                 "net_gamma": round(net_gamma, 2),
                 "volume_ratio": self._get_volume_ratio(volume_window),
                 "skew_normalizing": True,
-                "stop_pct": STOP_PCT,
-                "target_pct": TARGET_PCT,
+                "stop_pct": stop_pct,
+                "target_pct": target_pct,
                 "risk_reward_ratio": round(abs(target - price) / (stop - price), 2)
                     if (stop - price) > 0 else 0,
                 "trend": trend,
@@ -378,18 +416,21 @@ class IVSkewSqueeze(BaseStrategy):
             return True
 
         ratio = current_vol / avg_vol
+        
+        price_stable_threshold = self._params.get('price_stable_threshold', DEFAULT_PRICE_STABLE_THRESHOLD)
+        volume_spike_threshold = self._params.get('volume_spike_threshold', DEFAULT_VOLUME_SPIKE_THRESHOLD)
 
         if current_skew < 0:
             # Negative skew (panic) — check for volume spike on downside
-            if price_change < -PRICE_STABLE_THRESHOLD and ratio > VOLUME_SPIKE_THRESHOLD:
+            if price_change < -price_stable_threshold and ratio > volume_spike_threshold:
                 return False
         else:
             # Positive skew (euphoria) — check for volume spike on upside
-            if price_change > PRICE_STABLE_THRESHOLD and ratio > VOLUME_SPIKE_THRESHOLD:
+            if price_change > price_stable_threshold and ratio > volume_spike_threshold:
                 return False
 
         # Overall volume spike check regardless of direction
-        if ratio > VOLUME_SPIKE_THRESHOLD:
+        if ratio > volume_spike_threshold:
             return False
 
         return True
@@ -423,16 +464,22 @@ class IVSkewSqueeze(BaseStrategy):
             4. Volume alignment — no volume spike
             5. Net gamma strength — stronger positive gamma = higher confidence
         """
+        # Get parameters
+        skew_extreme_negative = self._params.get('skew_extreme_negative', DEFAULT_SKEW_EXTREME_NEGATIVE)
+        price_stable_threshold = self._params.get('price_stable_threshold', DEFAULT_PRICE_STABLE_THRESHOLD)
+        volume_spike_threshold = self._params.get('volume_spike_threshold', DEFAULT_VOLUME_SPIKE_THRESHOLD)
+        min_net_gamma = self._params.get('min_net_gamma', DEFAULT_MIN_NET_GAMMA)
+        
         # 1. Skew extremity (0.15–0.25)
-        #    Skew < -0.07 is the threshold; deeper = higher confidence
+        #    Skew < skew_extreme_negative is the threshold; deeper = higher confidence
         skew_magnitude = abs(current_skew)
-        # Normalize: -0.07 = 0.3, -0.27 = 0.6, -0.47+ = 1.0
-        skew_conf = min(1.0, (skew_magnitude - 0.07) / 0.40)
+        # Normalize: skew_extreme_negative = 0.3, skew_extreme_negative - 0.20 = 0.6, -0.47+ = 1.0
+        skew_conf = min(1.0, (skew_magnitude - abs(skew_extreme_negative)) / 0.40)
         skew_component = 0.15 + 0.10 * skew_conf
 
         # 2. Price stability (0.15–0.25)
         #    Price change closer to 0 = more stable = higher confidence
-        stability = 1.0 - min(1.0, abs(price_change) / PRICE_STABLE_THRESHOLD)
+        stability = 1.0 - min(1.0, abs(price_change) / price_stable_threshold)
         stability_component = 0.15 + 0.10 * stability
 
         # 3. Skew normalization (0.15–0.20)
@@ -446,14 +493,14 @@ class IVSkewSqueeze(BaseStrategy):
         vol_ratio = self._get_volume_ratio(volume_window)
         if vol_ratio is not None:
             # No spike = good (ratio close to 1.0)
-            vol_stability = 1.0 - min(1.0, max(0, (vol_ratio - 1.0) / (VOLUME_SPIKE_THRESHOLD - 1.0)))
+            vol_stability = 1.0 - min(1.0, max(0, (vol_ratio - 1.0) / (volume_spike_threshold - 1.0)))
             vol_component = 0.10 + 0.05 * vol_stability
         else:
             vol_component = 0.10  # Neutral if no volume data
 
         # 5. Net gamma strength (0.15–0.15)
         #    Higher net gamma = more stable environment
-        gamma_conf = min(1.0, net_gamma / 500000.0)
+        gamma_conf = min(1.0, net_gamma / min_net_gamma)
         gamma_component = 0.10 + 0.10 * gamma_conf
 
         # Normalize each component to [0,1] and average
@@ -464,7 +511,8 @@ class IVSkewSqueeze(BaseStrategy):
         norm_gamma = (gamma_component - 0.10) / (0.20 - 0.10) if 0.20 != 0.10 else 1.0
         confidence = (norm_skew + norm_stability + norm_norm + norm_vol + norm_gamma) / 5.0
 
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        max_confidence = self._params.get('max_confidence', DEFAULT_MAX_CONFIDENCE)
+        return min(max_confidence, max(0.0, confidence))
 
     def _compute_short_confidence(
         self,
@@ -485,15 +533,21 @@ class IVSkewSqueeze(BaseStrategy):
             4. Volume alignment — no volume spike
             5. Net gamma strength — stronger positive gamma = higher confidence
         """
+        # Get parameters
+        skew_extreme_positive = self._params.get('skew_extreme_positive', DEFAULT_SKEW_EXTREME_POSITIVE)
+        price_stable_threshold = self._params.get('price_stable_threshold', DEFAULT_PRICE_STABLE_THRESHOLD)
+        volume_spike_threshold = self._params.get('volume_spike_threshold', DEFAULT_VOLUME_SPIKE_THRESHOLD)
+        min_net_gamma = self._params.get('min_net_gamma', DEFAULT_MIN_NET_GAMMA)
+        
         # 1. Skew extremity (0.15–0.25)
-        #    Skew > 0.20 is the threshold; higher = higher confidence
+        #    Skew > skew_extreme_positive is the threshold; higher = higher confidence
         skew_magnitude = abs(current_skew)
-        # Normalize: 0.20 = 0.3, 0.40 = 0.6, 0.60+ = 1.0
-        skew_conf = min(1.0, (skew_magnitude - 0.20) / 0.40)
+        # Normalize: skew_extreme_positive = 0.3, skew_extreme_positive + 0.20 = 0.6, 0.60+ = 1.0
+        skew_conf = min(1.0, (skew_magnitude - skew_extreme_positive) / 0.40)
         skew_component = 0.15 + 0.10 * skew_conf
 
         # 2. Price stability (0.15–0.25)
-        stability = 1.0 - min(1.0, abs(price_change) / PRICE_STABLE_THRESHOLD)
+        stability = 1.0 - min(1.0, abs(price_change) / price_stable_threshold)
         stability_component = 0.15 + 0.10 * stability
 
         # 3. Skew normalization (0.15–0.20)
@@ -504,13 +558,13 @@ class IVSkewSqueeze(BaseStrategy):
         # 4. Volume alignment (0.10–0.15)
         vol_ratio = self._get_volume_ratio(volume_window)
         if vol_ratio is not None:
-            vol_stability = 1.0 - min(1.0, max(0, (vol_ratio - 1.0) / (VOLUME_SPIKE_THRESHOLD - 1.0)))
+            vol_stability = 1.0 - min(1.0, max(0, (vol_ratio - 1.0) / (volume_spike_threshold - 1.0)))
             vol_component = 0.10 + 0.05 * vol_stability
         else:
             vol_component = 0.10
 
         # 5. Net gamma strength (0.10–0.20)
-        gamma_conf = min(1.0, net_gamma / 500000.0)
+        gamma_conf = min(1.0, net_gamma / min_net_gamma)
         gamma_component = 0.10 + 0.10 * gamma_conf
 
         # Normalize each component to [0,1] and average
@@ -521,4 +575,5 @@ class IVSkewSqueeze(BaseStrategy):
         norm_gamma = normalize_confidence(gamma_component, 0.10, 0.20)
         confidence = (norm_skew + norm_stability + norm_norm + norm_vol + norm_gamma) / 5.0
 
-        return min(MAX_CONFIDENCE, max(0.0, confidence))
+        max_confidence = self._params.get('max_confidence', DEFAULT_MAX_CONFIDENCE)
+        return min(max_confidence, max(0.0, confidence))

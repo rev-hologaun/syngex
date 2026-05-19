@@ -76,12 +76,28 @@ class DeltaVolumeExhaustion(BaseStrategy):
     strategy_id = "delta_volume_exhaustion"
     layer = "layer2"
 
+    def __init__(self):
+        super().__init__()
+        self._params = {
+            'min_trend_points': MIN_TREND_POINTS,
+            'min_greeks_points': MIN_GREEKS_POINTS,
+            'delta_decline_ratio': DELTA_DECLINE_RATIO,
+            'volume_decline_ratio': VOLUME_DECLINE_RATIO,
+            'min_trend_duration': MIN_TREND_DURATION,
+            'stop_pct': STOP_PCT,
+            'min_confidence': MIN_CONFIDENCE,
+            'mean_reversion_mult': MEAN_REVERSION_MULT,
+        }
+
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """
         Evaluate current state for exhaustion setup.
 
         Returns empty list when no exhaustion detected.
         """
+        # Apply params from data if available
+        self._apply_params(data)
+        
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
             return []
@@ -133,7 +149,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
         """
         # 1. Check price trend
         price_window = rolling_data.get(KEY_PRICE_5M)
-        if price_window is None or price_window.count < MIN_TREND_POINTS:
+        if price_window is None or price_window.count < self._params.get('min_trend_points', MIN_TREND_POINTS):
             return None
 
         if price_window.trend != trend_direction:
@@ -159,7 +175,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
             trend_strength, delta_decline, vol_decline,
             net_gamma, regime, trend_direction,
         )
-        if confidence < MIN_CONFIDENCE:
+        if confidence < self._params.get('min_confidence', MIN_CONFIDENCE):
             return None
 
         # 5. Build signal
@@ -167,13 +183,13 @@ class DeltaVolumeExhaustion(BaseStrategy):
         reverse = -1 if trend_direction == "UP" else 1
 
         # Stop: beyond recent swing
-        swing_pct = STOP_PCT
+        swing_pct = self._params.get('stop_pct', STOP_PCT)
         stop = entry * (1 + swing_pct * reverse)
         risk = abs(entry - stop)
 
         # Target: toward rolling mean
         rolling_mean = price_window.mean or entry
-        target = entry + (rolling_mean - entry) * MEAN_REVERSION_MULT
+        target = entry + (rolling_mean - entry) * self._params.get('mean_reversion_mult', MEAN_REVERSION_MULT)
         target = max(target, stop + risk * 0.1)  # At least a little room
 
         direction = Direction.SHORT if trend_direction == "UP" else Direction.LONG
@@ -212,7 +228,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
         Returns 0.0–1.0. Higher = stronger, more sustained trend.
         Direction-agnostic (works for both UP and DOWN trends).
         """
-        if window.count < MIN_TREND_POINTS:
+        if window.count < self._params.get('min_trend_points', MIN_TREND_POINTS):
             return 0.0
 
         vals = list(window.values)
@@ -229,7 +245,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
         strength = min(1.0, max(0.0, 0.3 + (diff / std) / 4.0))
 
         # Bonus for longer sustained trends
-        duration_bonus = min(0.15, (window.count - MIN_TREND_POINTS) * 0.03)
+        duration_bonus = min(0.15, (window.count - self._params.get('min_trend_points', MIN_TREND_POINTS)) * 0.03)
         strength = min(1.0, strength + duration_bonus)
 
         return strength
@@ -241,7 +257,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
     ) -> bool:
         """Check if total delta is declining below rolling average."""
         window = rolling_data.get(KEY_TOTAL_DELTA_5M)
-        if window is None or window.count < MIN_GREEKS_POINTS:
+        if window is None or window.count < self._params.get('min_greeks_points', MIN_GREEKS_POINTS):
             return False
 
         avg = window.mean
@@ -251,7 +267,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
         # Delta should be declining: current below rolling avg
         # Account for sign: for positive delta, current < avg means declining
         # For negative delta, current > avg (less negative) means declining
-        if abs(current_delta) < abs(avg * DELTA_DECLINE_RATIO):
+        if abs(current_delta) < abs(avg * self._params.get('delta_decline_ratio', DELTA_DECLINE_RATIO)):
             return False
 
         # Direction check: delta should be moving toward zero (weakening)
@@ -263,7 +279,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
     def _check_volume_decline(self, rolling_data: Dict[str, Any]) -> bool:
         """Check if volume is declining below rolling average."""
         window = rolling_data.get(KEY_VOLUME_5M)
-        if window is None or window.count < MIN_GREEKS_POINTS:
+        if window is None or window.count < self._params.get('min_greeks_points', MIN_GREEKS_POINTS):
             return False
 
         latest = window.latest
@@ -271,7 +287,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
         if latest is None or avg is None or avg == 0:
             return False
 
-        return latest < avg * VOLUME_DECLINE_RATIO
+        return latest < avg * self._params.get('volume_decline_ratio', VOLUME_DECLINE_RATIO)
 
     def _compute_confidence(
         self,

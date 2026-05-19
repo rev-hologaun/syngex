@@ -36,15 +36,18 @@ from strategies.utils import normalize_confidence
 logger = logging.getLogger("Syngex.Strategies.GammaFlipBreakout")
 
 # ---------------------------------------------------------------------------
-# Constants
+# Default Fallback Constants
+# These are used ONLY if config/strategies.yaml is missing values.
+# The actual values should be configured in strategies.yaml under
+# layer1.gamma_flip_breakout.params
 # ---------------------------------------------------------------------------
 
-FLIP_PROXIMITY_PCT = 0.025      # 2.5% — price must be within this of flip
-STOP_OTHER_SIDE_PCT = 0.01      # 1% — stop on other side of flip
-ATR_MULT = 1.5                   # 1.5× rolling range as ATR proxy
-TARGET_RR = 2.5                  # 1:2.5 risk-reward minimum
-MIN_CONFIDENCE = 0.65            # Minimum confidence to emit signal
-MIN_GAMMA_STRENGTH = 500000      # Minimum |net_gamma| for regime confidence
+DEFAULT_FLIP_PROXIMITY_PCT = 0.025      # 2.5% — price must be within this of flip
+DEFAULT_STOP_OTHER_SIDE_PCT = 0.01      # 1% — stop on other side of flip
+DEFAULT_ATR_MULT = 1.5                   # 1.5× rolling range as ATR proxy
+DEFAULT_TARGET_RR = 2.5                  # 1:2.5 risk-reward minimum
+DEFAULT_MIN_CONFIDENCE = 0.65            # Minimum confidence to emit signal
+DEFAULT_MIN_GAMMA_STRENGTH = 500000      # Minimum |net_gamma| for regime confidence
 
 
 class GammaFlipBreakout(BaseStrategy):
@@ -69,6 +72,17 @@ class GammaFlipBreakout(BaseStrategy):
         Returns empty list when no flip point or ATM strike exists,
         or when other conditions are not met.
         """
+        # Apply config params from data dict
+        self._apply_params(data)
+
+        # Extract params with fallback defaults
+        flip_proximity_pct = self._params.get('flip_proximity_pct', DEFAULT_FLIP_PROXIMITY_PCT)
+        stop_other_side_pct = self._params.get('stop_other_side_pct', DEFAULT_STOP_OTHER_SIDE_PCT)
+        atr_mult = self._params.get('atr_mult', DEFAULT_ATR_MULT)
+        target_rr = self._params.get('target_rr', DEFAULT_TARGET_RR)
+        min_confidence = self._params.get('min_confidence', DEFAULT_MIN_CONFIDENCE)
+        min_gamma_strength = self._params.get('min_gamma_strength', DEFAULT_MIN_GAMMA_STRENGTH)
+
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
             return []
@@ -98,14 +112,16 @@ class GammaFlipBreakout(BaseStrategy):
         if underlying_price > flip_strike:
             # Above flip: positive gamma regime → fade breakouts
             sig = self._fade_above_flip(
-                flip_strike, underlying_price, net_gamma, regime, rolling_data, gex_calc
+                flip_strike, underlying_price, net_gamma, regime, rolling_data, gex_calc,
+                flip_proximity_pct, atr_mult, target_rr, min_gamma_strength, min_confidence
             )
             if sig:
                 signals.append(sig)
         elif underlying_price < flip_strike:
             # Below flip: negative gamma regime → breakout trades
             sig = self._breakout_below_flip(
-                flip_strike, underlying_price, net_gamma, regime, rolling_data, gex_calc
+                flip_strike, underlying_price, net_gamma, regime, rolling_data, gex_calc,
+                flip_proximity_pct, atr_mult, target_rr, min_gamma_strength, min_confidence
             )
             if sig:
                 signals.append(sig)
@@ -124,13 +140,18 @@ class GammaFlipBreakout(BaseStrategy):
         regime: str,
         rolling_data: Dict[str, Any],
         gex_calc: Any,
+        flip_proximity_pct: float,
+        atr_mult: float,
+        target_rr: float,
+        min_gamma_strength: float,
+        min_confidence: float,
     ) -> Optional[Signal]:
         """
         Above flip: positive gamma → price tends to revert.
         SHORT on rallies toward flip, LONG on dips away from flip.
         """
         distance_pct = (price - flip_strike) / flip_strike
-        if distance_pct > FLIP_PROXIMITY_PCT:
+        if distance_pct > flip_proximity_pct:
             # Too far from flip — not a fade setup
             return None
 
@@ -145,10 +166,10 @@ class GammaFlipBreakout(BaseStrategy):
 
         if zs is not None and zs > 0.3:
             # Price is above its rolling mean → SHORT fade
-            return self._short_fade(flip_strike, price, atr, net_gamma, regime, rolling_data, gex_calc)
+            return self._short_fade(flip_strike, price, atr, net_gamma, regime, rolling_data, gex_calc, stop_other_side_pct, target_rr, min_gamma_strength, min_confidence)
         elif zs is not None and zs < -0.3:
             # Price is below its rolling mean → LONG fade
-            return self._long_fade(flip_strike, price, atr, net_gamma, regime, rolling_data, gex_calc)
+            return self._long_fade(flip_strike, price, atr, net_gamma, regime, rolling_data, gex_calc, stop_other_side_pct, target_rr, min_gamma_strength, min_confidence)
 
         return None
 
@@ -161,26 +182,30 @@ class GammaFlipBreakout(BaseStrategy):
         regime: str,
         rolling_data: Dict[str, Any],
         gex_calc: Any,
+        stop_other_side_pct: float,
+        target_rr: float,
+        min_gamma_strength: float,
+        min_confidence: float,
     ) -> Optional[Signal]:
         """SHORT fade: price rallied toward flip, expect rejection."""
         price_window = rolling_data.get(KEY_PRICE_5M)
         # Stop: above price or other side of flip, whichever is closer
-        stop = max(price * 1.003, flip_strike * (1 + STOP_OTHER_SIDE_PCT))
+        stop = max(price * 1.003, flip_strike * (1 + stop_other_side_pct))
         risk = stop - price
         if risk <= 0:
             return None
 
-        # Target: next gamma wall below or 1:2.5 RR
-        walls = gex_calc.get_gamma_walls(threshold=MIN_GAMMA_STRENGTH)
+        # Target: next gamma wall below or target_rr RR
+        walls = gex_calc.get_gamma_walls(threshold=min_gamma_strength)
         below_walls = [w for w in walls if w["strike"] < price]
         if below_walls:
             nearest_below = max(w["strike"] for w in below_walls)
-            target = max(price - (risk * TARGET_RR), nearest_below)
+            target = max(price - (risk * target_rr), nearest_below)
         else:
-            target = price - (risk * TARGET_RR)
+            target = price - (risk * target_rr)
 
         confidence = self._fade_confidence(risk, price, net_gamma, regime, "short")
-        if confidence < MIN_CONFIDENCE:
+        if confidence < min_confidence:
             return None
 
         return Signal(
@@ -213,25 +238,29 @@ class GammaFlipBreakout(BaseStrategy):
         regime: str,
         rolling_data: Dict[str, Any],
         gex_calc: Any,
+        stop_other_side_pct: float,
+        target_rr: float,
+        min_gamma_strength: float,
+        min_confidence: float,
     ) -> Optional[Signal]:
         """LONG fade: price dipped away from flip, expect bounce back."""
         price_window = rolling_data.get(KEY_PRICE_5M)
         # Stop: below price or other side of flip
-        stop = min(price * 0.997, flip_strike * (1 - STOP_OTHER_SIDE_PCT))
+        stop = min(price * 0.997, flip_strike * (1 - stop_other_side_pct))
         risk = price - stop
         if risk <= 0:
             return None
 
-        walls = gex_calc.get_gamma_walls(threshold=MIN_GAMMA_STRENGTH)
+        walls = gex_calc.get_gamma_walls(threshold=min_gamma_strength)
         above_walls = [w for w in walls if w["strike"] > price]
         if above_walls:
             nearest_above = min(w["strike"] for w in above_walls)
-            target = min(price + (risk * TARGET_RR), nearest_above)
+            target = min(price + (risk * target_rr), nearest_above)
         else:
-            target = price + (risk * TARGET_RR)
+            target = price + (risk * target_rr)
 
         confidence = self._fade_confidence(risk, price, net_gamma, regime, "long")
-        if confidence < MIN_CONFIDENCE:
+        if confidence < min_confidence:
             return None
 
         return Signal(
@@ -267,13 +296,18 @@ class GammaFlipBreakout(BaseStrategy):
         regime: str,
         rolling_data: Dict[str, Any],
         gex_calc: Any,
+        flip_proximity_pct: float,
+        atr_mult: float,
+        target_rr: float,
+        min_gamma_strength: float,
+        min_confidence: float,
     ) -> Optional[Signal]:
         """
         Below flip: negative gamma → momentum dominates.
         LONG on breakouts above flip, SHORT on breakdowns below flip.
         """
         distance_pct = (flip_strike - price) / flip_strike
-        if distance_pct > FLIP_PROXIMITY_PCT:
+        if distance_pct > flip_proximity_pct:
             # Too far from flip — not a breakout setup
             return None
 
@@ -285,10 +319,10 @@ class GammaFlipBreakout(BaseStrategy):
 
         if zs is not None and zs > 0.3:
             # Price trending up toward flip → LONG breakout
-            return self._long_breakout(flip_strike, price, atr, net_gamma, regime, rolling_data, gex_calc)
+            return self._long_breakout(flip_strike, price, atr, net_gamma, regime, rolling_data, gex_calc, stop_other_side_pct, atr_mult, target_rr, min_gamma_strength, min_confidence)
         elif zs is not None and zs < -0.3:
             # Price trending down away from flip → SHORT breakout
-            return self._short_breakout(flip_strike, price, atr, net_gamma, regime, rolling_data, gex_calc)
+            return self._short_breakout(flip_strike, price, atr, net_gamma, regime, rolling_data, gex_calc, stop_other_side_pct, atr_mult, target_rr, min_gamma_strength, min_confidence)
 
         return None
 
@@ -301,26 +335,31 @@ class GammaFlipBreakout(BaseStrategy):
         regime: str,
         rolling_data: Dict[str, Any],
         gex_calc: Any,
+        stop_other_side_pct: float,
+        atr_mult: float,
+        target_rr: float,
+        min_gamma_strength: float,
+        min_confidence: float,
     ) -> Optional[Signal]:
         """LONG breakout: price approaching flip from below, expect momentum."""
         price_window = rolling_data.get(KEY_PRICE_5M)
-        # Stop: below flip or 1.5× ATR below entry
-        stop = max(flip_strike * (1 - STOP_OTHER_SIDE_PCT), price * (1 - ATR_MULT * atr / price))
+        # Stop: below flip or atr_mult× ATR below entry
+        stop = max(flip_strike * (1 - stop_other_side_pct), price * (1 - atr_mult * atr / price))
         risk = price - stop
         if risk <= 0:
             return None
 
-        # Target: next gamma wall above or 1:2.5 RR
-        walls = gex_calc.get_gamma_walls(threshold=MIN_GAMMA_STRENGTH)
+        # Target: next gamma wall above or target_rr RR
+        walls = gex_calc.get_gamma_walls(threshold=min_gamma_strength)
         above_walls = [w for w in walls if w["strike"] > price]
         if above_walls:
             nearest_above = min(w["strike"] for w in above_walls)
-            target = min(price + (risk * TARGET_RR), nearest_above)
+            target = min(price + (risk * target_rr), nearest_above)
         else:
-            target = price + (risk * TARGET_RR)
+            target = price + (risk * target_rr)
 
         confidence = self._breakout_confidence(risk, price, net_gamma, regime, "long")
-        if confidence < MIN_CONFIDENCE:
+        if confidence < min_confidence:
             return None
 
         return Signal(
@@ -353,24 +392,29 @@ class GammaFlipBreakout(BaseStrategy):
         regime: str,
         rolling_data: Dict[str, Any],
         gex_calc: Any,
+        stop_other_side_pct: float,
+        atr_mult: float,
+        target_rr: float,
+        min_gamma_strength: float,
+        min_confidence: float,
     ) -> Optional[Signal]:
         """SHORT breakout: price moving away from flip downward."""
         price_window = rolling_data.get(KEY_PRICE_5M)
-        stop = min(flip_strike * (1 + STOP_OTHER_SIDE_PCT), price * (1 + ATR_MULT * atr / price))
+        stop = min(flip_strike * (1 + stop_other_side_pct), price * (1 + atr_mult * atr / price))
         risk = stop - price
         if risk <= 0:
             return None
 
-        walls = gex_calc.get_gamma_walls(threshold=MIN_GAMMA_STRENGTH)
+        walls = gex_calc.get_gamma_walls(threshold=min_gamma_strength)
         below_walls = [w for w in walls if w["strike"] < price]
         if below_walls:
             nearest_below = max(w["strike"] for w in below_walls)
-            target = max(price - (risk * TARGET_RR), nearest_below)
+            target = max(price - (risk * target_rr), nearest_below)
         else:
-            target = price - (risk * TARGET_RR)
+            target = price - (risk * target_rr)
 
         confidence = self._breakout_confidence(risk, price, net_gamma, regime, "short")
-        if confidence < MIN_CONFIDENCE:
+        if confidence < min_confidence:
             return None
 
         return Signal(

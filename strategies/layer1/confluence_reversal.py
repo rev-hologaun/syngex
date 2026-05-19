@@ -49,18 +49,18 @@ from strategies.volume_filter import VolumeFilter
 logger = logging.getLogger("Syngex.Strategies.ConfluenceReversal")
 
 # ---------------------------------------------------------------------------
-# Constants
+# Default Fallback Constants
+# These are used ONLY if config/strategies.yaml is missing values.
+# The actual values should be configured in strategies.yaml under
+# layer1.confluence_reversal.params
 # ---------------------------------------------------------------------------
 
-CONFLUENCE_DISTANCE_PCT = 0.003  # 0.3% — max distance for confluence
-MIN_STRUCTURAL_SIGNALS = 1        # Wall-level confluence alone is valid
-MAX_CONFIDENCE_BASE = 0.6         # Base confidence for score 3
-MIN_CONFIDENCE = 0.65             # Minimum confidence to emit signal
-STOP_PCT = 0.008                  # 0.8% stop
-TARGET_RISK_MULT = 2.0            # 2× risk for target
-
-# Structural signals (independent sources of truth)
-# Only wall, flip, and VWAP count as structural — rolling extremes are technical, not structural
+DEFAULT_CONFLUENCE_DISTANCE_PCT = 0.003  # 0.3% — max distance for confluence
+DEFAULT_MIN_STRUCTURAL_SIGNALS = 1        # Wall-level confluence alone is valid
+DEFAULT_MAX_CONFIDENCE_BASE = 0.6         # Base confidence for score 3
+DEFAULT_MIN_CONFIDENCE = 0.65             # Minimum confidence to emit signal
+DEFAULT_STOP_PCT = 0.008                  # 0.8% stop
+DEFAULT_TARGET_RISK_MULT = 2.0            # 2× risk for target
 
 
 class ConfluenceReversal(BaseStrategy):
@@ -81,6 +81,17 @@ class ConfluenceReversal(BaseStrategy):
 
         Returns empty list when no confluence level meets the threshold.
         """
+        # Apply config params from data dict
+        self._apply_params(data)
+
+        # Extract params with fallback defaults
+        confluence_distance_pct = self._params.get('confluence_distance_pct', DEFAULT_CONFLUENCE_DISTANCE_PCT)
+        min_structural_signals = self._params.get('min_structural_signals', DEFAULT_MIN_STRUCTURAL_SIGNALS)
+        max_confidence_base = self._params.get('max_confidence_base', DEFAULT_MAX_CONFIDENCE_BASE)
+        min_confidence = self._params.get('min_confidence', DEFAULT_MIN_CONFIDENCE)
+        stop_pct = self._params.get('stop_pct', DEFAULT_STOP_PCT)
+        target_risk_mult = self._params.get('target_risk_mult', DEFAULT_TARGET_RISK_MULT)
+
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
             return []
@@ -92,7 +103,7 @@ class ConfluenceReversal(BaseStrategy):
         rolling_data = data.get("rolling_data", {})
 
         # Global volume filter — skip if volume doesn't support the signal
-        vol_check = VolumeFilter.evaluate(rolling_data, MIN_CONFIDENCE)
+        vol_check = VolumeFilter.evaluate(rolling_data, min_confidence)
         if not vol_check["recommended"]:
             return []
 
@@ -107,10 +118,12 @@ class ConfluenceReversal(BaseStrategy):
 
         # Find confluence levels
         resistance_levels = self._find_confluence_levels(
-            underlying_price, walls, flip, rolling_data, "resistance"
+            underlying_price, walls, flip, rolling_data, "resistance",
+            confluence_distance_pct
         )
         support_levels = self._find_confluence_levels(
-            underlying_price, walls, flip, rolling_data, "support"
+            underlying_price, walls, flip, rolling_data, "support",
+            confluence_distance_pct
         )
 
         signals: List[Signal] = []
@@ -118,9 +131,10 @@ class ConfluenceReversal(BaseStrategy):
         # Best resistance level → SHORT signal
         if resistance_levels:
             best_resist = max(resistance_levels, key=lambda x: x.get("structural_count", 0))
-            if best_resist.get("structural_count", 0) >= MIN_STRUCTURAL_SIGNALS:
+            if best_resist.get("structural_count", 0) >= min_structural_signals:
                 sig = self._build_short_signal(
-                    best_resist, underlying_price, regime, price_window
+                    best_resist, underlying_price, regime, price_window,
+                    stop_pct, target_risk_mult, min_confidence
                 )
                 if sig:
                     signals.append(sig)
@@ -128,9 +142,10 @@ class ConfluenceReversal(BaseStrategy):
         # Best support level → LONG signal
         if support_levels:
             best_support = max(support_levels, key=lambda x: x.get("structural_count", 0))
-            if best_support.get("structural_count", 0) >= MIN_STRUCTURAL_SIGNALS:
+            if best_support.get("structural_count", 0) >= min_structural_signals:
                 sig = self._build_long_signal(
-                    best_support, underlying_price, regime, price_window
+                    best_support, underlying_price, regime, price_window,
+                    stop_pct, target_risk_mult, min_confidence
                 )
                 if sig:
                     signals.append(sig)
@@ -148,11 +163,12 @@ class ConfluenceReversal(BaseStrategy):
         flip: Optional[float],
         rolling_data: Dict[str, Any],
         side: str,
+        confluence_distance_pct: float,
     ) -> List[Dict[str, Any]]:
         """
         Find confluence levels on a given side (resistance or support).
 
-        Confluence requires at least MIN_STRUCTURAL_SIGNALS independent
+        Confluence requires at least min_structural_signals independent
         structural signals: gamma wall, gamma flip, and/or VWAP.
         Wall-level confluence alone (score 1) is valid.
         Rolling extremes (max/min) are technical — they can boost
@@ -175,18 +191,18 @@ class ConfluenceReversal(BaseStrategy):
         technical_type = None
         if rw is not None and rw.count >= 3:
             if side == "resistance" and rw.max is not None:
-                if abs(rw.max - price) / price <= CONFLUENCE_DISTANCE_PCT * 2:
+                if abs(rw.max - price) / price <= confluence_distance_pct * 2:
                     has_technical = True
                     technical_type = "rolling_max"
             elif side == "support" and rw.min is not None:
-                if abs(rw.min - price) / price <= CONFLUENCE_DISTANCE_PCT * 2:
+                if abs(rw.min - price) / price <= confluence_distance_pct * 2:
                     has_technical = True
                     technical_type = "rolling_min"
 
         # Check each wall for confluence with independent structural signals
         for wall in candidate_walls:
             distance_pct = abs(wall["strike"] - price) / price
-            if distance_pct > CONFLUENCE_DISTANCE_PCT:
+            if distance_pct > confluence_distance_pct:
                 continue  # Too far from price
 
             # Count independent structural signals
@@ -207,11 +223,11 @@ class ConfluenceReversal(BaseStrategy):
             # Check if flip is also near (independent structural signal)
             if flip is not None:
                 flip_distance = abs(flip - price) / price
-                if flip_distance <= CONFLUENCE_DISTANCE_PCT:
+                if flip_distance <= confluence_distance_pct:
                     structural_count += 1
                     level_info["has_flip"] = True
                     level_info["flip_strike"] = flip
-                elif abs(flip - wall["strike"]) <= CONFLUENCE_DISTANCE_PCT:
+                elif abs(flip - wall["strike"]) <= confluence_distance_pct:
                     # Flip is near the wall itself — still independent
                     structural_count += 1
                     level_info["has_flip"] = True
@@ -226,7 +242,7 @@ class ConfluenceReversal(BaseStrategy):
                     level_info["has_vwap"] = True
 
             # Only emit if we have enough independent structural signals
-            if structural_count >= MIN_STRUCTURAL_SIGNALS:
+            if structural_count >= min_structural_signals:
                 level_info["structural_count"] = structural_count
                 level_info["score"] = structural_count
                 levels.append(level_info)
@@ -237,13 +253,13 @@ class ConfluenceReversal(BaseStrategy):
             mean = vw.mean
             if mean is not None and mean > 0:
                 vw_distance = abs(mean - price) / price
-                if vw_distance <= CONFLUENCE_DISTANCE_PCT:
+                if vw_distance <= confluence_distance_pct:
                     structural_count = 1  # VWAP itself
 
                     # Check for wall at VWAP
                     wall_near_vwap = None
                     for wall in candidate_walls:
-                        if abs(wall["strike"] - mean) / mean <= CONFLUENCE_DISTANCE_PCT:
+                        if abs(wall["strike"] - mean) / mean <= confluence_distance_pct:
                             wall_near_vwap = wall
                             break
 
@@ -253,10 +269,10 @@ class ConfluenceReversal(BaseStrategy):
                     # Check for flip at VWAP
                     if flip is not None:
                         flip_distance = abs(flip - mean) / mean
-                        if flip_distance <= CONFLUENCE_DISTANCE_PCT:
+                        if flip_distance <= confluence_distance_pct:
                             structural_count += 1  # Flip at VWAP
 
-                    if structural_count >= MIN_STRUCTURAL_SIGNALS:
+                    if structural_count >= min_structural_signals:
                         levels.append({
                             "type": "vwap",
                             "strike": mean,
@@ -283,6 +299,9 @@ class ConfluenceReversal(BaseStrategy):
         price: float,
         regime: str,
         price_window: Optional[Any],
+        stop_pct: float,
+        target_risk_mult: float,
+        min_confidence: float,
     ) -> Optional[Signal]:
         """Build a SHORT signal from a resistance confluence level."""
         strike = level["strike"]
@@ -291,9 +310,9 @@ class ConfluenceReversal(BaseStrategy):
 
         # Base confidence from structural signal count
         if structural_count >= 3:
-            confidence = MAX_CONFIDENCE_BASE
+            confidence = max_confidence_base
         else:
-            confidence = MAX_CONFIDENCE_BASE - 0.25
+            confidence = max_confidence_base - 0.25
 
         # Wall strength bonus (normalize to [0,1])
         gex_bonus = min(0.15, abs(gex) / 10_000_000)
@@ -314,13 +333,13 @@ class ConfluenceReversal(BaseStrategy):
         confidence = (norm_base + norm_gex + norm_tech + norm_regime) / 4.0
         # Apply trend penalty
         confidence += trend_penalty
-        if confidence < MIN_CONFIDENCE:
+        if confidence < min_confidence:
             return None
 
         # Stop past the confluence level
-        stop = strike * (1 + STOP_PCT)
+        stop = strike * (1 + stop_pct)
         risk = stop - price
-        target = price - risk * TARGET_RISK_MULT
+        target = price - risk * target_risk_mult
         if risk <= 0:
             return None
 
@@ -358,6 +377,9 @@ class ConfluenceReversal(BaseStrategy):
         price: float,
         regime: str,
         price_window: Optional[Any],
+        stop_pct: float,
+        target_risk_mult: float,
+        min_confidence: float,
     ) -> Optional[Signal]:
         """Build a LONG signal from a support confluence level."""
         strike = level["strike"]
@@ -366,9 +388,9 @@ class ConfluenceReversal(BaseStrategy):
 
         # Base confidence from structural signal count
         if structural_count >= 3:
-            confidence = MAX_CONFIDENCE_BASE
+            confidence = max_confidence_base
         else:
-            confidence = MAX_CONFIDENCE_BASE - 0.25
+            confidence = max_confidence_base - 0.25
 
         # Wall strength bonus (normalize to [0,1])
         gex_bonus = min(0.15, abs(gex) / 10_000_000)
@@ -389,13 +411,13 @@ class ConfluenceReversal(BaseStrategy):
         confidence = (norm_base + norm_gex + norm_tech + norm_regime) / 4.0
         # Apply trend penalty
         confidence += trend_penalty
-        if confidence < MIN_CONFIDENCE:
+        if confidence < min_confidence:
             return None
 
         # Stop past the confluence level
-        stop = strike * (1 - STOP_PCT)
+        stop = strike * (1 - stop_pct)
         risk = price - stop
-        target = price + risk * TARGET_RISK_MULT
+        target = price + risk * target_risk_mult
         if risk <= 0:
             return None
 

@@ -51,7 +51,7 @@ from strategies.utils import normalize_confidence
 logger = logging.getLogger("Syngex.Strategies.CallPutFlowAsymmetry")
 
 # ---------------------------------------------------------------------------
-# Constants
+# Constants (can be overridden via params)
 # ---------------------------------------------------------------------------
 
 # Flow score threshold: call score must exceed put score by this ratio
@@ -102,6 +102,9 @@ class CallPutFlowAsymmetry(BaseStrategy):
 
         Returns empty list when no significant asymmetry detected.
         """
+
+        # Apply params to data for parameterized thresholds
+        data = self._apply_params(data)
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
             return []
@@ -149,7 +152,6 @@ class CallPutFlowAsymmetry(BaseStrategy):
         gex_calc: Any,
     ) -> tuple[Optional[float], Optional[float]]:
         """
-        Calculate composite flow scores for calls and puts.
 
         Uses aggregated greeks summary: FlowScore = Σ(OI × Gamma × |Delta|)
         across all strikes.
@@ -186,7 +188,7 @@ class CallPutFlowAsymmetry(BaseStrategy):
                 total_put_score += put_oi * put_gamma * put_delta
                 put_points += 1
 
-        if call_points < MIN_GREEKS_POINTS or put_points < MIN_GREEKS_POINTS:
+        if call_points < self._params.get('min_greeks_points', MIN_GREEKS_POINTS) or put_points < self._params.get('min_greeks_points', MIN_GREEKS_POINTS):
             return None, None
 
         return total_call_score, total_put_score
@@ -207,7 +209,7 @@ class CallPutFlowAsymmetry(BaseStrategy):
         iv_skew = gex_calc.get_iv_skew()
 
         # For call-dominant, we want call IV < put IV (iv_skew > 0)
-        iv_aligned = iv_skew > IV_SKEW_THRESHOLD if iv_skew is not None else False
+        iv_aligned = iv_skew > self._params.get('iv_skew_threshold', IV_SKEW_THRESHOLD) if iv_skew is not None else False
 
         # Check volume dominance
         vol_up = self._check_volume_up(rolling_data)
@@ -215,14 +217,14 @@ class CallPutFlowAsymmetry(BaseStrategy):
         confidence = self._compute_confidence(
             flow_ratio, iv_aligned, vol_up, net_gamma, regime, "LONG",
         )
-        if confidence < MIN_CONFIDENCE:
+        if confidence < self._params.get('min_confidence', MIN_CONFIDENCE):
             return []
 
         # Build signal
         entry = price
-        stop = entry * (1 - STOP_PCT)
+        stop = entry * (1 - self._params.get('stop_pct', STOP_PCT))
         risk = entry - stop
-        target = entry + (risk * TARGET_RISK_MULT)
+        target = entry + (risk * self._params.get('target_risk_mult', TARGET_RISK_MULT))
 
         return [Signal(
             direction=Direction.LONG,
@@ -266,7 +268,7 @@ class CallPutFlowAsymmetry(BaseStrategy):
         iv_skew = gex_calc.get_iv_skew()
 
         # For put-dominant, we want put IV < call IV (iv_skew < 0)
-        iv_aligned = iv_skew < -IV_SKEW_THRESHOLD if iv_skew is not None else False
+        iv_aligned = iv_skew < -self._params.get('iv_skew_threshold', IV_SKEW_THRESHOLD) if iv_skew is not None else False
 
         # Check volume down (volume spike on selling)
         vol_down = self._check_volume_down(rolling_data)
@@ -275,14 +277,14 @@ class CallPutFlowAsymmetry(BaseStrategy):
             1.0 / flow_ratio if flow_ratio > 0 else float("inf"),
             iv_aligned, vol_down, net_gamma, regime, "SHORT",
         )
-        if confidence < MIN_CONFIDENCE:
+        if confidence < self._params.get('min_confidence', MIN_CONFIDENCE):
             return []
 
         # Build signal
         entry = price
-        stop = entry * (1 + STOP_PCT)
+        stop = entry * (1 + self._params.get('stop_pct', STOP_PCT))
         risk = stop - entry
-        target = entry - (risk * TARGET_RISK_MULT)
+        target = entry - (risk * self._params.get('target_risk_mult', TARGET_RISK_MULT))
 
         return [Signal(
             direction=Direction.SHORT,
@@ -340,8 +342,9 @@ class CallPutFlowAsymmetry(BaseStrategy):
         """
         # 1. Flow ratio magnitude (0.25–0.35)
         # Higher ratio = stronger asymmetry
+        flow_threshold = self._params.get('flow_threshold', FLOW_THRESHOLD)
         log_ratio = min(flow_ratio, 10.0)  # Cap for normalization
-        ratio_conf = 0.25 + 0.10 * min(1.0, (log_ratio - 1.5) / 8.5)
+        ratio_conf = 0.25 + 0.10 * min(1.0, (log_ratio - flow_threshold) / (10.0 - flow_threshold))
 
         # 2. IV skew alignment (0.15–0.20)
         iv_conf = 0.20 if iv_aligned else 0.05

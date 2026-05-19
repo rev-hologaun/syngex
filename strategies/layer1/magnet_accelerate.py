@@ -41,16 +41,19 @@ from strategies.utils import normalize_confidence
 logger = logging.getLogger("Syngex.Strategies.MagnetAccelerate")
 
 # ---------------------------------------------------------------------------
-# Constants
+# Default Fallback Constants
+# These are used ONLY if config/strategies.yaml is missing values.
+# The actual values should be configured in strategies.yaml under
+# layer1.magnet_accelerate.params
 # ---------------------------------------------------------------------------
 
-MIN_MAGNET_GEX = 500000       # Minimum |normalized GEX| to be a magnet (on same scale as wall threshold)
-MAGNET_EXIT_PCT = 0.003       # 0.3% — exit within this % of magnet
-BREAKOUT_PCT = 0.002          # 0.2% — price must be this far past magnet to breakout
-MAX_BREAKOUT_PCT = 0.02       # 2% — max distance past magnet (no chasing)
-TRAIL_STOP_PCT = 0.01         # 1% — trailing stop for Phase 2
-TARGET_RISK_MULT = 1.5        # Minimum 1.5× risk for target distance
-MIN_CONFIDENCE = 0.65         # Minimum confidence to emit signal
+DEFAULT_MIN_MAGNET_GEX = 500000       # Minimum |normalized GEX| to be a magnet
+DEFAULT_MAGNET_EXIT_PCT = 0.003       # 0.3% — exit within this % of magnet
+DEFAULT_BREAKOUT_PCT = 0.002          # 0.2% — price must be this far past magnet to breakout
+DEFAULT_MAX_BREAKOUT_PCT = 0.02       # 2% — max distance past magnet (no chasing)
+DEFAULT_TRAIL_STOP_PCT = 0.01         # 1% — trailing stop for Phase 2
+DEFAULT_TARGET_RISK_MULT = 1.5        # Minimum 1.5× risk for target distance
+DEFAULT_MIN_CONFIDENCE = 0.65         # Minimum confidence to emit signal
 
 
 class MagnetAccelerate(BaseStrategy):
@@ -76,6 +79,18 @@ class MagnetAccelerate(BaseStrategy):
         Returns empty list when magnet is not identifiable or conditions
         are not met.
         """
+        # Apply config params from data dict
+        self._apply_params(data)
+
+        # Extract params with fallback defaults
+        min_magnet_gex = self._params.get('min_magnet_gex', DEFAULT_MIN_MAGNET_GEX)
+        magnet_exit_pct = self._params.get('magnet_exit_pct', DEFAULT_MAGNET_EXIT_PCT)
+        breakout_pct = self._params.get('breakout_pct', DEFAULT_BREAKOUT_PCT)
+        max_breakout_pct = self._params.get('max_breakout_pct', DEFAULT_MAX_BREAKOUT_PCT)
+        trail_stop_pct = self._params.get('trail_stop_pct', DEFAULT_TRAIL_STOP_PCT)
+        target_risk_mult = self._params.get('target_risk_mult', DEFAULT_TARGET_RISK_MULT)
+        min_confidence = self._params.get('min_confidence', DEFAULT_MIN_CONFIDENCE)
+
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
             return []
@@ -89,7 +104,7 @@ class MagnetAccelerate(BaseStrategy):
         net_gamma = data.get("net_gamma", 0)
 
         # Global volume filter — Phase 1 only (Phase 2 breakout is unaffected)
-        vol_check = VolumeFilter.evaluate(rolling_data, MIN_CONFIDENCE)
+        vol_check = VolumeFilter.evaluate(rolling_data, min_confidence)
         if not vol_check["recommended"]:
             # Volume too low — suppress Phase 1 signals only
             # Phase 2 (breakout) signals still fire below
@@ -106,7 +121,7 @@ class MagnetAccelerate(BaseStrategy):
 
         # Use normalized GEX for consistent scale with get_gamma_walls()
         magnet_gex = abs(magnet_bucket.normalized_gamma() * 100 * underlying_price)
-        if magnet_gex < MIN_MAGNET_GEX:
+        if magnet_gex < min_magnet_gex:
             return []
 
         signals: List[Signal] = []
@@ -117,14 +132,16 @@ class MagnetAccelerate(BaseStrategy):
             # LONG: price below magnet → LONG toward magnet
             if underlying_price < magnet_strike:
                 sig = self._phase1_pull(
-                    magnet_strike, magnet_gex, underlying_price, net_gamma, rolling_data, Direction.LONG
+                    magnet_strike, magnet_gex, underlying_price, net_gamma, rolling_data, Direction.LONG,
+                    min_confidence
                 )
                 if sig:
                     signals.append(sig)
             # SHORT: price above magnet → SHORT toward magnet
             elif underlying_price > magnet_strike:
                 sig = self._phase1_pull(
-                    magnet_strike, magnet_gex, underlying_price, net_gamma, rolling_data, Direction.SHORT
+                    magnet_strike, magnet_gex, underlying_price, net_gamma, rolling_data, Direction.SHORT,
+                    min_confidence
                 )
                 if sig:
                     signals.append(sig)
@@ -133,7 +150,8 @@ class MagnetAccelerate(BaseStrategy):
         # Phase 2 is unaffected by volume filter — breakout signals are high-conviction
         if regime == "NEGATIVE":
             sig = self._phase2_accelerate(
-                magnet_strike, underlying_price, net_gamma, regime, rolling_data
+                magnet_strike, underlying_price, net_gamma, regime, rolling_data,
+                breakout_pct, max_breakout_pct, trail_stop_pct, target_risk_mult, min_confidence
             )
             if sig:
                 signals.append(sig)
@@ -152,6 +170,7 @@ class MagnetAccelerate(BaseStrategy):
         net_gamma: float,
         rolling_data: Dict[str, Any],
         direction: Direction,
+        min_confidence: float,
     ) -> Optional[Signal]:
         """
         Phase 1: Bidirectional magnet pull in positive gamma regime.
@@ -182,20 +201,13 @@ class MagnetAccelerate(BaseStrategy):
 
         # Confidence: closer to magnet + stronger gamma + good momentum
         confidence = self._phase1_confidence(distance_pct, magnet_gex, net_gamma, momentum)
-        if confidence < MIN_CONFIDENCE:
+        if confidence < min_confidence:
             return None
 
-        # Target: magnet strike (exit within 0.3% of it)
+        # Target: magnet strike (exit within magnet_exit_pct of it)
         target = magnet_strike
         # Stop: 1% beyond entry (opposite direction)
         stop = price * (1 + 0.01) if direction == Direction.SHORT else price * (1 - 0.01)
-
-        # Tighter stop from rolling window
-        if price_window and price_window.min is not None:
-            if direction == Direction.LONG:
-                stop = max(stop, price_window.min * 0.998)
-            else:
-                stop = min(stop, price_window.max * 1.002)
 
         risk = abs(price - stop)
         if risk <= 0:
@@ -238,6 +250,11 @@ class MagnetAccelerate(BaseStrategy):
         net_gamma: float,
         regime: str,
         rolling_data: Dict[str, Any],
+        breakout_pct: float,
+        max_breakout_pct: float,
+        trail_stop_pct: float,
+        target_risk_mult: float,
+        min_confidence: float,
     ) -> Optional[Signal]:
         """
         Phase 2: Price breaks magnet + gamma turns negative → breakout.
@@ -249,12 +266,12 @@ class MagnetAccelerate(BaseStrategy):
 
         price_window = rolling_data.get(KEY_PRICE_5M)
 
-        # Need price to be past the magnet by at least BREAKOUT_PCT
-        if abs(distance_from_magnet) < BREAKOUT_PCT:
+        # Need price to be past the magnet by at least breakout_pct
+        if abs(distance_from_magnet) < breakout_pct:
             return None
 
         # Reject if price is too far past the magnet — don't chase established moves
-        if abs(distance_from_magnet) > MAX_BREAKOUT_PCT:
+        if abs(distance_from_magnet) > max_breakout_pct:
             return None
 
         # Direction in NEGATIVE regime: opposite of Phase 1
@@ -263,32 +280,32 @@ class MagnetAccelerate(BaseStrategy):
         if distance_from_magnet < 0:
             # Price below magnet in NEGATIVE regime → LONG (oversold bounce)
             direction = Direction.LONG
-            stop = magnet_strike * (1 - TRAIL_STOP_PCT)
+            stop = magnet_strike * (1 - trail_stop_pct)
         else:
             # Price above magnet in NEGATIVE regime → SHORT (overextended)
             direction = Direction.SHORT
-            stop = magnet_strike * (1 + TRAIL_STOP_PCT)
+            stop = magnet_strike * (1 + trail_stop_pct)
 
         # Confidence: further from magnet + stronger negative gamma
         confidence = self._phase2_confidence(
             abs(distance_from_magnet), net_gamma, regime
         )
-        if confidence < MIN_CONFIDENCE:
+        if confidence < min_confidence:
             return None
 
         risk = abs(price - stop)
         if risk <= 0:
             return None
 
-        # Calculate target proportional to risk (minimum 1.5× R/R)
+        # Calculate target proportional to risk (minimum target_risk_mult× R/R)
         if direction == Direction.LONG:
-            target = price + risk * TARGET_RISK_MULT
+            target = price + risk * target_risk_mult
         else:
-            target = price - risk * TARGET_RISK_MULT
+            target = price - risk * target_risk_mult
 
         # Verify computed R/R meets minimum threshold
         computed_rr = abs(target - price) / risk
-        if computed_rr < TARGET_RISK_MULT:
+        if computed_rr < target_risk_mult:
             return None
 
         return Signal(

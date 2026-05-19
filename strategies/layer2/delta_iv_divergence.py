@@ -42,7 +42,7 @@ from strategies.utils import normalize_confidence
 logger = logging.getLogger("Syngex.Strategies.DeltaIVDivergence")
 
 # ---------------------------------------------------------------------------
-# Constants
+# Constants (can be overridden via params)
 # ---------------------------------------------------------------------------
 
 # Min data points for both delta and IV windows
@@ -74,6 +74,10 @@ class DeltaIVDivergence(BaseStrategy):
 
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """Evaluate current state for delta-IV divergence."""
+
+        # Apply params to data for parameterized thresholds
+        data = self._apply_params(data)
+
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
             return []
@@ -115,7 +119,7 @@ class DeltaIVDivergence(BaseStrategy):
         # Both windows need sufficient data
         if delta_window is None or iv_window is None:
             return None
-        if delta_window.count < MIN_DATA_POINTS or iv_window.count < MIN_DATA_POINTS:
+        if delta_window.count < self._params.get('min_data_points', MIN_DATA_POINTS) or iv_window.count < self._params.get('min_data_points', MIN_DATA_POINTS):
             return None
 
         # Check trend alignment
@@ -143,7 +147,7 @@ class DeltaIVDivergence(BaseStrategy):
             divergence_strength = min(abs(delta_z), iv_z) / 2.0
 
         divergence_strength = max(0.0, divergence_strength)
-        if divergence_strength < MIN_DIVERSION_STRENGTH:
+        if divergence_strength < self._params.get('min_divergence_strength', MIN_DIVERSION_STRENGTH):
             return None
 
         # Compute confidence
@@ -152,16 +156,16 @@ class DeltaIVDivergence(BaseStrategy):
             net_gamma, regime, direction,
             delta_window, iv_window,
         )
-        if confidence < MIN_CONFIDENCE:
+        if confidence < self._params.get('min_confidence', MIN_CONFIDENCE):
             return None
 
         # Build signal
         entry = price
         # LONG: stop below entry, target above. SHORT: stop above entry, target below.
         reverse = 1 if direction == "LONG" else -1
-        stop = entry * (1 - STOP_PCT * reverse)  # LONG: below, SHORT: above
+        stop = entry * (1 - self._params.get('stop_pct', STOP_PCT) * reverse)  # LONG: below, SHORT: above
         risk = abs(entry - stop)
-        target = entry + (risk * TARGET_RISK_MULT * reverse)  # LONG: above, SHORT: below
+        target = entry + (risk * self._params.get('target_risk_mult', TARGET_RISK_MULT) * reverse)  # LONG: above, SHORT: below
 
         return Signal(
             direction=Direction.LONG if direction == "LONG" else Direction.SHORT,
