@@ -375,7 +375,7 @@ class StrategyEngine:
                             error=str(exc)
                         )
                     else:
-                        logger.error("Signal handler error: %s", exc)
+                        logger.error("Signal handler error: %s", exc, exc_info=True)
 
         if all_signals:
             if log_with_correlation:

@@ -161,7 +161,7 @@ class TradeStationClient:
             try:
                 self._on_message_callback(data)
             except Exception as exc:
-                logger.error("Callback error: %s", exc)
+                logger.error("Callback error: %s", exc, exc_info=True)
 
     # ------------------------------------------------------------------
     # Quote Stream
@@ -229,7 +229,7 @@ class TradeStationClient:
                 await asyncio.sleep(2)
 
             except Exception as exc:
-                logger.error("[%s] Unexpected error: %s", symbol, exc)
+                logger.error("[%s] Unexpected error: %s", symbol, exc, exc_info=True)
                 await asyncio.sleep(5)
 
     # ------------------------------------------------------------------
