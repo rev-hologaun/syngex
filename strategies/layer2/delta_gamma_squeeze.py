@@ -149,7 +149,7 @@ class DeltaGammaSqueeze(BaseStrategy):
         # Direction-specific proximity check
         if direction == "LONG":
             distance_pct = (wall_strike - price) / price
-            if distance_pct > DELTA_GAMMA_SQUEEZE_WALL_PROXIMITY_PCT:
+            if distance_pct > WALL_PROXIMITY_PCT:
                 logger.debug(
                     "Squeeze: price %.2f too far from wall %.2f (dist=%.2f%%)",
                     price, wall_strike, distance_pct * 100,
@@ -302,7 +302,7 @@ class DeltaGammaSqueeze(BaseStrategy):
         """
         # 1. Proximity to wall (0.25–0.35)
         # Closer = higher confidence
-        proximity_conf = 0.25 + 0.10 * (1 - distance_pct / DELTA_GAMMA_SQUEEZE_WALL_PROXIMITY_PCT)
+        proximity_conf = 0.25 + 0.10 * (1 - distance_pct / WALL_PROXIMITY_PCT)
 
         # 2. Delta acceleration (0.20–0.30)
         # Higher ratio = more urgency
