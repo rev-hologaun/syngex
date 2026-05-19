@@ -23,7 +23,7 @@ from data.ingestor import TradeStationClient
 from engine.gex_calculator import GEXCalculator
 from engine.dashboard import SyngexDashboard
 from strategies.engine import StrategyEngine, EngineConfig
-from strategies.filters.net_gamma_filter import NetGammaFilter
+from strategies.filters.net_gamma_filter import NetGammaFilter as LegacyNetGammaFilter
 from strategies.rolling_window import RollingWindow
 from strategies.rolling_keys import *
 from strategies.layer1 import (
@@ -60,6 +60,10 @@ from strategies.signal_tracker import SignalTracker
 # Import new engines (Phase 2)
 from core.strategy_engine import StrategyEvaluationEngine
 
+# Import Phase 4 engines
+from core.gamma_profile import GammaProfileEngine
+from core.filters import NetGammaFilter
+
 from config.logging_config import setup_logging, log_with_correlation
 
 
@@ -88,7 +92,8 @@ class SyngexOrchestrator:
         self._calculator: GEXCalculator | None = None
         self._dashboard: SyngexDashboard | None = None
         self._strategy_engine: StrategyEngine | None = None
-        self._gamma_filter: NetGammaFilter | None = None
+        self._gamma_filter: NetGammaFilter | None = None  # From core.filters
+        self._gamma_profile: GammaProfileEngine | None = None
         self._rolling_data: Dict[str, RollingWindow] = {}
         self._running = False
         self._profile_timer: float = 0.0
@@ -138,8 +143,9 @@ class SyngexOrchestrator:
         self._dashboard = SyngexDashboard(orchestrator=self)
         self._client = TradeStationClient()
 
-        # Phase 0: Strategy Engine + Filter
-        self._gamma_filter = NetGammaFilter(flip_buffer=0.5)
+        # Phase 4: Create Gamma Profile Engine and NetGammaFilter
+        self._gamma_profile = GammaProfileEngine()
+        self._gamma_filter = NetGammaFilter(flip_buffer=0.50)
 
         # Load strategy configuration from YAML
         config_path = Path(__file__).parent.parent / "config" / "strategies.yaml"
@@ -213,7 +219,6 @@ class SyngexOrchestrator:
         if net_gamma_cfg.get("enabled", True):
             flip_buffer = net_gamma_cfg.get("params", {}).get("flip_buffer", 0.5)
             self._gamma_filter = NetGammaFilter(flip_buffer=flip_buffer)
-            self._strategy_engine.register_filter(self._gamma_filter.evaluate_signal)
             log_with_correlation(
                 self._logger, logging.INFO,
                 "Registered net_gamma filter",

@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from engine.gex_calculator import GEXCalculator
 from strategies.engine import StrategyEngine
 from strategies.signal_tracker import SignalTracker
-from strategies.filters.net_gamma_filter import NetGammaFilter
+from core.filters import NetGammaFilter
 
 
 class StrategyEvaluationEngine:
@@ -51,7 +51,9 @@ class StrategyEvaluationEngine:
         price = summary["underlying_price"]
 
         # Update regime filter
-        self._gamma_filter.update_regime(net_gamma, flip, price)
+        # Check regime filter
+        if not self._gamma_filter.check_regime(net_gamma, flip, price):
+            return  # Blocked - transitioning regime
 
         # Build data snapshot for strategies
         data = {
@@ -60,7 +62,7 @@ class StrategyEvaluationEngine:
             "gex_calculator": self._gex_calculator,
             "rolling_data": orchestrator_ref._rolling_data,
             "timestamp": time.time(),
-            "regime": self._gamma_filter.regime,
+            "regime": self._gamma_filter._regime.value,
             "net_gamma": net_gamma,
             "gamma_flip": flip,
             "greeks_summary": self._gex_calculator.get_greeks_summary(),
