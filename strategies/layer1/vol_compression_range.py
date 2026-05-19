@@ -377,10 +377,10 @@ class VolCompressionRange(BaseStrategy):
         position_conf = 0.2 + 0.1 * edge_proximity
 
         # Wall proximity: closer to wall = higher confidence
-        wall_conf = 0.2 + 0.1 * (1 - wall_distance / WALL_EDGE_PROXIMITY)
+        wall_conf = 0.2 + 0.1 * (1 - wall_distance / DEFAULT_WALL_EDGE_PROXIMITY)
 
         # Range tightness: tighter range = higher confidence
-        tightness_conf = 0.1 + 0.1 * max(0, 1 - range_pct / compression_pct)
+        tightness_conf = 0.1 + 0.1 * max(0, 1 - range_pct / DEFAULT_COMPRESSION_PCT)
 
         # Wall strength
         strength_conf = 0.1 + 0.1 * min(1.0, abs(wall_gex) / 5_000_000)
@@ -410,7 +410,7 @@ class VolCompressionRange(BaseStrategy):
         self, rolling_data: Dict[str, Any]
     ) -> Optional[Any]:
         """Get the best available price rolling window."""
-        min_range_bars = self._params.get('min_range_bars', self.DEFAULT_MIN_RANGE_BARS)
+        min_range_bars = self._params.get('min_range_bars', DEFAULT_MIN_RANGE_BARS)
         for key in (KEY_PRICE_5M, KEY_PRICE_30M):
             rw = rolling_data.get(key)
             if rw is not None and rw.count >= min_range_bars:

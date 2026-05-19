@@ -398,8 +398,8 @@ class IVBandBreakout(BaseStrategy):
             logger.debug("IVBandBreakout: failed to get ATM strike: %s", exc)
             return None
 
-    @staticmethod
     def _check_iv_compression(
+        self,
         rolling_data: Dict[str, Any],
         atm_strike: float,
     ) -> tuple[bool, float]:

@@ -401,8 +401,8 @@ class GammaVolumeConvergence(BaseStrategy):
             logger.debug("GVC: failed to get gamma walls: %s", exc)
             return []
 
-    @staticmethod
     def _check_delta_acceleration(
+        self,
         rolling_data: Dict[str, Any],
     ) -> Optional[float]:
         """

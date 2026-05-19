@@ -113,7 +113,6 @@ class CallPutFlowAsymmetry(BaseStrategy):
 
         Returns empty list when no significant asymmetry detected.
         """
-
         # Defensive check: data may be None
         if data is None:
             return []

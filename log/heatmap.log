@@ -534,3 +534,16 @@ Werkzeug appears to be used in a production deployment. Consider switching to a 
 192.168.50.30 - - [19/May/2026 15:59:01] "GET /socket.io/?EIO=4&transport=polling&t=Pv2TiMx HTTP/1.1" 200 -
 192.168.50.30 - - [19/May/2026 15:59:01] "POST /socket.io/?EIO=4&transport=polling&t=Pv2Tigt&sid=rFASoQpOnM3zH7tdAAAA HTTP/1.1" 200 -
 192.168.50.30 - - [19/May/2026 15:59:01] "GET /socket.io/?EIO=4&transport=polling&t=Pv2Tigv&sid=rFASoQpOnM3zH7tdAAAA HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8211
+ * Running on http://192.168.50.97:8211
+[33mPress CTRL+C to quit[0m
+192.168.50.147 - - [19/May/2026 16:09:31] "GET /socket.io/?EIO=4&transport=polling&t=Pv2W6PJ HTTP/1.1" 200 -
+192.168.50.147 - - [19/May/2026 16:09:31] "POST /socket.io/?EIO=4&transport=polling&t=Pv2W6PX&sid=IYi8EyAKl6YPjeabAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [19/May/2026 16:09:31] "GET /socket.io/?EIO=4&transport=polling&t=Pv2W6PX.0&sid=IYi8EyAKl6YPjeabAAAA HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8211
+ * Running on http://192.168.50.97:8211
+[33mPress CTRL+C to quit[0m

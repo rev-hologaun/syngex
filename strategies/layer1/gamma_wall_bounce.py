@@ -165,8 +165,7 @@ class GammaWallBounce(BaseStrategy):
 
         # Calculate confidence
         confidence = self._compute_confidence(
-            distance_pct, wall_gex, rejection_score, "call", regime,
-            wall_proximity_pct, min_wall_gex, max_confidence
+            distance_pct, wall_gex, rejection_score, "call", regime
         )
         if confidence < min_confidence:
             return None
@@ -244,8 +243,7 @@ class GammaWallBounce(BaseStrategy):
         trend = pw.trend if pw else "UNKNOWN"
 
         confidence = self._compute_confidence(
-            distance_pct, abs(wall_gex), rejection_score, "put", regime,
-            wall_proximity_pct, min_wall_gex, max_confidence
+            distance_pct, abs(wall_gex), rejection_score, "put", regime
         )
         if confidence < min_confidence:
             return None
@@ -359,15 +357,17 @@ class GammaWallBounce(BaseStrategy):
         rejection_score: float,
         side: str,
         regime: str = "",
-        wall_proximity_pct: float = DEFAULT_WALL_PROXIMITY_PCT,
-        min_wall_gex: float = DEFAULT_MIN_WALL_GEX,
-        max_confidence: float = DEFAULT_MAX_CONFIDENCE,
     ) -> float:
         """
         Combine proximity, wall strength, and rejection into confidence.
 
         Returns 0.0–1.0.
         """
+        # Get params from self._params or use defaults
+        wall_proximity_pct = self._params.get('wall_proximity_pct', DEFAULT_WALL_PROXIMITY_PCT)
+        min_wall_gex = self._params.get('min_wall_gex', DEFAULT_MIN_WALL_GEX)
+        max_confidence = self._params.get('max_confidence', DEFAULT_MAX_CONFIDENCE)
+        
         # Proximity component: closer = higher confidence (0.3–0.5)
         proximity_conf = 0.3 + 0.2 * (1 - distance_pct / wall_proximity_pct)
 
