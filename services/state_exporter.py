@@ -96,7 +96,8 @@ class StateExporter:
         if not self._signal_tracker:
             return {}
 
-        from strategies.signal_tracker import SignalDirection, SignalOutcome, SignalResolution
+        from strategies.signal import Direction
+        from strategies.signal_tracker import SignalOutcome
         triggers: dict[str, dict[str, Any]] = {}
 
         # Build timestamp -> signal map for open signals
@@ -143,7 +144,7 @@ class StateExporter:
 
             if last:
                 triggers[sid] = {
-                    "side": "BUY" if last["direction"] == SignalDirection.LONG else "SELL",
+                    "side": "BUY" if last["direction"] == Direction.LONG else "SELL",
                     "confidence": round(last["confidence"], 3),
                     "entry": round(last["entry"], 2),
                     "stop": round(last["stop"], 2),
