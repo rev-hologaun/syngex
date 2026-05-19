@@ -262,8 +262,7 @@ class StrategyEvaluationEngine:
             gex_calculator: The GEXCalculator instance.
             symbol: The ticker symbol.
         """
-        if not self._logger:
-            return
+        logger = self._logger if self._logger else logging.getLogger("root")
 
         summary = gex_calculator.get_summary()
         profile = gex_calculator.get_gamma_profile()
@@ -273,7 +272,7 @@ class StrategyEvaluationEngine:
         strikes = summary["active_strikes"]
 
         # Format: one line per top-level metric
-        self._logger.info(
+        logger.info(
             "GAMMA_PROFILE  |  %s  |  Underlying: $%.2f  |  "
             "Net Gamma: %+.2f  |  Strikes: %d  |  Msgs: %d",
             symbol,
@@ -286,7 +285,7 @@ class StrategyEvaluationEngine:
         # Gamma Flip point
         flip = gex_calculator.get_gamma_flip()
         if flip is not None:
-            self._logger.info("  GAMMA_FLIP:  Strike $%.1f (cumulative gamma turns negative below this)", flip)
+            logger.info("  GAMMA_FLIP:  Strike $%.1f (cumulative gamma turns negative below this)", flip)
 
         # Gamma Walls
         walls = gex_calculator.get_gamma_walls(threshold=500000)
@@ -295,7 +294,7 @@ class StrategyEvaluationEngine:
             for w in walls[:3]:
                 sign = "+" if w["gex"] > 0 else "-"
                 wall_parts.append(f"${w['strike']:.0f} ({w['side']}) {sign}${abs(w['gex']):,.0f}")
-            self._logger.info("  GAMMA_WALLS:  %s", "  |  ".join(wall_parts))
+            logger.info("  GAMMA_WALLS:  %s", "  |  ".join(wall_parts))
 
         # Top 5 strikes by absolute Net Gamma
         top = sorted(
@@ -310,4 +309,4 @@ class StrategyEvaluationEngine:
                 ng = bucket["net_gamma"]
                 sign = "+" if ng >= 0 else "-"
                 parts.append(f"  K{strike:.1f}: {sign}{abs(ng):,.2f}")
-            self._logger.info("  TOP_STRIKES:  %s", "  |  ".join(parts))
+            logger.info("  TOP_STRIKES:  %s", "  |  ".join(parts))
