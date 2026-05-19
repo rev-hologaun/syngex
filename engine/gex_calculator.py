@@ -167,17 +167,42 @@ class GEXCalculator:
     # ------------------------------------------------------------------
 
     def process_message(self, message: Dict[str, Any]) -> None:
-        """
-        Process an incoming JSON message from the TradeStation stream.
+        """Process an incoming JSON message from the TradeStation stream.
 
-        Handles:
-            - option_update  → updates a specific strike in the ladder
-            - underlying_update  → updates the underlying price
-            - raw TradeStation quotes  → extracts underlying price
-            - raw TradeStation option-chain  → extracts contracts
-            - stream greeks objects  → infers strike/side from greeks
+        Expected input format:
+            message (Dict): JSON object with one of the following structures:
+                - {"type": "underlying_update", "price": <numeric>}
+                - {"type": "option_update", "strike": <num>, "gamma": <num>, "open_interest": <num>, "side": "call"|"put"}
+                - Raw TradeStation quote: {"Last": <num>, "Symbol": <str>}
+                - Raw TradeStation option: {"Gamma": <num>, "DailyOpenInterest": <num>, "Side": <str>, "Strikes": [<num>]}
+                - Stream greeks: {"Delta": <num>, "Gamma": <num>, "IntrinsicValue": <num>, ...}
+
+        Validation:
+            - Performs basic type checking before calling update methods
+            - Logs warnings for malformed data instead of raising exceptions
+            - Continues processing after logging errors (fail gracefully)
+
+        Returns:
+            None: Always returns None, never raises exceptions
+
+        Logs:
+            - WARNING for malformed messages or invalid data
+            - ERROR for unexpected exceptions during processing
         """
         self._msg_count += 1
+
+        # Basic type validation for message
+        if not isinstance(message, dict):
+            if log_with_correlation:
+                log_with_correlation(
+                    logger, logging.WARNING,
+                    "Invalid message type (expected dict), skipping",
+                    correlation_id=self._correlation_id,
+                    message_type=type(message).__name__
+                )
+            else:
+                logger.warning("Invalid message type %s (expected dict), skipping", type(message).__name__)
+            return
 
         try:
             msg_type = message.get("type")
@@ -624,8 +649,47 @@ class GEXCalculator:
     # ------------------------------------------------------------------
 
     def _update_underlying_price(self, price: float) -> None:
-        if price <= 0:
+        """Update the underlying price from incoming data.
+
+        Args:
+            price: The underlying price value (must be a number > 0).
+
+        Validation:
+            - price must be numeric (int or float)
+            - price must be > 0
+            - Returns early without updating if validation fails
+
+        Logs:
+            - WARNING if validation fails
+            - DEBUG when price is successfully updated
+        """
+        # Type validation
+        if not isinstance(price, (int, float)):
+            if log_with_correlation:
+                log_with_correlation(
+                    logger, logging.WARNING,
+                    "Invalid underlying price type, ignoring",
+                    correlation_id=self._correlation_id,
+                    price=price,
+                    price_type=type(price).__name__
+                )
+            else:
+                logger.warning("Invalid underlying price type %s: %s, ignoring", type(price).__name__, price)
             return
+
+        # Range validation
+        if price <= 0:
+            if log_with_correlation:
+                log_with_correlation(
+                    logger, logging.WARNING,
+                    "Invalid underlying price value, ignoring",
+                    correlation_id=self._correlation_id,
+                    price=price
+                )
+            else:
+                logger.warning("Invalid underlying price value: %s (must be > 0), ignoring", price)
+            return
+
         if price != self.underlying_price:
             self.underlying_price = price
             self._net_gamma_dirty = True
@@ -744,47 +808,105 @@ class GEXCalculator:
         return round(strike / 2.5) * 2.5
 
     def _update_strike_from_stream(self, msg: Dict[str, Any]) -> None:
+        """Process a stream greeks object — infer strike, side, and update ladder.
+
+        Expected input format:
+            msg (Dict): Stream greeks object with the following fields:
+                - Delta: numeric (float or int) — used to infer call/put side
+                - Gamma: numeric (float or int) — must be > 0
+                - IntrinsicValue: numeric (float or int) — used for ITM strike inference
+                - ProbabilityITM: numeric (float or int) — used for OTM strike inference
+
+        Validation:
+            - Validates that inferred strike price is reasonable (> 0)
+            - Validates that gamma/delta values are numeric
+            - Returns early without updating if validation fails
+
+        Returns:
+            None: Returns early if validation fails (no exception raised)
+
+        Logs:
+            - WARNING if validation fails on strike inference or greeks values
+            - DEBUG when strike cannot be inferred
         """
-        Process a stream greeks object — infer strike, side, and update ladder.
-
-        Stream greeks objects have:
-            Delta, Theta, Gamma, Rho, Vega, ImpliedVolatility,
-            IntrinsicValue, ExtrinsicValue, TheoreticalValue,
-            ProbabilityITM, ProbabilityOTM, ProbabilityBE
-
-        Missing fields (inferred):
-            side    → from Delta sign
-            strike  → from IntrinsicValue + underlying_price (ITM)
-                      or from delta approximation (OTM)
-            open_interest → defaults to 1.0 (TradeStation stream limitation)
-
-        ⚠️ **Open Interest Limitation**:
-        The TradeStation SSE stream greeks format does NOT include Open Interest.
-        This is a data source limitation — the stream provides greeks but not
-        contract counts. OI defaults to 1.0 per message, making all OI-dependent
-        calculations **relative** rather than absolute.
-
-        **Impact on Strategies**:
-        - Flow scores (CallPutFlowAsymmetry) use relative OI ratios — still valid
-          for detecting asymmetry direction and magnitude
-        - GEX values are relative — use for sign detection and relative comparisons
-        - Absolute dollar GEX requires REST API OI fetches (future enhancement)
-
-        **Why This Still Works**:
-        Relative OI preserves the **ratios** between call and put flow. When call
-        flow is 3× put flow with relative OI, it's still 3× with real OI (assuming
-        similar OI distribution). The asymmetry detection remains valid.
-        """
-        # Extract greeks
+        # Extract and validate greeks
         try:
-            delta = float(msg.get("Delta", 0))
-            gamma = float(msg.get("Gamma", 0))
-            intrinsic = float(msg.get("IntrinsicValue", 0))
-        except (ValueError, TypeError):
+            delta_raw = msg.get("Delta", 0)
+            gamma_raw = msg.get("Gamma", 0)
+            intrinsic_raw = msg.get("IntrinsicValue", 0)
+
+            # Validate delta is numeric
+            if not isinstance(delta_raw, (int, float)):
+                if log_with_correlation:
+                    log_with_correlation(
+                        logger, logging.WARNING,
+                        "Invalid Delta type in stream greeks, skipping",
+                        correlation_id=self._correlation_id,
+                        delta_type=type(delta_raw).__name__,
+                        delta_value=delta_raw
+                    )
+                else:
+                    logger.warning("Invalid Delta type %s: %s, skipping", type(delta_raw).__name__, delta_raw)
+                return
+
+            delta = float(delta_raw)
+
+            # Validate gamma is numeric
+            if not isinstance(gamma_raw, (int, float)):
+                if log_with_correlation:
+                    log_with_correlation(
+                        logger, logging.WARNING,
+                        "Invalid Gamma type in stream greeks, skipping",
+                        correlation_id=self._correlation_id,
+                        gamma_type=type(gamma_raw).__name__,
+                        gamma_value=gamma_raw
+                    )
+                else:
+                    logger.warning("Invalid Gamma type %s: %s, skipping", type(gamma_raw).__name__, gamma_raw)
+                return
+
+            gamma = float(gamma_raw)
+
+            # Validate intrinsic value is numeric
+            if not isinstance(intrinsic_raw, (int, float)):
+                if log_with_correlation:
+                    log_with_correlation(
+                        logger, logging.WARNING,
+                        "Invalid IntrinsicValue type in stream greeks, skipping",
+                        correlation_id=self._correlation_id,
+                        intrinsic_type=type(intrinsic_raw).__name__,
+                        intrinsic_value=intrinsic_raw
+                    )
+                else:
+                    logger.warning("Invalid IntrinsicValue type %s: %s, skipping", type(intrinsic_raw).__name__, intrinsic_raw)
+                return
+
+            intrinsic = float(intrinsic_raw)
+
+        except (ValueError, TypeError) as exc:
+            if log_with_correlation:
+                log_with_correlation(
+                    logger, logging.WARNING,
+                    "Error parsing greeks from stream, skipping",
+                    correlation_id=self._correlation_id,
+                    error=str(exc)
+                )
+            else:
+                logger.warning("Error parsing greeks from stream: %s, skipping", exc)
             return
 
+        # Validate gamma is positive
         if gamma <= 0:
-            return  # Skip invalid gamma
+            if log_with_correlation:
+                log_with_correlation(
+                    logger, logging.WARNING,
+                    "Invalid Gamma value (must be > 0), skipping",
+                    correlation_id=self._correlation_id,
+                    gamma=gamma
+                )
+            else:
+                logger.warning("Invalid Gamma value: %s (must be > 0), skipping", gamma)
+            return
 
         # Infer side from delta sign
         side = self._infer_side(delta)
@@ -798,18 +920,20 @@ class GEXCalculator:
             strike = self._infer_strike_from_probability(prob_itm, delta)
 
         if strike is None or strike <= 0:
+            # Validate inferred strike is reasonable
             if log_with_correlation:
                 log_with_correlation(
-                    logger, logging.DEBUG,
-                    "Cannot infer strike, skipping",
+                    logger, logging.WARNING,
+                    "Cannot infer reasonable strike price, skipping",
                     correlation_id=self._correlation_id,
                     delta=delta,
-                    intrinsic=intrinsic
+                    intrinsic=intrinsic,
+                    inferred_strike=strike
                 )
             else:
-                logger.debug(
-                    "Cannot infer strike for delta=%.4f intrinsic=%.2f, skipping",
-                    delta, intrinsic,
+                logger.warning(
+                    "Cannot infer reasonable strike price for delta=%.4f intrinsic=%.2f, inferred strike=%s, skipping",
+                    delta, intrinsic, strike
                 )
             return
 
@@ -907,9 +1031,93 @@ class GEXCalculator:
                 })
 
     def _update_strike(self, data: Dict[str, Any]) -> None:
-        strike = data["strike"]
-        gamma = data["gamma"]
-        oi = data["open_interest"]
+        """Update or create a strike bucket with option data.
+
+        Args:
+            data (Dict): Dictionary containing:
+                - strike: numeric (int or float) — must be > 0
+                - gamma: numeric (int or float) — gamma value
+                - open_interest: numeric (int or float) — open interest value
+                - side (optional): str — "call" or "put" (default: "")
+                - delta (optional): numeric — delta value (default: 0.0)
+                - iv (optional): numeric — implied volatility (default: 0.0)
+
+        Validation:
+            - strike must be numeric and > 0
+            - gamma must be numeric
+            - open_interest must be numeric
+            - Returns early without updating if any validation fails
+
+        Returns:
+            None: Returns early if validation fails (no exception raised)
+
+        Logs:
+            - WARNING if any required field fails validation
+            - DEBUG when strike bucket is successfully updated
+        """
+        # Validate strike
+        strike_raw = data.get("strike")
+        if not isinstance(strike_raw, (int, float)):
+            if log_with_correlation:
+                log_with_correlation(
+                    logger, logging.WARNING,
+                    "Invalid strike type, skipping update",
+                    correlation_id=self._correlation_id,
+                    strike_type=type(strike_raw).__name__,
+                    strike_value=strike_raw
+                )
+            else:
+                logger.warning("Invalid strike type %s: %s, skipping update", type(strike_raw).__name__, strike_raw)
+            return
+
+        strike = float(strike_raw)
+
+        if strike <= 0:
+            if log_with_correlation:
+                log_with_correlation(
+                    logger, logging.WARNING,
+                    "Invalid strike value (must be > 0), skipping update",
+                    correlation_id=self._correlation_id,
+                    strike=strike
+                )
+            else:
+                logger.warning("Invalid strike value: %s (must be > 0), skipping update", strike)
+            return
+
+        # Validate gamma
+        gamma_raw = data.get("gamma")
+        if not isinstance(gamma_raw, (int, float)):
+            if log_with_correlation:
+                log_with_correlation(
+                    logger, logging.WARNING,
+                    "Invalid gamma type, skipping update",
+                    correlation_id=self._correlation_id,
+                    gamma_type=type(gamma_raw).__name__,
+                    gamma_value=gamma_raw
+                )
+            else:
+                logger.warning("Invalid gamma type %s: %s, skipping update", type(gamma_raw).__name__, gamma_raw)
+            return
+
+        gamma = float(gamma_raw)
+
+        # Validate open_interest
+        oi_raw = data.get("open_interest")
+        if not isinstance(oi_raw, (int, float)):
+            if log_with_correlation:
+                log_with_correlation(
+                    logger, logging.WARNING,
+                    "Invalid open_interest type, skipping update",
+                    correlation_id=self._correlation_id,
+                    oi_type=type(oi_raw).__name__,
+                    oi_value=oi_raw
+                )
+            else:
+                logger.warning("Invalid open_interest type %s: %s, skipping update", type(oi_raw).__name__, oi_raw)
+            return
+
+        oi = float(oi_raw)
+
         side = data.get("side", "")
         delta = data.get("delta", 0.0)  # Optional from stream greeks
         iv = data.get("iv", 0.0)  # Optional IV from stream greeks

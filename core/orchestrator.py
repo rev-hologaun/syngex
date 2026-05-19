@@ -64,6 +64,10 @@ from core.strategy_engine import StrategyEvaluationEngine
 from core.gamma_profile import GammaProfileEngine
 from core.filters import NetGammaFilter
 
+# Import Phase 7 components
+from core.container import SyngexContainer
+from core.config_loader import ConfigLoader, StrategiesConfig
+
 from config.logging_config import setup_logging, log_with_correlation
 
 
@@ -81,13 +85,20 @@ class SyngexOrchestrator:
     PROFILE_INTERVAL: float = 5.0
 
     def __init__(
-        self, symbol: str, mode: str = "stream", port: int = 8501,
-        json_log: bool = False
+        self,
+        symbol: str,
+        mode: str = "stream",
+        port: int = 8501,
+        json_log: bool = False,
+        container: Optional[SyngexContainer] = None,
+        config_loader: Optional[ConfigLoader] = None,
     ) -> None:
         self.symbol = symbol.upper()
         self.mode = mode.lower()
         self._port = port
         self._json_log = json_log
+        self._container = container
+        self._config_loader = config_loader
         self._client: TradeStationClient | None = None
         self._calculator: GEXCalculator | None = None
         self._dashboard: SyngexDashboard | None = None
@@ -116,8 +127,18 @@ class SyngexOrchestrator:
         # Correlation ID for this orchestrator instance (traces signal lifecycle)
         self._correlation_id = str(uuid.uuid4())[:8]
 
+        # Circuit breaker for consecutive errors
+        self._error_count: int = 0
+        self._max_consecutive_errors: int = 10
+        self._last_error_time: float = 0.0
+
         # Logging
         self._logger = setup_logging(log_level="DEBUG", json_format=json_log)
+
+        # Circuit breaker for consecutive errors
+        self._error_count: int = 0
+        self._max_consecutive_errors: int = 10
+        self._last_error_time: float = 0.0
 
         # Services (created in initialize())
         self._dashboard_service: DashboardService | None = None
@@ -305,7 +326,8 @@ class SyngexOrchestrator:
 
     async def connect(self) -> None:
         """Establish streaming connections."""
-        assert self._client is not None
+        if self._client is None:
+            raise RuntimeError("TradeStationClient not initialized - call initialize() first")
         log_with_correlation(
             self._logger, logging.INFO,
             "Connecting to TradeStation streams",
@@ -321,8 +343,10 @@ class SyngexOrchestrator:
         Also watches for fail-fast conditions.
         Spawns the Streamlit dashboard as a background subprocess (dashboard mode only).
         """
-        assert self._client is not None
-        assert self._calculator is not None
+        if self._client is None:
+            raise RuntimeError("TradeStationClient not initialized - call initialize() first")
+        if self._calculator is None:
+            raise RuntimeError("GEXCalculator not initialized - call initialize() first")
 
         self._running = True
         self._profile_timer = time.monotonic()
@@ -386,7 +410,28 @@ class SyngexOrchestrator:
                 # Strategy evaluation (every ~1s) - using new engine
                 if now - self._strategy_timer >= 1.0:
                     if self._strategy_engine_eval:
-                        self._strategy_engine_eval.evaluate_strategies(self)
+                        try:
+                            self._strategy_engine_eval.evaluate_strategies(self)
+                        except Exception as exc:
+                            # Increment error count for circuit breaker
+                            self._error_count += 1
+                            self._last_error_time = time.time()
+                            
+                            log_with_correlation(
+                                self._logger, logging.ERROR,
+                                "Error in strategy evaluation",
+                                correlation_id=self._correlation_id,
+                                error=str(exc),
+                                error_count=self._error_count
+                            )
+                            
+                            # Circuit breaker: trigger critical alert after threshold
+                            if self._error_count >= self._max_consecutive_errors:
+                                self._logger.critical(
+                                    f"CIRCUIT BREAKER: {self._error_count} consecutive errors - shutting down",
+                                    extra={"correlation_id": self._correlation_id}
+                                )
+                                self._running = False
                     self._strategy_timer = now
 
                 # Fail-fast: option chain critical error
@@ -732,8 +777,13 @@ class SyngexOrchestrator:
 
     def _on_message(self, data: Dict[str, Any]) -> None:
         """Callback from TradeStationClient — feed to GEXCalculator + update rolling windows."""
-        assert self._calculator is not None
+        if self._calculator is None:
+            raise RuntimeError("GEXCalculator not initialized - call initialize() first")
         try:
+            # Reset error count on successful message processing
+            if self._error_count > 0:
+                self._error_count = 0
+            
             self._calculator.process_message(data)
 
             # Update rolling windows with underlying price
@@ -823,9 +873,23 @@ class SyngexOrchestrator:
 
 
         except Exception as exc:
+            # Increment error count for circuit breaker
+            self._error_count += 1
+            self._last_error_time = time.time()
+            
             log_with_correlation(
                 self._logger, logging.ERROR,
                 "Error processing message",
                 correlation_id=self._correlation_id,
-                error=str(exc)
+                error=str(exc),
+                error_count=self._error_count
             )
+            
+            # Circuit breaker: trigger critical alert after threshold
+            if self._error_count >= self._max_consecutive_errors:
+                self._logger.critical(
+                    f"CIRCUIT BREAKER: {self._error_count} consecutive errors - shutting down",
+                    extra={"correlation_id": self._correlation_id}
+                )
+                # Trigger shutdown to prevent further data loss
+                self._running = False

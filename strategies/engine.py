@@ -28,7 +28,7 @@ import json
 import logging
 import time
 import uuid
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
@@ -140,9 +140,13 @@ class StrategyEngine:
         self._tick_count: int = 0
         self._correlation_id = str(uuid.uuid4())[:8]  # Engine instance correlation ID
 
+        # Circuit breaker for consecutive errors
+        self._error_count: int = 0
+        self._max_consecutive_errors: int = 10
+        self._last_error_time: float = 0.0
+
         # In-memory ring buffer for recent signals (used by Command Center)
-        self._recent_signals: List[Dict[str, Any]] = []  # last N signal dicts
-        self._recent_buffer_size: int = 200  # keep up to 200 recent signals in memory
+        self._recent_signals: deque[Dict[str, Any]] = deque(maxlen=200)  # auto-trimming ring buffer
 
         # Ensure log directory exists
         log_path = Path(self.config.signal_log_path)
@@ -337,6 +341,10 @@ class StrategyEngine:
                     all_signals.append(signal)
                     self._last_signals[signal.strategy_id] = now
             except Exception as exc:
+                # Increment error count for circuit breaker
+                self._error_count += 1
+                self._last_error_time = time.time()
+                
                 if log_with_correlation:
                     log_with_correlation(
                         logger, logging.ERROR,
@@ -344,10 +352,18 @@ class StrategyEngine:
                         correlation_id=self._correlation_id,
                         strategy_id=strategy.strategy_id,
                         error=str(exc),
+                        error_count=self._error_count,
                         exc_info=True
                     )
                 else:
-                    logger.error("Strategy %s error: %s", strategy.strategy_id, exc, exc_info=True)
+                    logger.error("Strategy %s error: %s (error_count=%d)", strategy.strategy_id, exc, self._error_count, exc_info=True)
+                
+                # Circuit breaker: trigger critical alert after threshold
+                if self._error_count >= self._max_consecutive_errors:
+                    logger.critical(
+                        f"CIRCUIT BREAKER: {self._error_count} consecutive strategy errors",
+                        extra={"correlation_id": self._correlation_id}
+                    )
 
         # Phase 2: Apply regime filter
         if self._filter_callback:
@@ -395,11 +411,8 @@ class StrategyEngine:
             self._signal_count += 1
             # Log to file
             self._log_signal(signal)
-            # Store in memory buffer for Command Center queries
-            sig_dict = signal.to_dict()
-            self._recent_signals.append(sig_dict)
-            if len(self._recent_signals) > self._recent_buffer_size:
-                self._recent_signals = self._recent_signals[-self._recent_buffer_size:]
+            # Store in memory buffer for Command Center queries (deque auto-trims)
+            self._recent_signals.append(signal.to_dict())
             # Push to handlers
             for handler in self._signal_handlers:
                 try:
@@ -432,6 +445,10 @@ class StrategyEngine:
                     len(all_signals),
                     ", ".join(f"{s.strategy_id}={s.confidence:.2f}" for s in all_signals[:5]),
                 )
+
+        # Reset error count on successful processing
+        if self._error_count > 0:
+            self._error_count = 0
 
         return all_signals
 
@@ -693,7 +710,7 @@ class StrategyEngine:
 
     def get_recent_signals(self, n: int = 20) -> List[Dict[str, Any]]:
         """Return the last N signals as dicts (for Command Center micro-signal overlay)."""
-        return list(self._recent_signals[-n:])
+        return list(self._recent_signals)[-n:]
 
     @property
     def strategy_count(self) -> int:
