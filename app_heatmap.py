@@ -26,6 +26,9 @@ from typing import Dict
 from flask import Flask, jsonify, render_template
 from flask_socketio import SocketIO, emit
 
+# Import health check service
+from api.health import HealthCheckService
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
@@ -63,10 +66,8 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 # In-memory cache of latest data
 _latest_data: dict = {}
 _latest_ts: float = 0.0
-# App start time for uptime calculation
-_app_start_time: float = time.time()
-# Version
-__version__ = "1.86"
+# Initialize health check service
+health_service = HealthCheckService(base_path=Path(__file__).parent, symbol=SYMBOL)
 
 
 # ---------------------------------------------------------------------------
@@ -277,112 +278,44 @@ def index():
 def health():
     """Health check endpoint for production monitoring.
     
+    Uses the centralized HealthCheckService for consistent health checks.
+    
     Returns:
-        HTTP 200 - All systems healthy
+        HTTP 200 - All systems healthy (or degraded but operational)
         HTTP 503 - One or more critical components down
         
     Response format:
         {
-            "status": "healthy" | "unhealthy",
+            "status": "healthy" | "unhealthy" | "degraded",
             "timestamp": "2026-05-19T00:00:00Z",
-            "version": "1.86",
-            "uptime_seconds": 12345,
             "components": {
-                "orchestrator": "running" | "stopped",
-                "signal_engine": "running" | "stopped",
-                "gex_calculator": "running" | "stopped",
-                "heatmap_server": "running",
-                "data_feed": "connected" | "disconnected"
+                "gex_calculator": "healthy" | "unhealthy",
+                "strategy_engine": "healthy" | "unhealthy",
+                "signal_tracker": "healthy" | "unhealthy",
+                "trade_station": "connected" | "disconnected"
             },
             "metrics": {
+                "uptime_seconds": 12345,
                 "signals_last_minute": 12,
-                "active_positions": 5,
-                "last_signal_timestamp": 1715011200.0
+                "active_strategies": 15
             }
         }
     """
     logger.info("Health check requested")
     
-    # Calculate uptime
-    uptime_seconds = int(time.time() - _app_start_time)
+    # Use the centralized HealthCheckService
+    health_status = health_service.get_full_status()
     
-    # Check data file to determine component status
-    data = _read_json_file()
+    # Determine HTTP status code based on overall status
+    status = health_status["status"]
+    if status == "healthy":
+        status_code = 200
+    elif status == "degraded":
+        status_code = 200  # Still operational
+    else:
+        status_code = 503
     
-    # Default component statuses
-    components = {
-        "orchestrator": "stopped",
-        "signal_engine": "stopped",
-        "gex_calculator": "stopped",
-        "heatmap_server": "running",
-        "data_feed": "disconnected"
-    }
-    
-    # Default metrics
-    metrics = {
-        "signals_last_minute": 0,
-        "active_positions": 0,
-        "last_signal_timestamp": None
-    }
-    
-    if data is not None:
-        # Data file exists and is readable - orchestrator is running
-        components["orchestrator"] = "running"
-        components["gex_calculator"] = "running"
-        components["data_feed"] = "connected"
-        
-        # Check if strategy engine is active
-        if data.get("strategy_engine") is not None:
-            components["signal_engine"] = "running"
-        
-        # Extract metrics from data
-        strategy_health = data.get("strategy_health", {})
-        
-        # Count active signals and calculate signals in last minute
-        now = time.time()
-        signals_last_minute = 0
-        active_positions = 0
-        last_signal_ts = None
-        
-        for strat_name, health in strategy_health.items():
-            last_ts = health.get("last_signal_ts", 0)
-            if last_ts > 0:
-                if last_signal_ts is None or last_ts > last_signal_ts:
-                    last_signal_ts = last_ts
-                
-                # Count signals in last minute
-                if now - last_ts <= 60:
-                    signals_last_minute += 1
-                
-                # Count active positions (signals within last 15 minutes)
-                if now - last_ts <= 900:
-                    active_positions += 1
-        
-        metrics["signals_last_minute"] = signals_last_minute
-        metrics["active_positions"] = active_positions
-        metrics["last_signal_timestamp"] = last_signal_ts
-    
-    # Determine overall status
-    critical_components = ["orchestrator", "gex_calculator", "data_feed"]
-    all_healthy = all(components[comp] == "running" or components[comp] == "connected" 
-                      for comp in critical_components)
-    
-    status = "healthy" if all_healthy else "unhealthy"
-    
-    # Build response
-    response = {
-        "status": status,
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "version": __version__,
-        "uptime_seconds": uptime_seconds,
-        "components": components,
-        "metrics": metrics
-    }
-    
-    # Return appropriate HTTP status code
-    status_code = 200 if all_healthy else 503
-    
-    return jsonify(response), status_code
+    return jsonify(health_status), status_code
 
 
 # ---------------------------------------------------------------------------
