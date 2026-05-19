@@ -19,7 +19,7 @@ from services.state_exporter import StateExporter
 
 
 # Import all components
-from ingestor.tradestation_client import TradeStationClient
+from data.ingestor import TradeStationClient
 from engine.gex_calculator import GEXCalculator
 from engine.dashboard import SyngexDashboard
 from strategies.engine import StrategyEngine, EngineConfig
