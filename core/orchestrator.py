@@ -295,7 +295,6 @@ class SyngexOrchestrator:
             logger=self._logger,
             correlation_id=self._correlation_id,
         )
-        self._logger.info("[INIT] StrategyEvaluationEngine created: %s", bool(self._strategy_engine_eval))
 
         log_with_correlation(
             self._logger, logging.INFO,
@@ -350,21 +349,15 @@ class SyngexOrchestrator:
             # Start config watcher task
             config_task = asyncio.create_task(self._watch_config())
 
-            self._logger.info("[RUN LOOP] Entering main run loop...")
             while self._running:
                 now = time.monotonic()
-                self._logger.info("[RUN LOOP] Iteration: now=%.2f profile_timer=%.2f interval=%ss", now, self._profile_timer, self.PROFILE_INTERVAL)
 
                 # Report Gamma Profile at intervals (using new engine)
                 profile_check = now - self._profile_timer >= self.PROFILE_INTERVAL
-                self._logger.info("[PROFILE CHECK] profile_check=%s (diff=%.2f >= %s)", profile_check, now - self._profile_timer, self.PROFILE_INTERVAL)
                 if profile_check:
-                    self._logger.info("[PROFILE] Checking report_profile()... strategy_engine_eval=%s", bool(self._strategy_engine_eval))
                     if self._strategy_engine_eval:
-                        self._logger.info("[PROFILE] Calling report_profile()...")
                         self._strategy_engine_eval.report_profile(self._calculator, self.symbol)
                     self._profile_timer = now
-                self._logger.debug("[PROFILE TIMER] Updated to: %s", self._profile_timer)
 
                 # Export GEX state to shared file for Streamlit dashboard
                 if now - self._state_export_timer >= 1.0:
@@ -392,7 +385,6 @@ class SyngexOrchestrator:
 
                 # Strategy evaluation (every ~1s) - using new engine
                 if now - self._strategy_timer >= 1.0:
-                    self._logger.debug("[STRATEGY EVAL] Calling evaluate_strategies()...")
                     if self._strategy_engine_eval:
                         self._strategy_engine_eval.evaluate_strategies(self)
                     self._strategy_timer = now
