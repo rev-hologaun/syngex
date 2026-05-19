@@ -25,6 +25,22 @@ Confidence factors:
     - Proximity to strike
     - Signal strength (candle pattern quality, volume confirmation)
     - Regime alignment
+
+⚠️ **Open Interest Limitation**:
+This strategy identifies "top OI strikes" using relative OI values from the
+TradeStation SSE stream (default 1.0 per message). The stream greeks format
+does not include Open Interest data.
+
+**Impact**:
+- "Top OI strikes" are based on relative rankings, not absolute contract counts
+- Strike rankings may differ from real OI distribution
+- Strategy still works for detecting price reactions at concentrated strikes
+
+**Why It Still Works**:
+The strategy relies on **strike concentration patterns** — where market
+participants have clustered positions. Even with relative OI, the stream
+data reveals which strikes have the most gamma/delta activity, which often
+correlates with OI concentration.
 """
 
 from __future__ import annotations

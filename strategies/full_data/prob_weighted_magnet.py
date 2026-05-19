@@ -29,6 +29,23 @@ Confidence factors:
     - Price consolidation tightness
     - Volume profile (declining = accumulation signal)
     - Distance to target strike
+
+⚠️ **Open Interest Limitation**:
+This strategy uses OI concentration thresholds (MIN_OI_CONCENTRATION = 2.0)
+to filter qualifying strikes. The OI values are **relative** (1.0 per message)
+because the TradeStation SSE stream greeks format does not include Open Interest.
+
+**Impact**:
+- MIN_OI_CONCENTRATION threshold (2.0) is in relative units, not contract counts
+- Strikes with "high OI" are identified by relative activity levels
+- Absolute OI thresholds would require REST API OI fetches
+
+**Why It Still Works**:
+The strategy combines **ProbabilityITM** (from stream greeks) with **relative OI**
+to detect accumulation. Even with relative OI, strikes showing both high activity
+(gamma/delta from stream) AND high ProbabilityITM indicate smart money positioning.
+The relative OI serves as a proxy for "activity concentration" rather than exact
+contract counts.
 """
 
 from __future__ import annotations

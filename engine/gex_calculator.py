@@ -27,13 +27,27 @@ logger = logging.getLogger("Syngex.Engine.GEXCalculator")
 class _StrikeBucket:
     """Aggregate state for a single strike price.
 
-    Note: OI values from stream greeks are **relative** (not absolute
-    contract counts). The stream does not include real open interest —
-    OI defaults to 1.0 per message. Use `set_open_interest()` to update
-    with real OI from REST API if/when we add periodic OI fetching.
+    ⚠️ **Open Interest Limitation**: OI values from the TradeStation SSE
+    stream greeks are **relative** (not absolute contract counts).
 
-    OI-dependent strategies (e.g. Call/Put Flow Asymmetry) use relative
-    ratios which still work for detecting asymmetry direction and magnitude.
+    **Root Cause**: The TradeStation option-chain SSE stream provides greeks
+    objects (Delta, Gamma, IV, ProbabilityITM, etc.) but does **NOT** include
+    Open Interest data. The stream greeks format is detected by the absence
+    of the `DailyOpenInterest` field.
+
+    **Current Behavior**: OI defaults to 1.0 per message. This means:
+    - GEX values are relative, not absolute dollar amounts
+    - OI-dependent strategies use relative ratios (still valid for asymmetry)
+    - Absolute contract counts require REST API OI fetches (not yet implemented)
+
+    **Workaround**: Use `set_open_interest()` to update with real OI from
+    REST API when/if periodic OI fetching is added.
+
+    **Affected Strategies**:
+    - `CallPutFlowAsymmetry`: Uses OI×Gamma×Delta ratios — still works for
+      detecting call vs put flow imbalance direction and magnitude
+    - `StrikeConcentration`: Uses OI thresholds — values are relative
+    - `ProbWeightedMagnet`: Uses OI for weighting — relative rankings valid
     """
 
     strike: float
@@ -349,21 +363,36 @@ class GEXCalculator:
             'net_gamma': float,  # normalized (per-message average)
             'call_gamma': float,  # normalized (per-message average)
             'put_gamma': float,   # normalized (per-message average)
-            'call_oi': float,
-            'put_oi': float,
-            'net_oi': float,
+            'call_oi': float,     # ⚠️ RELATIVE (defaults to 1.0 per message)
+            'put_oi': float,      # ⚠️ RELATIVE (defaults to 1.0 per message)
+            'net_oi': float,      # ⚠️ RELATIVE
             'net_delta': float,
             'call_delta_sum': float,
             'put_delta_sum': float,
         }
 
-        Gamma values are normalized (divided by message count) to produce
-        bounded, per-message averages. OI values remain cumulative as they
-        represent relative OI from the stream.
+        ⚠️ **Open Interest Warning**:
+        OI values are **relative**, not absolute contract counts. The TradeStation
+        SSE stream greeks format does not include Open Interest data. OI defaults
+        to 1.0 per message.
 
-        Note: OI values are **relative** (not absolute contract counts).
-        OI-dependent strategies use relative ratios which still work for
-        detecting asymmetry direction and magnitude.
+        **Implications**:
+        - Absolute dollar GEX values are not accurate (use for relative comparisons)
+        - OI ratios between calls/puts are still valid for asymmetry detection
+        - Strategies using OI thresholds should treat values as relative indicators
+
+        **Valid Use Cases**:
+        - Call vs Put flow ratio (CallPutFlowAsymmetry) — relative ratios work
+        - Strike-to-strike OI comparison (relative rankings preserved)
+        - Directional asymmetry detection (magnitude still meaningful)
+
+        **Invalid Use Cases**:
+        - Absolute contract count assumptions
+        - Dollar-value GEX calculations without REST API OI fetch
+        - OI threshold-based filtering with absolute values
+
+        Gamma values are normalized (divided by message count) to produce
+        bounded, per-message averages.
         """
         summary: Dict[float, Dict[str, float]] = {}
         for strike, bucket in self._ladder.items():
@@ -680,12 +709,24 @@ class GEXCalculator:
             side    → from Delta sign
             strike  → from IntrinsicValue + underlying_price (ITM)
                       or from delta approximation (OTM)
-            open_interest → defaults to 1.0 (not in stream)
+            open_interest → defaults to 1.0 (TradeStation stream limitation)
 
-        Note: OI values are **relative** (not absolute contract counts).
-        The stream does not include real open interest. Use
-        `set_open_interest()` to update with real OI from REST API
-        when we add periodic OI fetching.
+        ⚠️ **Open Interest Limitation**:
+        The TradeStation SSE stream greeks format does NOT include Open Interest.
+        This is a data source limitation — the stream provides greeks but not
+        contract counts. OI defaults to 1.0 per message, making all OI-dependent
+        calculations **relative** rather than absolute.
+
+        **Impact on Strategies**:
+        - Flow scores (CallPutFlowAsymmetry) use relative OI ratios — still valid
+          for detecting asymmetry direction and magnitude
+        - GEX values are relative — use for sign detection and relative comparisons
+        - Absolute dollar GEX requires REST API OI fetches (future enhancement)
+
+        **Why This Still Works**:
+        Relative OI preserves the **ratios** between call and put flow. When call
+        flow is 3× put flow with relative OI, it's still 3× with real OI (assuming
+        similar OI distribution). The asymmetry detection remains valid.
         """
         # Extract greeks
         try:

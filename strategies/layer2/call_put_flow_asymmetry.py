@@ -16,6 +16,26 @@ Confidence factors:
     - IV skew alignment (IV should favor the direction)
     - Volume dominance (VolumeUp on the dominant side)
     - Bid/ask size ratio (larger bid side = conviction)
+
+⚠️ **Open Interest Limitation**:
+This strategy uses OI×Gamma×Delta flow scores. The OI values from the
+TradeStation SSE stream are **relative** (default 1.0 per message) because
+the stream greeks format does not include Open Interest data.
+
+**Why This Still Works**:
+The strategy relies on **ratios** (call score / put score), not absolute values.
+Relative OI preserves the ratio between call and put flow. If call flow is 3×
+put flow with relative OI, it would be approximately 3× with real OI (assuming
+similar OI distribution across strikes). The asymmetry detection remains valid.
+
+**What's Affected**:
+- Absolute flow score magnitudes are not real dollar values
+- Cross-symbol comparisons may be misleading (different OI distributions)
+
+**What's Valid**:
+- Call vs Put asymmetry within the same symbol
+- Flow ratio magnitude (1.5×, 2×, 3×, etc.)
+- Directional signals (LONG when calls dominant, SHORT when puts dominant)
 """
 
 from __future__ import annotations
@@ -58,6 +78,19 @@ class CallPutFlowAsymmetry(BaseStrategy):
     When call flow significantly outweighs put flow (or vice versa),
     it signals directional conviction from market participants.
     Combined with IV skew analysis, this reveals smart money positioning.
+
+    ⚠️ **OI Limitation Note**:
+    Uses relative OI (1.0 per message) from TradeStation SSE stream.
+    Flow scores are relative but ratios remain valid for asymmetry detection.
+    See module docstring for details.
+
+    Attributes:
+        FLOW_THRESHOLD: Call score must exceed put score by this ratio (default 1.5)
+        MIN_GREEKS_POINTS: Minimum data points for aggregation (default 3)
+        IV_SKEW_THRESHOLD: IV difference threshold (default 0.03 = 3%)
+        MIN_CONFIDENCE: Minimum confidence to emit signal (default 0.35)
+        STOP_PCT: Stop loss percentage (default 0.6%)
+        TARGET_RISK_MULT: Risk target multiple (default 2.0 = 2R)
     """
 
     strategy_id = "call_put_flow_asymmetry"
@@ -120,6 +153,10 @@ class CallPutFlowAsymmetry(BaseStrategy):
 
         Uses aggregated greeks summary: FlowScore = Σ(OI × Gamma × |Delta|)
         across all strikes.
+
+        ⚠️ **OI Note**: OI values are relative (1.0 per message) from the
+        TradeStation SSE stream. Flow scores are relative but ratios between
+        call and put scores remain valid for asymmetry detection.
 
         Returns (call_score, put_score) or (None, None) if insufficient data.
         """
