@@ -156,7 +156,7 @@ class GammaWallBounce(BaseStrategy):
 
         # Check velocity: if price is crossing the wall at high speed,
         # the wall is permeable — skip the signal
-        if not self._check_velocity(price, wall_strike, rolling_data, "call", velocity_threshold=0.005):
+        if not self._check_velocity(price, wall_strike, rolling_data, "call", 0.005):
             return None
 
         # Get trend from rolling data
@@ -236,7 +236,7 @@ class GammaWallBounce(BaseStrategy):
 
         # Check velocity: if price is crossing the wall at high speed,
         # the wall is permeable — skip the signal
-        if not self._check_velocity(price, wall_strike, rolling_data, "put", velocity_threshold=0.005):
+        if not self._check_velocity(price, wall_strike, rolling_data, "put", 0.005):
             return None
 
         # Get trend from rolling data
@@ -288,7 +288,10 @@ class GammaWallBounce(BaseStrategy):
         wall_strike: float,
         rolling_data: Dict[str, Any] = None,
         wall_side: str = "",
+        velocity_threshold: float = None,
     ) -> bool:
+        if velocity_threshold is None:
+            velocity_threshold = self._params.get('wall_proximity_pct', DEFAULT_WALL_PROXIMITY_PCT) * 1.0
         """
         Check if price is approaching wall at high velocity.
         If velocity is too high, the wall is being pierced, not rejected.

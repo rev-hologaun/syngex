@@ -1,0 +1,22 @@
+[run]
+source = core/, data/, engine/, strategies/, services/, api/
+omit = 
+    */tests/*
+    */__pycache__/*
+    */venv/*
+    */node_modules/*
+
+[report]
+precision = 2
+show_missing = True
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise AssertionError
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    @abstractmethod
+
+[html]
+directory = htmlcov
