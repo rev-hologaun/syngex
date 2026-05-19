@@ -114,6 +114,10 @@ class CallPutFlowAsymmetry(BaseStrategy):
         Returns empty list when no significant asymmetry detected.
         """
 
+        # Defensive check: data may be None
+        if data is None:
+            return []
+
         # Apply params to data for parameterized thresholds
         data = self._apply_params(data)
         underlying_price = data.get("underlying_price", 0)

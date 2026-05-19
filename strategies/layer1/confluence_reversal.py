@@ -242,7 +242,7 @@ class ConfluenceReversal(BaseStrategy):
                     level_info["has_vwap"] = True
 
             # Only emit if we have enough independent structural signals
-            if structural_count >= min_structural_signals:
+            if structural_count >= self._params.get('min_structural_signals', DEFAULT_MIN_STRUCTURAL_SIGNALS):
                 level_info["structural_count"] = structural_count
                 level_info["score"] = structural_count
                 levels.append(level_info)
@@ -272,7 +272,7 @@ class ConfluenceReversal(BaseStrategy):
                         if flip_distance <= confluence_distance_pct:
                             structural_count += 1  # Flip at VWAP
 
-                    if structural_count >= min_structural_signals:
+                    if structural_count >= self._params.get('min_structural_signals', DEFAULT_MIN_STRUCTURAL_SIGNALS):
                         levels.append({
                             "type": "vwap",
                             "strike": mean,
@@ -310,9 +310,9 @@ class ConfluenceReversal(BaseStrategy):
 
         # Base confidence from structural signal count
         if structural_count >= 3:
-            confidence = max_confidence_base
+            confidence = self._params.get('max_confidence_base', DEFAULT_MAX_CONFIDENCE_BASE)
         else:
-            confidence = max_confidence_base - 0.25
+            confidence = self._params.get('max_confidence_base', DEFAULT_MAX_CONFIDENCE_BASE) - 0.25
 
         # Wall strength bonus (normalize to [0,1])
         gex_bonus = min(0.15, abs(gex) / 10_000_000)
@@ -333,7 +333,7 @@ class ConfluenceReversal(BaseStrategy):
         confidence = (norm_base + norm_gex + norm_tech + norm_regime) / 4.0
         # Apply trend penalty
         confidence += trend_penalty
-        if confidence < min_confidence:
+        if confidence < self._params.get('min_confidence', DEFAULT_MIN_CONFIDENCE):
             return None
 
         # Stop past the confluence level
@@ -388,9 +388,9 @@ class ConfluenceReversal(BaseStrategy):
 
         # Base confidence from structural signal count
         if structural_count >= 3:
-            confidence = max_confidence_base
+            confidence = self._params.get('max_confidence_base', DEFAULT_MAX_CONFIDENCE_BASE)
         else:
-            confidence = max_confidence_base - 0.25
+            confidence = self._params.get('max_confidence_base', DEFAULT_MAX_CONFIDENCE_BASE) - 0.25
 
         # Wall strength bonus (normalize to [0,1])
         gex_bonus = min(0.15, abs(gex) / 10_000_000)
@@ -411,7 +411,7 @@ class ConfluenceReversal(BaseStrategy):
         confidence = (norm_base + norm_gex + norm_tech + norm_regime) / 4.0
         # Apply trend penalty
         confidence += trend_penalty
-        if confidence < min_confidence:
+        if confidence < self._params.get('min_confidence', DEFAULT_MIN_CONFIDENCE):
             return None
 
         # Stop past the confluence level

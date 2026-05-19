@@ -85,6 +85,10 @@ class DeltaIVDivergence(BaseStrategy):
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
         """Evaluate current state for delta-IV divergence."""
 
+        # Defensive check: data may be None
+        if data is None:
+            return []
+
         # Apply params to data for parameterized thresholds
         data = self._apply_params(data)
 

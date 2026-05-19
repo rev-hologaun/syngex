@@ -108,6 +108,10 @@ class IVGEXDivergence(BaseStrategy):
         Returns signals list — may contain SHORT, LONG, both, or empty.
         """
 
+        # Defensive check: data may be None
+        if data is None:
+            return []
+
         # Apply params to data for parameterized thresholds
         data = self._apply_params(data)
 

@@ -144,7 +144,7 @@ class GammaWallBounce(BaseStrategy):
         if distance_pct < 0:
             # Price already above the wall — no bounce setup
             return None
-        if distance_pct > wall_proximity_pct:
+        if distance_pct > self._params.get('wall_proximity_pct', DEFAULT_WALL_PROXIMITY_PCT):
             # Too far from wall
             return None
 
@@ -227,7 +227,7 @@ class GammaWallBounce(BaseStrategy):
         if distance_pct < 0:
             # Price already below the wall
             return None
-        if distance_pct > wall_proximity_pct:
+        if distance_pct > self._params.get('wall_proximity_pct', DEFAULT_WALL_PROXIMITY_PCT):
             return None
 
         rejection_score = self._rejection_score(wall, price, all_walls, rolling_data)
@@ -325,8 +325,8 @@ class GammaWallBounce(BaseStrategy):
         distance_pct = abs(wall_strike - price) / price
         if distance_pct < 0.0005:
             base_score = 0.3
-        elif distance_pct < wall_proximity_pct:
-            base_score = 0.5 + 0.5 * (1 - distance_pct / wall_proximity_pct)
+        elif distance_pct < self._params.get('wall_proximity_pct', DEFAULT_WALL_PROXIMITY_PCT):
+            base_score = 0.5 + 0.5 * (1 - distance_pct / self._params.get('wall_proximity_pct', DEFAULT_WALL_PROXIMITY_PCT))
         else:
             return 0.0
         if rolling_data:

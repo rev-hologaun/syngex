@@ -112,12 +112,12 @@ class GEXDivergence(BaseStrategy):
 
         # Get price rolling window
         price_window = self._get_price_window(rolling_data)
-        if price_window is None or price_window.count < min_data_points:
+        if price_window is None or price_window.count >= self._params.get('min_data_points', DEFAULT_MIN_DATA_POINTS):
             return []
 
         # Get net_gamma rolling window — this is critical
-        gamma_window = self._get_gamma_window(rolling_data, min_data_points)
-        if gamma_window is None or gamma_window.count < min_data_points:
+        gamma_window = self._get_gamma_window(rolling_data, self._params.get('min_data_points', DEFAULT_MIN_DATA_POINTS))
+        if gamma_window is None or gamma_window.count < self._params.get('min_data_points', DEFAULT_MIN_DATA_POINTS):
             return []  # No gamma data — skip gracefully
 
         # Calculate slopes
@@ -172,7 +172,7 @@ class GEXDivergence(BaseStrategy):
         try:
             summary = gex_calc.get_summary()
             net_gamma_val = summary.get("net_gamma", 0.0)
-            if abs(net_gamma_val) < min_total_gex:
+            if abs(net_gamma_val) < self._params.get('min_total_gex', DEFAULT_MIN_TOTAL_GEX):
                 return []  # GEX walls too weak for a reliable signal
         except Exception:
             return []  # Can't assess GEX strength — skip
@@ -321,7 +321,7 @@ class GEXDivergence(BaseStrategy):
 
         # Data quality
         min_count = min(price_window.count, gamma_window.count)
-        data_conf = min(0.1, (min_count - MIN_DATA_POINTS) / 100)
+        data_conf = min(0.1, (min_count - self._params.get('min_data_points', DEFAULT_MIN_DATA_POINTS)) / 100)
 
         # Regime alignment: soft bonus when aligned, zero when misaligned
         regime_conf = 0.0
@@ -350,7 +350,7 @@ class GEXDivergence(BaseStrategy):
         """Get the best available price rolling window."""
         for key in (KEY_PRICE_5M, KEY_PRICE_30M):
             rw = rolling_data.get(key)
-            if rw is not None and rw.count >= MIN_DATA_POINTS:
+            if rw is not None and rw.count >= self._params.get('min_data_points', DEFAULT_MIN_DATA_POINTS):
                 return rw
         return None
 
