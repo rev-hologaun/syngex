@@ -160,3 +160,45 @@ Port 8211 is in use by another program. Either identify and stop that program, o
 192.168.50.147 - - [19/May/2026 03:55:27] "GET /socket.io/?EIO=4&transport=polling&t=Pu_u5Dn HTTP/1.1" 200 -
 192.168.50.147 - - [19/May/2026 03:55:27] "POST /socket.io/?EIO=4&transport=polling&t=Pu_u5D_&sid=ZN0Cq-j_kv8LTweFAAAA HTTP/1.1" 200 -
 192.168.50.147 - - [19/May/2026 03:55:27] "GET /socket.io/?EIO=4&transport=polling&t=Pu_u5E0&sid=ZN0Cq-j_kv8LTweFAAAA HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8201
+ * Running on http://192.168.50.97:8201
+[33mPress CTRL+C to quit[0m
+192.168.50.147 - - [19/May/2026 04:40:03] "GET /socket.io/?EIO=4&transport=polling&t=Pv02IYS HTTP/1.1" 200 -
+192.168.50.147 - - [19/May/2026 04:40:03] "POST /socket.io/?EIO=4&transport=polling&t=Pv02IYg&sid=aAXzVLdi7GXG01p_AAAA HTTP/1.1" 200 -
+192.168.50.147 - - [19/May/2026 04:40:03] "GET /socket.io/?EIO=4&transport=polling&t=Pv02IYh&sid=aAXzVLdi7GXG01p_AAAA HTTP/1.1" 200 -
+192.168.50.147 - - [19/May/2026 04:40:03] "GET /socket.io/?EIO=4&transport=polling&t=Pv02IYl&sid=aAXzVLdi7GXG01p_AAAA HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8211
+ * Running on http://192.168.50.97:8211
+[33mPress CTRL+C to quit[0m
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8221
+ * Running on http://192.168.50.97:8221
+[33mPress CTRL+C to quit[0m
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8261
+ * Running on http://192.168.50.97:8261
+[33mPress CTRL+C to quit[0m
+192.168.50.147 - - [19/May/2026 04:40:13] "GET /socket.io/?EIO=4&transport=polling&t=Pv02K-e HTTP/1.1" 200 -
+192.168.50.147 - - [19/May/2026 04:40:13] "GET /socket.io/?EIO=4&transport=polling&t=Pv02K-e HTTP/1.1" 200 -
+192.168.50.147 - - [19/May/2026 04:40:13] "GET /socket.io/?EIO=4&transport=polling&t=Pv02K-e HTTP/1.1" 200 -
+192.168.50.147 - - [19/May/2026 04:40:13] "POST /socket.io/?EIO=4&transport=polling&t=Pv02K-t&sid=hSz51BmxGazM202gAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [19/May/2026 04:40:13] "POST /socket.io/?EIO=4&transport=polling&t=Pv02K-t&sid=KjuZt9nvHAxCwRObAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [19/May/2026 04:40:13] "GET /socket.io/?EIO=4&transport=polling&t=Pv02K-t.0&sid=hSz51BmxGazM202gAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [19/May/2026 04:40:13] "GET /socket.io/?EIO=4&transport=polling&t=Pv02K-t.0&sid=KjuZt9nvHAxCwRObAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [19/May/2026 04:40:13] "POST /socket.io/?EIO=4&transport=polling&t=Pv02K-t&sid=SihUAQChs2lZ8TOyAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [19/May/2026 04:40:13] "GET /socket.io/?EIO=4&transport=polling&t=Pv02K-t.0&sid=SihUAQChs2lZ8TOyAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [19/May/2026 04:40:13] "GET /socket.io/?EIO=4&transport=polling&t=Pv02K--&sid=SihUAQChs2lZ8TOyAAAA HTTP/1.1" 200 -
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8241
+ * Running on http://192.168.50.97:8241
+[33mPress CTRL+C to quit[0m
+192.168.50.147 - - [19/May/2026 04:40:14] "GET /socket.io/?EIO=4&transport=polling&t=Pv02LEI HTTP/1.1" 200 -
+192.168.50.147 - - [19/May/2026 04:40:14] "POST /socket.io/?EIO=4&transport=polling&t=Pv02LEV&sid=vnwhizbHM7z6WonUAAAA HTTP/1.1" 200 -
+192.168.50.147 - - [19/May/2026 04:40:14] "GET /socket.io/?EIO=4&transport=polling&t=Pv02LEW&sid=vnwhizbHM7z6WonUAAAA HTTP/1.1" 200 -
