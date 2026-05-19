@@ -97,6 +97,7 @@ class SyngexOrchestrator:
         self._rolling_data: Dict[str, RollingWindow] = {}
         self._running = False
         self._profile_timer: float = 0.0
+        self._strategy_timer: float = 0.0
         self._signal_timer: float = 0.0
         self._state_export_timer: float = 0.0
 
@@ -326,6 +327,7 @@ class SyngexOrchestrator:
 
         self._running = True
         self._profile_timer = time.monotonic()
+        self._strategy_timer = time.monotonic()
         self._state_export_timer = time.monotonic()
 
         # Start strategy engine
@@ -389,10 +391,11 @@ class SyngexOrchestrator:
                     self._signal_timer = now
 
                 # Strategy evaluation (every ~1s) - using new engine
-                if now - self._profile_timer >= 1.0:
+                if now - self._strategy_timer >= 1.0:
+                    self._logger.debug("[STRATEGY EVAL] Calling evaluate_strategies()...")
                     if self._strategy_engine_eval:
                         self._strategy_engine_eval.evaluate_strategies(self)
-                    self._profile_timer = now
+                    self._strategy_timer = now
 
                 # Fail-fast: option chain critical error
                 if self._client._option_chain_failed:
