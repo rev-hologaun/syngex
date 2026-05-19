@@ -18,7 +18,7 @@ from services.heatmap_service import HeatmapService
 from services.state_exporter import StateExporter
 
 
-# Import all components (kept from main.py for Phase 1)
+# Import all components
 from ingestor.tradestation_client import TradeStationClient
 from engine.gex_calculator import GEXCalculator
 from engine.dashboard import SyngexDashboard
@@ -56,6 +56,9 @@ from strategies.full_data import (
     ExtrinsicIntrinsicFlow,
 )
 from strategies.signal_tracker import SignalTracker
+
+# Import new engines (Phase 2)
+from core.strategy_engine import StrategyEvaluationEngine
 
 from config.logging_config import setup_logging, log_with_correlation
 
@@ -114,6 +117,9 @@ class SyngexOrchestrator:
         self._dashboard_service: DashboardService | None = None
         self._heatmap_service: HeatmapService | None = None
         self._state_exporter: StateExporter | None = None
+
+        # Phase 2 Engines
+        self._strategy_engine_eval: StrategyEvaluationEngine | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -271,6 +277,17 @@ class SyngexOrchestrator:
             symbol=self.symbol,
             logger=self._logger,
             correlation_id=self._correlation_id,
+            strategy_engine_eval=self._strategy_engine_eval,
+        )
+
+        # Phase 2: Create Strategy Evaluation Engine
+        self._strategy_engine_eval = StrategyEvaluationEngine(
+            gex_calculator=self._calculator,
+            strategy_engine=self._strategy_engine,
+            signal_tracker=self._signal_tracker,
+            gamma_filter=self._gamma_filter,
+            logger=self._logger,
+            correlation_id=self._correlation_id,
         )
 
         log_with_correlation(
@@ -328,9 +345,10 @@ class SyngexOrchestrator:
             while self._running:
                 now = time.monotonic()
 
-                # Report Gamma Profile at intervals
+                # Report Gamma Profile at intervals (using new engine)
                 if now - self._profile_timer >= self.PROFILE_INTERVAL:
-                    self._report_profile()
+                    if self._strategy_engine_eval:
+                        self._strategy_engine_eval.report_profile(self._calculator, self.symbol)
                     self._profile_timer = now
 
                 # Export GEX state to shared file for Streamlit dashboard
@@ -357,9 +375,11 @@ class SyngexOrchestrator:
                                 )
                     self._signal_timer = now
 
-                # Strategy evaluation (every ~1s)
+                # Strategy evaluation (every ~1s) - using new engine
                 if now - self._profile_timer >= 1.0:
-                    self._evaluate_strategies()
+                    if self._strategy_engine_eval:
+                        self._strategy_engine_eval.evaluate_strategies(self)
+                    self._profile_timer = now
 
                 # Fail-fast: option chain critical error
                 if self._client._option_chain_failed:
@@ -801,112 +821,3 @@ class SyngexOrchestrator:
                 correlation_id=self._correlation_id,
                 error=str(exc)
             )
-
-    def _evaluate_strategies(self) -> None:
-        """Run strategy evaluation with current market state."""
-        assert self._calculator is not None
-        assert self._strategy_engine is not None
-        assert self._gamma_filter is not None
-
-        summary = self._calculator.get_summary()
-        net_gamma = summary["net_gamma"]
-        flip = self._calculator.get_gamma_flip()
-        price = summary["underlying_price"]
-
-        # Update regime filter
-        self._gamma_filter.update_regime(net_gamma, flip, price)
-
-        # Build data snapshot for strategies
-        data = {
-            "underlying_price": price,
-            "symbol": self.symbol,
-            "gex_calculator": self._calculator,
-            "rolling_data": self._rolling_data,
-            "timestamp": time.time(),
-            "regime": self._gamma_filter.regime,
-            "net_gamma": net_gamma,
-            "gamma_flip": flip,
-            "greeks_summary": self._calculator.get_greeks_summary(),
-        }
-
-        # Inject per-strategy config params into data dict
-        # Strategies can read params from data["params"][strategy_id] in evaluate()
-        strategy_params: Dict[str, Dict[str, Any]] = {}
-        for layer in ["layer1", "layer2", "layer3", "full_data"]:
-            layer_config = self._strategy_config.get(layer, {})
-            for strat_name, strat_cfg in layer_config.items():
-                if strat_cfg.get("enabled", True):
-                    params = strat_cfg.get("params", {})
-                    strategy_params[strat_name] = params
-        data["params"] = strategy_params
-
-        # Run evaluation
-        signals = self._strategy_engine.process(data)
-
-        if signals:
-            # Track new signals for outcome resolution
-            if self._signal_tracker:
-                for s in signals:
-                    self._signal_tracker.track(s.to_dict())
-
-            for s in signals:
-                log_with_correlation(
-                    self._logger, logging.INFO,
-                    "SIGNAL",
-                    correlation_id=self._correlation_id,
-                    strategy_id=s.strategy_id,
-                    direction=s.direction.value,
-                    confidence=s.confidence,
-                    reason=s.reason
-                )
-
-    def _report_profile(self) -> None:
-        """Log the current Gamma Profile — the evolving state."""
-        assert self._calculator is not None
-
-        summary = self._calculator.get_summary()
-        profile = self._calculator.get_gamma_profile()
-
-        net = summary["net_gamma"]
-        price = summary["underlying_price"]
-        strikes = summary["active_strikes"]
-
-        # Format: one line per top-level metric
-        self._logger.info(
-            "GAMMA_PROFILE  |  %s  |  Underlying: $%.2f  |  "
-            "Net Gamma: %+.2f  |  Strikes: %d  |  Msgs: %d",
-            self.symbol,
-            price,
-            net,
-            strikes,
-            summary["total_messages"],
-        )
-
-        # Gamma Flip point
-        flip = self._calculator.get_gamma_flip()
-        if flip is not None:
-            self._logger.info("  GAMMA_FLIP:  Strike $%.1f (cumulative gamma turns negative below this)", flip)
-
-        # Gamma Walls
-        walls = self._calculator.get_gamma_walls(threshold=500000)
-        if walls:
-            wall_parts = []
-            for w in walls[:3]:
-                sign = "+" if w["gex"] > 0 else "-"
-                wall_parts.append(f"${w['strike']:.0f} ({w['side']}) {sign}${abs(w['gex']):,.0f}")
-            self._logger.info("  GAMMA_WALLS:  %s", "  |  ".join(wall_parts))
-
-        # Top 5 strikes by absolute Net Gamma
-        top = sorted(
-            profile["strikes"].items(),
-            key=lambda x: abs(x[1]["net_gamma"]),
-            reverse=True,
-        )[:5]
-
-        if top:
-            parts = []
-            for strike, bucket in top:
-                ng = bucket["net_gamma"]
-                sign = "+" if ng >= 0 else "-"
-                parts.append(f"  K{strike:.1f}: {sign}{abs(ng):,.2f}")
-            self._logger.info("  TOP_STRIKES:  %s", "  |  ".join(parts))

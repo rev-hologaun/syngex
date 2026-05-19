@@ -20,12 +20,14 @@ class StateExporter:
         symbol: str,
         logger: Any,
         correlation_id: str,
+        strategy_engine_eval: Any = None,
     ) -> None:
         self._data_dir = data_dir
         self._calculator = calculator_ref
         self._strategy_engine = strategy_engine_ref
         self._signal_tracker = signal_tracker_ref
         self._gamma_filter = gamma_filter_ref
+        self._strategy_engine_eval = strategy_engine_eval
         self.symbol = symbol
         self._logger = logger
         self._correlation_id = correlation_id
@@ -53,9 +55,13 @@ class StateExporter:
         if self._strategy_engine:
             export["strategy_engine"] = self._strategy_engine.get_status()
             # Per-strategy health data for heatmap
-            export["strategy_health"] = self._build_strategy_health()
-            # Per-strategy last trigger for execution card
-            export["last_trigger"] = self._build_last_trigger()
+            if self._strategy_engine_eval:
+                export["strategy_health"] = self._strategy_engine_eval.build_strategy_health(self)
+                export["last_trigger"] = self._strategy_engine_eval.build_last_trigger(self._signal_tracker)
+            else:
+                # Fallback to old methods if new engine not available
+                export["strategy_health"] = self._build_strategy_health()
+                export["last_trigger"] = self._build_last_trigger()
             # Micro-signal confidence overlay for dashboard
             recent = self._strategy_engine.get_recent_signals(20)
             micro_signals: dict[str, dict[str, Any]] = {}
