@@ -52,12 +52,27 @@ logger = logging.getLogger("Syngex.Strategies.ConfluenceReversal")
 # Constants
 # ---------------------------------------------------------------------------
 
-CONFLUENCE_DISTANCE_PCT = 0.003  # 0.3% — max distance for confluence
+CONFLUENCE_DISTANCE_PCT = 0.005  # 0.5% — max distance for confluence
 MIN_STRUCTURAL_SIGNALS = 1        # Wall-level confluence alone is valid
-MAX_CONFIDENCE_BASE = 0.6         # Base confidence for score 3
-MIN_CONFIDENCE = 0.65             # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.10             # Minimum confidence to emit signal
 STOP_PCT = 0.008                  # 0.8% stop
 TARGET_RISK_MULT = 2.0            # 2× risk for target
+
+# Confluence Velocity (Phase 1)
+VELOCITY_MIN_ZSCORE = 0.5         # Minimum |z-score| for approach velocity
+VELOCITY_MIN_VOLUME_MULT = 1.05   # Volume must be >= 1.05x rolling average
+
+# IV-Skew Wall Quality (Phase 2)
+IV_WEIGHT_BASE = 1.0
+IV_WEIGHT_MAX = 1.5
+IV_WEIGHT_SKEW_THRESHOLD = 0.05
+
+# Liquidity Absorption (Phase 3)
+DEPTH_SPIKE_THRESHOLD = 1.3       # Current depth >= 1.3x rolling average
+
+# Regime-Adaptive Stops (Phase 4)
+NEGATIVE_GAMMA_STOP_MULT = 1.5    # Wider stops in negative gamma (more noise)
+POSITIVE_GAMMA_STOP_MULT = 0.75   # Tighter stops in positive gamma (cleaner)
 
 # Structural signals (independent sources of truth)
 # Only wall, flip, and VWAP count as structural — rolling extremes are technical, not structural
@@ -219,7 +234,7 @@ class ConfluenceReversal(BaseStrategy):
 
             # Check if VWAP is near (independent structural signal)
             vw = self._get_price_window(rolling_data)
-            if vw is not None and vw.count >= 10 and vw.mean is not None:
+            if vw is not None and vw.count >= 5 and vw.mean is not None:
                 vw_distance = abs(vw.mean - wall["strike"]) / vw.mean
                 if vw_distance <= CONFLUENCE_DISTANCE_PCT:
                     structural_count += 1
@@ -233,7 +248,7 @@ class ConfluenceReversal(BaseStrategy):
 
         # Also check VWAP as standalone confluence level
         vw = self._get_price_window(rolling_data)
-        if vw is not None and vw.count >= 10:
+        if vw is not None and vw.count >= 5:
             mean = vw.mean
             if mean is not None and mean > 0:
                 vw_distance = abs(mean - price) / price
