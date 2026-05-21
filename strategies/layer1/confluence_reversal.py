@@ -2,7 +2,7 @@
 strategies/layer1/confluence_reversal.py — Confluence Reversal
 
 When technical support/resistance aligns with a Gamma Wall or Flip point
-within a tight distance (0.3%), that's a double-stacked level with high
+within a tight distance (1.5%), that's a double-stacked level with high
 reversal probability.
 
 Concept:
@@ -12,8 +12,8 @@ Concept:
 
 Scoring:
     - Technical level (swing high/low, VWAP) near price: +1
-    - Gamma wall within 0.3% of price: +1
-    - Gamma flip within 0.3% of price: +1
+    - Gamma wall within 1.5% of price: +1
+    - Gamma flip within 1.5% of price: +1
 
     Score 3 = max conviction (technical + wall + flip)
     Score 2 = moderate conviction (any two)
@@ -57,7 +57,7 @@ logger = logging.getLogger("Syngex.Strategies.ConfluenceReversal")
 # Constants
 # ---------------------------------------------------------------------------
 
-CONFLUENCE_DISTANCE_PCT = 0.003  # 0.3% — max distance for confluence
+CONFLUENCE_DISTANCE_PCT = 0.015  # 1.5% — max distance for confluence
 MIN_STRUCTURAL_SIGNALS = 1        # Wall-level confluence alone is valid
 MIN_CONFIDENCE = 0.15             # Minimum confidence to emit signal
 STOP_PCT = 0.008                  # 0.8% stop
@@ -65,7 +65,7 @@ TARGET_RISK_MULT = 2.0            # 2× risk for target
 
 # Confluence Velocity (Phase 1)
 VELOCITY_MIN_ZSCORE = 1.0         # Minimum |z-score| for approach velocity
-VELOCITY_MIN_VOLUME_MULT = 1.2    # Volume must be >= 1.2x rolling average
+VELOCITY_MIN_VOLUME_MULT = 1.05   # Volume must be >= 1.05x rolling average
 
 # IV-Skew Wall Quality (Phase 2)
 IV_WEIGHT_BASE = 1.0
@@ -73,7 +73,7 @@ IV_WEIGHT_MAX = 1.5
 IV_WEIGHT_SKEW_THRESHOLD = 0.05
 
 # Liquidity Absorption (Phase 3)
-DEPTH_SPIKE_THRESHOLD = 1.5       # Current depth >= 1.5x rolling average
+DEPTH_SPIKE_THRESHOLD = 1.2       # Current depth >= 1.2x rolling average
 
 # Regime-Adaptive Stops (Phase 4)
 NEGATIVE_GAMMA_STOP_MULT = 1.5    # Wider stops in negative gamma (more noise)

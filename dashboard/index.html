@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Syngex Live Metrics Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #111;
+            color: #eee;
+            font-family: 'JetBrains Mono', monospace;
+            min-height: 100vh;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 16px;
+            padding: 20px;
+        }
+
+        .tile {
+            border: 2px solid #444;
+            border-radius: 8px;
+            padding: 12px;
+        }
+
+        .tile.live {
+            border-color: #22c55e;
+            box-shadow: 0 0 10px #22c55e55;
+        }
+
+        .tile.stale {
+            border-color: #ef4444;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .line {
+            padding: 4px 0;
+            border-bottom: 1px solid #222;
+        }
+
+        .conf-90 { color: #22c55e; }
+        .conf-70 { color: #eab308; }
+        .conf-50 { color: #f59e0b; }
+        .conf-0 { color: #ef4444; }
+
+        h1 {
+            padding: 20px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>Syngex Live Metrics Dashboard</h1>
+    <div id="grid" class="grid"></div>
+    <script>
+        // WebSocket connection
+        const ws = new WebSocket('ws://localhost:8000/ws');
+
+        // Store strategies state
+        const strategies = {};
+
+        ws.onopen = () => {
+            console.log('Connected to dashboard');
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === 'init') {
+                renderAll(data);
+            } else if (data.type === 'update') {
+                renderTile(data);
+            }
+        };
+
+        ws.onclose = () => {
+            console.log('Disconnected, reconnecting...');
+            setTimeout(() => {
+                location.reload();
+            }, 3000);
+        };
+
+        // Helper: format timestamp to HH:MM:SS.mmm
+        function formatTime(timestamp) {
+            const date = new Date(timestamp);
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const seconds = String(date.getSeconds()).padStart(2, '0');
+            const ms = String(date.getMilliseconds()).padStart(3, '0');
+            return `${hours}:${minutes}:${seconds}.${ms}`;
+        }
+
+        // Render a single strategy tile
+        function renderTile({ strategy, lines, timestamp, status = "LIVE" }) {
+            const grid = document.getElementById('grid');
+            
+            // Calculate max confidence from lines
+            let maxConfidence = 0;
+            if (lines && lines.length > 0) {
+                maxConfidence = Math.max(...lines.map(line => line.confidence || 0));
+            }
+
+            // Format timestamp
+            const timeStr = formatTime(timestamp);
+
+            // Determine confidence color class
+            let confClass = 'conf-0';
+            if (maxConfidence >= 90) confClass = 'conf-90';
+            else if (maxConfidence >= 70) confClass = 'conf-70';
+            else if (maxConfidence >= 50) confClass = 'conf-50';
+
+            // Build tile HTML
+            let html = `
+                <div class="header">
+                    <strong>${strategy.toUpperCase()}</strong>
+                    <span>[${status}] [conf: ${maxConfidence}%]</span>
+                </div>
+            `;
+
+            // Add lines
+            if (lines && lines.length > 0) {
+                html += '<div class="lines">';
+                lines.forEach(line => {
+                    const lineTime = line.timestamp ? formatTime(line.timestamp) : '';
+                    const lineConfClass = line.confidence >= 90 ? 'conf-90' : 
+                                          line.confidence >= 70 ? 'conf-70' : 
+                                          line.confidence >= 50 ? 'conf-50' : 'conf-0';
+                    html += `
+                        <div class="line">
+                            <span>[${lineTime}] ${line.name}: ${line.value} | confidence ${line.confidence}%</span>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+            }
+
+            // Add footer
+            html += `<div class="footer" style="margin-top: 8px; font-size: 0.8em; color: #666;">Last update: ${timeStr}</div>`;
+
+            // Create or update tile
+            const tileId = `tile-${strategy}`;
+            let tile = document.getElementById(tileId);
+            
+            if (tile) {
+                tile.innerHTML = html;
+                tile.className = `tile ${status.toLowerCase()}`;
+            } else {
+                tile = document.createElement('div');
+                tile.id = tileId;
+                tile.className = `tile ${status.toLowerCase()} ${confClass}`;
+                tile.innerHTML = html;
+                grid.appendChild(tile);
+            }
+        }
+
+        // Render all strategies
+        function renderAll(data) {
+            const grid = document.getElementById('grid');
+            grid.innerHTML = '';
+            
+            Object.entries(data).forEach(([strategyName, strategyData]) => {
+                renderTile({
+                    strategy: strategyName,
+                    lines: strategyData.lines,
+                    timestamp: strategyData.timestamp,
+                    status: strategyData.status
+                });
+            });
+        }
+    </script>
+</body>
+</html>
