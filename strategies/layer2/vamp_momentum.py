@@ -11,18 +11,17 @@ LONG: Δ_VAMP > +threshold AND ROC(VAMP) > 0
 SHORT: Δ_VAMP < -threshold AND ROC(VAMP) < 0
 
 Hard gates (all must pass):
-    Gate A: Avg participants over top 10 >= min_avg_participants
-    Gate B: Σ size(top 10) > MA(total depth, 60s) × 1.2
-    Gate C: Current spread < MA(spread, 5m)
+    Gate A: Avg participants >= min_avg_participants (default 1.5)
+    Gate B: Σ size(top 10) > MA(total depth, 60s) × 1.05
 
-Confidence model (7 components):
+Confidence model (5 components, simple average):
     1. VAMP deviation magnitude     (0.0–0.25)
     2. VAMP ROC strength            (0.0–0.20)
     3. Participant conviction       (0.0–0.15)
     4. Liquidity density            (0.0–0.15)
     5. Spread stability             (0.0–0.10)
-    6. GEX regime alignment         (0.0–0.10)
-    7. Depth level quality           (0.0–0.05)
+
+MIN_CONFIDENCE = 0.20
 """
 
 from __future__ import annotations
@@ -44,7 +43,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.VampMomentum")
 
-MIN_CONFIDENCE = 0.0
+MIN_CONFIDENCE = 0.20
 
 
 class VampMomentum(BaseStrategy):
@@ -144,7 +143,7 @@ class VampMomentum(BaseStrategy):
         gate_a = avg_participants >= min_avg_participants
 
         # Gate B: Liquidity density
-        liquidity_density_min_mult = params.get("liquidity_density_min_mult", 1.2)
+        liquidity_density_min_mult = params.get("liquidity_density_min_mult", 1.05)
         depth_ma_window = params.get("depth_ma_window_seconds", 60)
         gate_b = True
         if depth_density_history and depth_density_history.count > 0:
@@ -152,16 +151,7 @@ class VampMomentum(BaseStrategy):
             if ma_depth > 0:
                 gate_b = current_total_size > ma_depth * liquidity_density_min_mult
 
-        # Gate C: Spread stability
-        spread_stability_ma_seconds = params.get("spread_stability_ma_seconds", 300)
-        gate_c = True
-        spread_ma_window = rolling_data.get(KEY_DEPTH_SPREAD_5M)
-        if spread_ma_window and spread_ma_window.count > 0:
-            ma_spread = spread_ma_window.mean or 0
-            if ma_spread > 0:
-                gate_c = current_spread < ma_spread
-
-        all_gates_pass = gate_a and gate_b and gate_c
+        all_gates_pass = gate_a and gate_b
         if not all_gates_pass:
             return []
 
@@ -234,7 +224,6 @@ class VampMomentum(BaseStrategy):
                 "gates": {
                     "A_participants": gate_a,
                     "B_liquidity_density": gate_b,
-                    "C_spread_stability": gate_c,
                 },
                 "bid_levels_count": len(bid_levels),
                 "ask_levels_count": len(ask_levels),
