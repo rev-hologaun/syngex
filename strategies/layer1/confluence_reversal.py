@@ -59,13 +59,13 @@ logger = logging.getLogger("Syngex.Strategies.ConfluenceReversal")
 
 CONFLUENCE_DISTANCE_PCT = 0.015  # 1.5% — max distance for confluence
 MIN_STRUCTURAL_SIGNALS = 1        # Wall-level confluence alone is valid
-MIN_CONFIDENCE = 0.15             # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.20             # Minimum confidence to emit signal
 STOP_PCT = 0.008                  # 0.8% stop
 TARGET_RISK_MULT = 2.0            # 2× risk for target
 
 # Confluence Velocity (Phase 1)
 VELOCITY_MIN_ZSCORE = 1.0         # Minimum |z-score| for approach velocity
-VELOCITY_MIN_VOLUME_MULT = 1.05   # Volume must be >= 1.05x rolling average
+VELOCITY_MIN_VOLUME_MULT = 1.0    # Volume must be >= 1.0x rolling average
 
 # IV-Skew Wall Quality (Phase 2)
 IV_WEIGHT_BASE = 1.0
@@ -114,6 +114,10 @@ class ConfluenceReversal(BaseStrategy):
         # Global volume filter — skip if volume doesn't support the signal
         vol_check = VolumeFilter.evaluate(rolling_data, MIN_CONFIDENCE)
         if not vol_check["recommended"]:
+            logger.warning(
+                "Volume filter not recommended: ratio=%.3f status=%s",
+                vol_check.get("volume_ratio", 0), vol_check.get("status", "unknown"),
+            )
             return []
 
         regime = data.get("regime", "")
@@ -158,6 +162,12 @@ class ConfluenceReversal(BaseStrategy):
                 if sig:
                     signals.append(sig)
 
+        # Summary log
+        logger.debug(
+            "Confluence evaluation: resistance_levels=%d support_levels=%d signals_emitted=%d",
+            len(resistance_levels), len(support_levels), len(signals),
+        )
+
         return signals
 
     # ------------------------------------------------------------------
@@ -191,6 +201,11 @@ class ConfluenceReversal(BaseStrategy):
         else:
             candidate_walls = [w for w in walls if w["strike"] < price]
 
+        logger.debug(
+            "Confluence check: %d candidate walls on %s side of price %.2f",
+            len(candidate_walls), side, price,
+        )
+
         # Get rolling window for technical signal check
         price_window = self._get_price_window(rolling_data)
         rw = price_window
@@ -211,6 +226,12 @@ class ConfluenceReversal(BaseStrategy):
             distance_pct = abs(wall["strike"] - price) / price
             if distance_pct > CONFLUENCE_DISTANCE_PCT:
                 continue  # Too far from price
+
+        if not levels:
+            logger.debug(
+                "No confluence levels found on %s: %d walls checked, 0 within %.1f%% of price %.2f",
+                side, len(candidate_walls), CONFLUENCE_DISTANCE_PCT * 100, price,
+            )
 
             # Count independent structural signals
             structural_count = 1  # Wall itself
@@ -318,14 +339,17 @@ class ConfluenceReversal(BaseStrategy):
         # === Velocity check (hard gate) ===
         velocity_score = self._check_confluence_velocity(price, rolling_data)
         if velocity_score is None:
+            logger.warning(
+                "SHORT gate: velocity check failed — price=%.2f, window_count=%d",
+                price, price_window.count if price_window else 0,
+            )
             return None
 
-        # === Liquidity absorption check (hard gate) ===
+        # === Liquidity absorption (soft factor) ===
         absorption_score = self._check_liquidity_absorption(
             wall_side, depth_snapshot, rolling_data
         )
-        if absorption_score is None:
-            return None
+        # absorption_score is now 0.0-1.0; 0.0 contributes nothing to confidence
 
         # === Regime-adaptive stop ===
         regime_mult = (
@@ -360,7 +384,14 @@ class ConfluenceReversal(BaseStrategy):
         confidence = min(1.0, max(0.0, confidence))
 
         if confidence < MIN_CONFIDENCE:
+            logger.warning(
+                "SHORT gate: confidence below threshold (%.3f < %.3f) — base=%.3f integrity=%.3f velocity=%.3f absorption=%.3f",
+                confidence, MIN_CONFIDENCE, norm_base, norm_integrity, norm_velocity, norm_absorption,
+            )
             return None
+
+        # Compute trend from price window
+        trend = price_window.trend if price_window else "UNKNOWN"
 
         return Signal(
             direction=Direction.SHORT,
@@ -413,14 +444,17 @@ class ConfluenceReversal(BaseStrategy):
         # === Velocity check (hard gate) ===
         velocity_score = self._check_confluence_velocity(price, rolling_data)
         if velocity_score is None:
+            logger.warning(
+                "LONG gate: velocity check failed — price=%.2f, window_count=%d",
+                price, price_window.count if price_window else 0,
+            )
             return None
 
-        # === Liquidity absorption check (hard gate) ===
+        # === Liquidity absorption (soft factor) ===
         absorption_score = self._check_liquidity_absorption(
             wall_side, depth_snapshot, rolling_data
         )
-        if absorption_score is None:
-            return None
+        # absorption_score is now 0.0-1.0; 0.0 contributes nothing to confidence
 
         # === Regime-adaptive stop ===
         regime_mult = (
@@ -455,7 +489,14 @@ class ConfluenceReversal(BaseStrategy):
         confidence = min(1.0, max(0.0, confidence))
 
         if confidence < MIN_CONFIDENCE:
+            logger.warning(
+                "LONG gate: confidence below threshold (%.3f < %.3f) — base=%.3f integrity=%.3f velocity=%.3f absorption=%.3f",
+                confidence, MIN_CONFIDENCE, norm_base, norm_integrity, norm_velocity, norm_absorption,
+            )
             return None
+
+        # Compute trend from price window
+        trend = price_window.trend if price_window else "UNKNOWN"
 
         return Signal(
             direction=Direction.LONG,
@@ -508,10 +549,16 @@ class ConfluenceReversal(BaseStrategy):
         """
         price_window = self._get_price_window(rolling_data)
         if price_window is None or price_window.count < 5:
+            logger.debug(
+                "Velocity: insufficient data — count=%d (need >=5)",
+                price_window.count if price_window else 0,
+            )
             return None
         if price_window.std is None or price_window.std <= 0:
+            logger.debug("Velocity: std dev is None or non-positive (%s)", price_window.std)
             return None
         if price_window.mean is None:
+            logger.debug("Velocity: mean is None")
             return None
 
         z_score = (price - price_window.mean) / price_window.std
@@ -520,6 +567,10 @@ class ConfluenceReversal(BaseStrategy):
         vol_mult = vol_filter.get("volume_multiplier", 1.0)
 
         if vol_mult < VELOCITY_MIN_VOLUME_MULT:
+            logger.debug(
+                "Velocity: volume multiplier too low (%.3f < %.3f)",
+                vol_mult, VELOCITY_MIN_VOLUME_MULT,
+            )
             return None
 
         velocity_score = min(1.0, abs(z_score) / 3.0)
@@ -573,14 +624,15 @@ class ConfluenceReversal(BaseStrategy):
         level_side: str,
         depth_snapshot: Optional[Dict[str, Any]],
         rolling_data: Dict[str, Any],
-    ) -> Optional[float]:
+    ) -> float:
         """Check if order book depth shows absorption at the level.
 
-        Returns absorption score 0.0-1.0, or None if insufficient depth data.
-        Hard gate: None means skip signal.
+        Returns absorption score 0.0-1.0.
+        Soft factor: returns 0.0 when insufficient depth data instead of killing the signal.
         """
         if not depth_snapshot:
-            return None
+            logger.debug("Absorption: depth_snapshot is missing — score=0.0")
+            return 0.0
 
         if level_side == "call":
             current_depth = depth_snapshot.get("total_ask_size", 0)
@@ -591,11 +643,16 @@ class ConfluenceReversal(BaseStrategy):
 
         depth_rw = rolling_data.get(key)
         if depth_rw is None or depth_rw.count < 10 or depth_rw.mean is None:
-            return None
+            logger.debug(
+                "Absorption: insufficient rolling depth — key=%s, count=%d, mean=%s — score=0.0",
+                key, depth_rw.count if depth_rw else 0,
+                depth_rw.mean if depth_rw else "None",
+            )
+            return 0.0
 
         avg_depth = depth_rw.mean
         if avg_depth <= 0:
-            return None
+            return 0.0
 
         spike_ratio = current_depth / avg_depth
 
@@ -604,7 +661,11 @@ class ConfluenceReversal(BaseStrategy):
         elif spike_ratio >= 1.0:
             return spike_ratio / DEPTH_SPIKE_THRESHOLD * 0.5
         else:
-            return None
+            logger.debug(
+                "Absorption: spike_ratio=%.2f < 1.0 — score=0.0",
+                spike_ratio,
+            )
+            return 0.0
 
     # ------------------------------------------------------------------
     # Helpers
