@@ -807,3 +807,18 @@ ByteDance's super agent harness uses an 18-middleware chain on its lead agent. E
 ---
 
 *Last updated: 2026-05-12 — 41 strategies across 7 heatmap rows. v1.95–v1.97 added 19 new strategies (exchange flow, depth, OB, participant, volatility surface, sentiment). Next: Collect 1 day of trading data and perform validation of all 41 strategies.*
+
+---
+
+### v4.005 Release (2026-05-22)
+
+Three heatmap strategies fixed from dead-to-firing:
+
+- **IV_GEX_DIV** — skew mismatch bug, cumulative gamma threshold, 3 relaxed params
+- **TAIL_RISK** — decoupling abs() fix, gamma double-push removed, 3 relaxed params  
+- **VAMP** — Gate B 1.2→1.05, Gate C removed, MIN_CONFIDENCE→0.20
+- **main.py** — NumParticipants → bid/ask avg participants (fixes VAMP Gate A + Whale tracker)
+
+See `RELEASE_v4.005.md` for full details.
+
+**Next investigation: PARTICIPANT_CONV** (`participant_diversity_conviction`)
