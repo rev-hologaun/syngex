@@ -45,6 +45,10 @@ logger = logging.getLogger("Syngex.Strategies.ObiAggressionFlow")
 
 MIN_CONFIDENCE = 0.0
 
+# Throttle info-level logging to once per N evaluation cycles
+_eval_counter = 0
+_EVAL_THROTTLE = 100
+
 
 class ObiAggressionFlow(BaseStrategy):
     """
@@ -87,6 +91,9 @@ class ObiAggressionFlow(BaseStrategy):
             return []
         current_af = af_window.values[-1]
 
+        global _eval_counter
+        _eval_counter += 1
+
         # --- 3. Master trigger: OBI × AF ---
         obi_threshold = params.get("obi_threshold", 0.75)
         af_threshold = params.get("af_threshold", 0.5)
@@ -107,6 +114,10 @@ class ObiAggressionFlow(BaseStrategy):
             direction = "SHORT"
 
         if direction is None:
+            logger.debug(
+                "OBI_AF master: OBI=%.3f AF=%.3f | no direction",
+                current_obi, current_af,
+            )
             return []
 
         # --- 4. Apply 3 HARD GATES ---
@@ -115,8 +126,8 @@ class ObiAggressionFlow(BaseStrategy):
         )
 
         if not (gate_a and gate_b and gate_c):
-            logger.debug(
-                "OBI AF gate fail: direction=%s gates=[A=%s B=%s C=%s]",
+            logger.warning(
+                "OBI_AF gate failed: direction=%s gates=[A=%s B=%s C=%s]",
                 direction, gate_a, gate_b, gate_c,
             )
             return []
@@ -132,6 +143,10 @@ class ObiAggressionFlow(BaseStrategy):
         confidence = max(min_confidence, confidence)
 
         if confidence < min_confidence:
+            logger.warning(
+                "OBI_AF confidence below threshold: %.2f < %.2f",
+                confidence, min_confidence,
+            )
             return []
 
         # --- 6. Build signal with entry/stop/target ---
@@ -149,6 +164,13 @@ class ObiAggressionFlow(BaseStrategy):
             target = entry - (stop_distance * target_risk_mult)
 
         direction_enum = Direction.LONG if direction == "LONG" else Direction.SHORT
+
+        if _eval_counter % _EVAL_THROTTLE == 0:
+            logger.info(
+                "OBI_AF SIGNAL: %s confidence=%.2f direction=%s OBI=%.3f AF=%.3f",
+                "LONG" if direction == "LONG" else "SHORT", confidence,
+                direction, current_obi, current_af,
+            )
 
         return [Signal(
             direction=direction_enum,
@@ -207,9 +229,20 @@ class ObiAggressionFlow(BaseStrategy):
             if avg_trade_size > 0:
                 # No trade data yet → skip gate (treat as pass)
                 if latest_trade_size == 0:
+                    logger.debug(
+                        "OBI_AF Gate A: last_size=0 (no trade data yet), skipping",
+                    )
                     gate_a = True
                 else:
+                    trade_size_ratio = latest_trade_size / avg_trade_size
                     gate_a = latest_trade_size > avg_trade_size * trade_size_mult
+                    if _eval_counter % _EVAL_THROTTLE == 0:
+                        logger.info(
+                            "OBI_AF Gate A (Volume Spike): last_size=%d avg_trade_size=%.1f ratio=%.2f threshold=%.1f | %s",
+                            latest_trade_size, avg_trade_size,
+                            trade_size_ratio, trade_size_mult,
+                            "PASS" if gate_a else "FAIL",
+                        )
 
         # --- Gate B: Participant diversity ---
         min_avg_participants = params.get("min_avg_participants", 1.0)
@@ -220,8 +253,17 @@ class ObiAggressionFlow(BaseStrategy):
         if bid_avg > 0 or ask_avg > 0:
             avg_participants = (bid_avg + ask_avg) / 2
             gate_b = avg_participants >= min_avg_participants
+            if _eval_counter % _EVAL_THROTTLE == 0:
+                logger.info(
+                    "OBI_AF Gate B (Participant Diversity): bid_avg=%d ask_avg=%d avg_participants=%.1f min=%s | %s",
+                    bid_avg, ask_avg, avg_participants, min_avg_participants,
+                    "PASS" if gate_b else "FAIL",
+                )
         else:
             # No participant data yet → skip gate (treat as pass)
+            logger.debug(
+                "OBI_AF Gate B: both participant avgs=0 (no participant data yet), skipping",
+            )
             gate_b = True
 
         # --- Gate C: Spread stability ---
@@ -233,6 +275,13 @@ class ObiAggressionFlow(BaseStrategy):
             current_spread = depth_snapshot.get("spread", 0)
             if ma_spread > 0:
                 gate_c = current_spread < ma_spread * max_spread_mult
+                if _eval_counter % _EVAL_THROTTLE == 0:
+                    logger.info(
+                        "OBI_AF Gate C (Spread Stability): current_spread=%.4f ma_spread=%.4f ratio=%.2f max_mult=%s | %s",
+                        current_spread, ma_spread,
+                        current_spread / ma_spread if ma_spread > 0 else 0,
+                        max_spread_mult, "PASS" if gate_c else "FAIL",
+                    )
 
         return gate_a, gate_b, gate_c
 
@@ -301,4 +350,13 @@ class ObiAggressionFlow(BaseStrategy):
             c5 = normalize(avg_participants, 0.0, min_avg_participants * 2.0)
 
         confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
-        return min(1.0, max(0.0, confidence))
+        confidence = min(1.0, max(0.0, confidence))
+
+        global _eval_counter
+        if _eval_counter % _EVAL_THROTTLE == 0:
+            logger.info(
+                "OBI_AF confidence: c1(obi)=%.2f c2(af)=%.2f c3(confluence)=%.2f c4(volume)=%.2f c5(participants)=%.2f | final=%.2f",
+                c1, c2, c3, c4, c5, confidence,
+            )
+
+        return confidence
