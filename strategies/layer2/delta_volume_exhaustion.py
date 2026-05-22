@@ -72,8 +72,8 @@ MEAN_REVERSION_MULT = 1.0             # 1.0× distance — target is the rolling
 
 # --- v2 Exhaustion-Master params ---
 # Liquidity vacuum
-LIQUIDITY_VACUUM_RATIO_STABILITY = 0.15   # ratio must be within 15% of rolling mean
-LIQUIDITY_VACUUM_SPREAD_WIDEN_MULT = 1.2  # spread must be > 1.2× rolling mean
+LIQUIDITY_VACUUM_RATIO_STABILITY = 0.30   # ratio must be within 30% of rolling mean
+LIQUIDITY_VACUUM_SPREAD_WIDEN_MULT = 1.5  # spread must be > 1.5× rolling mean
 
 # IV acceleration
 IV_ACCEL_WINDOW = 5                         # window for IV ROC calculation
@@ -302,8 +302,8 @@ class DeltaVolumeExhaustion(BaseStrategy):
         Check for liquidity vacuum via depth snapshot analysis.
 
         Detects pre-reversal order book thinning:
-        1. Bid/ask ratio has stabilized (within 15% of rolling mean)
-        2. Spread has widened (> 1.2× rolling mean)
+        1. Bid/ask ratio has stabilized (within 30% of rolling mean)
+        2. Spread has widened (> 1.5× rolling mean)
 
         Both conditions must be met (hard gate).
 
@@ -338,7 +338,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
             depth_snapshot.get("spread", {}).get("current", 0)
         )
 
-        # Condition 1: Bid/ask ratio is within 15% of rolling mean ratio
+        # Condition 1: Bid/ask ratio is within 30% of rolling mean ratio
         if bid_mean and ask_mean and ask_mean > 0:
             mean_ratio = bid_mean / ask_mean
             if mean_ratio > 0:
@@ -350,7 +350,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
             # No rolling data — can't confirm stabilization
             return False, bid_ask_ratio, current_spread, mean_spread or 0.0
 
-        # Condition 2: Spread has widened > 1.2× rolling mean
+        # Condition 2: Spread has widened > 1.5× rolling mean
         if mean_spread and mean_spread > 0:
             spread_widened = (
                 current_spread > mean_spread * LIQUIDITY_VACUUM_SPREAD_WIDEN_MULT

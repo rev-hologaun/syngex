@@ -205,7 +205,11 @@ class ObiAggressionFlow(BaseStrategy):
             depth_snapshot = data.get("depth_snapshot", {})
             latest_trade_size = depth_snapshot.get("last_size", 0)
             if avg_trade_size > 0:
-                gate_a = latest_trade_size > avg_trade_size * trade_size_mult
+                # No trade data yet → skip gate (treat as pass)
+                if latest_trade_size == 0:
+                    gate_a = True
+                else:
+                    gate_a = latest_trade_size > avg_trade_size * trade_size_mult
 
         # --- Gate B: Participant diversity ---
         min_avg_participants = params.get("min_avg_participants", 1.0)
@@ -216,6 +220,9 @@ class ObiAggressionFlow(BaseStrategy):
         if bid_avg > 0 or ask_avg > 0:
             avg_participants = (bid_avg + ask_avg) / 2
             gate_b = avg_participants >= min_avg_participants
+        else:
+            # No participant data yet → skip gate (treat as pass)
+            gate_b = True
 
         # --- Gate C: Spread stability ---
         max_spread_mult = params.get("max_spread_multiplier", 1.5)
@@ -275,7 +282,11 @@ class ObiAggressionFlow(BaseStrategy):
             latest_trade_size = depth_snapshot.get("last_size", 0)
             if avg_trade_size > 0:
                 trade_size_ratio = latest_trade_size / avg_trade_size
-        c4 = normalize(trade_size_ratio, 0.0, trade_size_mult)
+        # No trade data yet → neutral score instead of 0.0
+        if latest_trade_size == 0:
+            c4 = 0.5
+        else:
+            c4 = normalize(trade_size_ratio, 0.0, trade_size_mult)
 
         # 5. Participant diversity: avg_participants from 0→min_avg_participants*2, higher = higher
         min_avg_participants = params.get("min_avg_participants", 1.0)
@@ -283,7 +294,11 @@ class ObiAggressionFlow(BaseStrategy):
         bid_avg = depth_snapshot.get("bid_avg_participants", 0)
         ask_avg = depth_snapshot.get("ask_avg_participants", 0)
         avg_participants = (bid_avg + ask_avg) / 2 if (bid_avg > 0 or ask_avg > 0) else 0
-        c5 = normalize(avg_participants, 0.0, min_avg_participants * 2.0)
+        # No participant data yet → neutral score instead of 0.0
+        if bid_avg == 0 and ask_avg == 0:
+            c5 = 0.5
+        else:
+            c5 = normalize(avg_participants, 0.0, min_avg_participants * 2.0)
 
         confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))

@@ -241,6 +241,9 @@ class DepthImbalanceMomentum(BaseStrategy):
             else:
                 # Heavy ask pressure — check ask participants
                 avg_participants = depth_snapshot.get("ask_avg_participants", 0)
+            # No participant data yet → pass gate (can't evaluate)
+            if avg_participants == 0:
+                return True
             return avg_participants >= min_avg
 
         # No depth snapshot data — pass gate (can't evaluate)
@@ -356,7 +359,11 @@ class DepthImbalanceMomentum(BaseStrategy):
         avg_participants = 0
         if depth_snapshot:
             avg_participants = depth_snapshot.get("bid_avg_participants", 0) if direction == "LONG" else depth_snapshot.get("ask_avg_participants", 0)
-        c3 = normalize(avg_participants, min_avg_participants, min_avg_participants * 2.0)
+        # No participant data yet → neutral score instead of 0.0
+        if avg_participants == 0:
+            c3 = 0.5
+        else:
+            c3 = normalize(avg_participants, min_avg_participants, min_avg_participants * 2.0)
 
         # 4. Volume confirmation: vol_ratio from 1.0→2.0, higher = higher
         volume_window = rolling_data.get(KEY_VOLUME_5M)

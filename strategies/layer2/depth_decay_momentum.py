@@ -141,12 +141,20 @@ class DepthDecayMomentum(BaseStrategy):
                 # Ask-side evaporation — check ask participants
                 ask_max = depth_snapshot.get("ask_max_participants", 0)
                 ask_avg = depth_snapshot.get("ask_avg_participants", 0)
-                gate_b = ask_max <= max_evap_participants or ask_avg <= max_evap_participants
+                # No participant data yet → pass gate (can't evaluate)
+                if ask_max == 0 and ask_avg == 0:
+                    gate_b = True
+                else:
+                    gate_b = ask_max <= max_evap_participants or ask_avg <= max_evap_participants
             else:
                 # Bid-side evaporation — check bid participants
                 bid_max = depth_snapshot.get("bid_max_participants", 0)
                 bid_avg = depth_snapshot.get("bid_avg_participants", 0)
-                gate_b = bid_max <= max_evap_participants or bid_avg <= max_evap_participants
+                # No participant data yet → pass gate (can't evaluate)
+                if bid_max == 0 and bid_avg == 0:
+                    gate_b = True
+                else:
+                    gate_b = bid_max <= max_evap_participants or bid_avg <= max_evap_participants
 
         if not gate_b:
             logger.debug(

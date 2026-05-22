@@ -317,6 +317,13 @@ class SyngexOrchestrator:
         self._heatmap_stderr: Any = None  # file handle for heatmap stderr
         self._state_export_timer: float = 0.0
 
+        # Depth snapshot participant/trade fields (explicit init, no getattr)
+        self._last_size: int = 0
+        self._bid_avg_participants: float = 0.0
+        self._ask_avg_participants: float = 0.0
+        self._bid_max_participants: float = 0.0
+        self._ask_max_participants: float = 0.0
+
         # Shared data file for Streamlit dashboard (symbol-specific)
         self._data_dir = Path(__file__).parent / "data"
         self._data_file = self._data_dir / f"gex_state_{self.symbol}.json"
@@ -2026,6 +2033,13 @@ class SyngexOrchestrator:
                 # participant_equilibrium = bid_avg_participants / ask_avg_participants
                 bid_avg_p = data.get("bid_avg_participants", 0)
                 ask_avg_p = data.get("ask_avg_participants", 0)
+                bid_max_p = data.get("bid_max_participants", 0)
+                ask_max_p = data.get("ask_max_participants", 0)
+                # Track as instance vars for depth snapshot
+                self._bid_avg_participants = bid_avg_p
+                self._ask_avg_participants = ask_avg_p
+                self._bid_max_participants = bid_max_p
+                self._ask_max_participants = ask_max_p
                 if ask_avg_p > 0:
                     participant_equil = bid_avg_p / ask_avg_p
                 else:
@@ -2384,6 +2398,9 @@ class SyngexOrchestrator:
                         last_size = int(last_size)
                     except (ValueError, TypeError):
                         last_size = 0
+
+                # Track last_size as instance var for depth snapshot
+                self._last_size = last_size
 
                 if last_size > 0:
                     if last >= ask and ask > 0:
@@ -2990,6 +3007,12 @@ class SyngexOrchestrator:
                     "mean": sum(rw.values) / len(rw.values) if rw.values else 0,
                     "count": rw.count,
                 }
+        # Non-rolling instance vars that strategies depend on
+        snap["last_size"] = self._last_size
+        snap["bid_avg_participants"] = self._bid_avg_participants
+        snap["ask_avg_participants"] = self._ask_avg_participants
+        snap["bid_max_participants"] = self._bid_max_participants
+        snap["ask_max_participants"] = self._ask_max_participants
         return snap
 
 
