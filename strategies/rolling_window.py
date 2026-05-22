@@ -45,7 +45,7 @@ class RollingWindow:
     _values: deque = field(default_factory=deque)
     _timestamps: deque = field(default_factory=deque)
     _trend: str = "FLAT"
-    _trend_z_threshold: float = 0.8       # z-score needed to ENTER a trend
+    _trend_z_threshold: float = 0.5       # z-score needed to ENTER a trend
     _trend_exit_threshold: float = 0.3    # z-score below which we EXIT
 
     # ------------------------------------------------------------------

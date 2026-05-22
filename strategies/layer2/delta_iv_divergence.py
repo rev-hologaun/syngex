@@ -49,13 +49,13 @@ logger = logging.getLogger("Syngex.Strategies.DeltaIVDivergence")
 MIN_DATA_POINTS = 3
 
 # Minimum divergence strength (combined z-score magnitude)
-MIN_DIVERSION_STRENGTH = 0.3
+MIN_DIVERSION_STRENGTH = 0.2
 
 # Stop distance
 STOP_PCT = 0.008  # 0.8%
 
 # Confidence threshold
-MIN_CONFIDENCE = 0.0
+MIN_CONFIDENCE = 0.20
 
 # Skew divergence threshold
 SK_DIV_THRESHOLD = 0.10
@@ -64,7 +64,7 @@ SK_DIV_THRESHOLD = 0.10
 DECOUPLE_HISTORY_WINDOW = 30
 
 # Decoupling correlation threshold
-DECOUPLE_THRESHOLD = 0.50
+DECOUPLE_THRESHOLD = 0.70
 
 # Gamma density decline threshold
 GAMMA_DECLINE_THRESHOLD = 0.70
@@ -397,7 +397,8 @@ class DeltaIVDivergence(BaseStrategy):
         mean_corr = statistics.mean(corr_vals[-(history + 1):-1]) if history > 0 else current_corr
 
         # Hard gate: current correlation < rolling mean × threshold
-        return current_corr < mean_corr * threshold
+        # Use abs() to handle negative mean_corr (Fix 1: negative mean bug)
+        return abs(current_corr) < abs(mean_corr) * threshold
 
     def _get_decoupling_coefficient(self, rolling_data: Dict[str, Any]) -> float:
         """Get the raw decoupling coefficient for metadata."""
@@ -446,13 +447,13 @@ class DeltaIVDivergence(BaseStrategy):
         if gamma_window is None:
             return False
 
-        gamma_window.push(gamma_density)
-
+        # Don't push here — main.py already pushes into this window.
+        # Pushing during evaluation causes double-push (Fix 2).
         if gamma_window.count < 3:
             return False
 
         # Current density vs rolling mean
-        current = gamma_density
+        current = gamma_window.latest or gamma_density
         mean_density = gamma_window.mean or 0.0
 
         if mean_density <= 0:
@@ -643,8 +644,15 @@ class DeltaIVDivergence(BaseStrategy):
         # 4. Divergence strength: divergence_strength from 0→2.0, higher = higher
         c4 = normalize(divergence_strength, 0.0, 2.0)
 
-        # 5. Net gamma: abs(net_gamma) from 0→5M, higher = higher
-        c5 = normalize(abs(net_gamma), 0.0, 5000000.0)
+        # 5. Net gamma: abs(net_gamma) from 0→500k, higher = higher
+        # Use greeks_summary if available for more accurate net gamma (Fix 7)
+        if greeks_summary:
+            net_gamma_from_summary = 0.0
+            for strike_data in greeks_summary.values():
+                net_gamma_from_summary += strike_data.get("net_gamma", 0.0)
+            c5 = normalize(abs(net_gamma_from_summary), 0.0, 500000.0)
+        else:
+            c5 = normalize(abs(net_gamma), 0.0, 500000.0)
 
         confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))
