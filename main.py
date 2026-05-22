@@ -2074,14 +2074,16 @@ class SyngexOrchestrator:
 
                     # ── VAMP Momentum: store top N levels + compute VAMP ──
                     N_TOP_LEVELS = 10
+                    bid_avg_p = data.get("bid_avg_participants", 0) or 0
+                    ask_avg_p = data.get("ask_avg_participants", 0) or 0
                     bid_levels_full = [
                         {"price": float(b.get("Price", 0)), "size": int(b.get("TotalSize", 0)),
-                         "participants": int(b.get("NumParticipants", 1))}
+                         "participants": bid_avg_p}
                         for b in bids[:N_TOP_LEVELS]
                     ]
                     ask_levels_full = [
                         {"price": float(a.get("Price", 0)), "size": int(a.get("TotalSize", 0)),
-                         "participants": int(a.get("NumParticipants", 1))}
+                         "participants": ask_avg_p}
                         for a in asks[:N_TOP_LEVELS]
                     ]
                     self._rolling_data[KEY_VAMP_LEVELS] = {
@@ -2293,20 +2295,16 @@ class SyngexOrchestrator:
                                     for b in top_bids
                                     if int(b.get("TotalSize", 0)) > 0
                                 ]
-                                bid_participants = [
-                                    int(b.get("NumParticipants", 0))
-                                    for b in top_bids
-                                ]
+                                bid_avg_p = data.get("bid_avg_participants", 0) or 0
+                                ask_avg_p = data.get("ask_avg_participants", 0) or 0
+                                bid_participants = [bid_avg_p] * len(top_bids)
 
                                 ask_sizes = [
                                     int(a.get("TotalSize", 0))
                                     for a in top_asks
                                     if int(a.get("TotalSize", 0)) > 0
                                 ]
-                                ask_participants = [
-                                    int(a.get("NumParticipants", 0))
-                                    for a in top_asks
-                                ]
+                                ask_participants = [ask_avg_p] * len(top_asks)
 
                                 if bid_sizes and ask_sizes:
                                     bid_biggest = max(bid_sizes)
