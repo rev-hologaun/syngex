@@ -63,7 +63,7 @@ PRICE_ABOVE_MEAN_CONFIDENCE = 0.55    # Price in upper half of 5m window
 MIN_DATA_POINTS = 3                   # Fewer points needed (was 5)
 
 # Minimum confidence threshold
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.0
 
 # Stop and target parameters
 STOP_BELOW_WALL_PCT = 0.008           # 0.8% below entry
@@ -132,6 +132,14 @@ class DeltaGammaSqueeze(BaseStrategy):
             if w["side"] == "put" and w["strike"] < underlying_price
         ]
 
+        # Extract depth snapshot for liquidity vacuum check
+        depth_snapshot = data.get("depth_snapshot")
+
+        logger.debug(
+            "Squeeze: %d call walls above, %d put walls below price %.2f",
+            len(call_walls_above), len(put_walls_below), underlying_price,
+        )
+
         # Check LONG setup (call wall above)
         if call_walls_above:
             call_walls_above.sort(
@@ -140,6 +148,7 @@ class DeltaGammaSqueeze(BaseStrategy):
             sig = self._evaluate_squeeze(
                 call_walls_above[0], underlying_price, gex_calc,
                 rolling_data, net_gamma, regime, "LONG", wall_delta,
+                depth_snapshot=depth_snapshot,
             )
             if sig:
                 signals.append(sig)
@@ -152,9 +161,16 @@ class DeltaGammaSqueeze(BaseStrategy):
             sig = self._evaluate_squeeze(
                 put_walls_below[0], underlying_price, gex_calc,
                 rolling_data, net_gamma, regime, "SHORT", wall_delta,
+                depth_snapshot=depth_snapshot,
             )
             if sig:
                 signals.append(sig)
+
+        # Summary log
+        logger.debug(
+            "Squeeze evaluation: %d call walls checked, %d put walls checked, signals_emitted=%d",
+            len(call_walls_above), len(put_walls_below), len(signals),
+        )
 
         return signals
 
@@ -168,6 +184,7 @@ class DeltaGammaSqueeze(BaseStrategy):
         regime: str,
         direction: str,  # "LONG" or "SHORT"
         wall_delta: float = 0.0,
+        depth_snapshot: Optional[Dict[str, Any]] = None,
     ) -> Optional[Signal]:
         """Evaluate a specific wall for squeeze setup."""
         wall_strike = wall["strike"]
@@ -177,58 +194,119 @@ class DeltaGammaSqueeze(BaseStrategy):
         if direction == "LONG":
             distance_pct = (wall_strike - price) / price
             if distance_pct > WALL_PROXIMITY_PCT:
-                logger.debug(
-                    "Squeeze: price %.2f too far from wall %.2f (dist=%.2f%%)",
-                    price, wall_strike, distance_pct * 100,
+                logger.warning(
+                    "Squeeze: price %.2f too far from call wall %.2f (dist=%.2f%% > %.1f%%)",
+                    price, wall_strike, distance_pct * 100, WALL_PROXIMITY_PCT * 100,
                 )
                 return None
             if distance_pct < 0:
-                # Price already above wall — squeeze may have already fired
+                logger.debug(
+                    "Squeeze: price %.2f already above call wall %.2f — no LONG squeeze",
+                    price, wall_strike,
+                )
                 return None
         else:  # SHORT
             distance_pct = (price - wall_strike) / price
             if distance_pct > WALL_PROXIMITY_PCT:
-                logger.debug(
-                    "Squeeze: price %.2f too far from wall %.2f (dist=%.2f%%)",
-                    price, wall_strike, distance_pct * 100,
+                logger.warning(
+                    "Squeeze: price %.2f too far from put wall %.2f (dist=%.2f%% > %.1f%%)",
+                    price, wall_strike, distance_pct * 100, WALL_PROXIMITY_PCT * 100,
                 )
                 return None
             if distance_pct < 0:
-                # Price already below wall — squeeze may have already fired
+                logger.debug(
+                    "Squeeze: price %.2f already below put wall %.2f — no SHORT squeeze",
+                    price, wall_strike,
+                )
                 return None
 
         # Delta acceleration — use wall_delta (net delta at nearest wall)
         accel_ratio = self._check_delta_acceleration(
             wall_delta, rolling_data, wall_strike,
         )
-        if accel_ratio is None or accel_ratio < DELTA_ACCEL_RATIO:
-            logger.debug(
-                "Squeeze: no delta acceleration at %.2f (ratio=%.2f)",
-                wall_strike, accel_ratio or 0,
+        if accel_ratio is None:
+            window = rolling_data.get(KEY_WALL_DELTA_5M)
+            cnt = window.count if window else 0
+            mean_val = window.mean if window else None
+            if window is None:
+                logger.warning(
+                    "Squeeze: wall_delta_5m window missing at %.2f",
+                    wall_strike,
+                )
+            elif cnt < MIN_DATA_POINTS:
+                logger.warning(
+                    "Squeeze: insufficient wall delta data at %.2f — count=%d (need >=%d)",
+                    wall_strike, cnt, MIN_DATA_POINTS,
+                )
+            elif mean_val is None:
+                logger.warning(
+                    "Squeeze: wall delta mean is None at %.2f — count=%d (data exists but mean failed)",
+                    wall_strike, cnt,
+                )
+            elif mean_val == 0:
+                logger.warning(
+                    "Squeeze: wall delta mean is 0 at %.2f — count=%d",
+                    wall_strike, cnt,
+                )
+            return None
+        if accel_ratio < DELTA_ACCEL_RATIO:
+            logger.warning(
+                "Squeeze: delta not accelerating at %.2f (ratio=%.2f < %.2f)",
+                wall_strike, accel_ratio, DELTA_ACCEL_RATIO,
             )
             return None
 
         # === v2: GEX acceleration hard gate ===
         gex_accel = self._check_gex_acceleration(rolling_data)
-        if gex_accel is None or gex_accel < GEX_ACCEL_MIN:
-            logger.debug(
-                "Squeeze v2: no GEX acceleration at %.2f (ratio=%.2f)",
-                wall_strike, gex_accel or 0,
+        if gex_accel is None:
+            window = rolling_data.get(KEY_TOTAL_GAMMA_5M)
+            cnt = window.count if window else 0
+            mean_val = window.mean if window else None
+            if window is None:
+                logger.warning(
+                    "Squeeze v2: total_gamma_5m window missing at %.2f",
+                    wall_strike,
+                )
+            elif cnt < MIN_DATA_POINTS:
+                logger.warning(
+                    "Squeeze v2: insufficient GEX data at %.2f — count=%d (need >=%d)",
+                    wall_strike, cnt, MIN_DATA_POINTS,
+                )
+            elif mean_val is None:
+                logger.warning(
+                    "Squeeze v2: GEX mean is None at %.2f — count=%d (data exists but mean failed)",
+                    wall_strike, cnt,
+                )
+            elif mean_val == 0:
+                logger.warning(
+                    "Squeeze v2: GEX mean is 0 at %.2f — count=%d",
+                    wall_strike, cnt,
+                )
+            return None
+        if gex_accel < GEX_ACCEL_MIN:
+            logger.warning(
+                "Squeeze v2: GEX not accelerating at %.2f (ratio=%.2f < %.2f)",
+                wall_strike, gex_accel, GEX_ACCEL_MIN,
             )
             return None
 
         # Volume spike and price momentum checks are direction-agnostic
         vol_spike = self._check_volume_spike(rolling_data)
         price_trend = self._check_price_momentum(rolling_data)
-
-        # === v2: Liquidity vacuum hard gate ===
-        depth_snapshot = data.get("depth_snapshot")
-        if not self._check_liquidity_vacuum(depth_snapshot, direction):
+        if not vol_spike:
+            window = rolling_data.get(KEY_VOLUME_5M)
             logger.debug(
-                "Squeeze v2: no liquidity vacuum for %s at %.2f",
-                direction, wall_strike,
+                "Squeeze: no volume spike for %s at %.2f (need >%.0f%% above avg) — trend=%s",
+                direction, wall_strike, VOLUME_SPIKE_RATIO * 100, price_trend,
             )
-            return None
+
+        # === v2: Liquidity vacuum soft factor ===
+        liquidity_vacuum_score = self._check_liquidity_vacuum(depth_snapshot, direction)
+        if liquidity_vacuum_score < 0.3:
+            logger.warning(
+                "Squeeze v2: weak liquidity vacuum for %s at %.2f (score=%.2f) — reduces confidence",
+                direction, wall_strike, liquidity_vacuum_score,
+            )
 
         # Compute IV ROC for confidence bonus
         iv_roc = self._compute_iv_roc(rolling_data)
@@ -242,8 +320,13 @@ class DeltaGammaSqueeze(BaseStrategy):
             gex_accel=gex_accel,
             iv_roc=iv_roc,
             iv_roc_bonus=iv_roc_bonus,
+            liquidity_vacuum_score=liquidity_vacuum_score,
         )
         if confidence < MIN_CONFIDENCE:
+            logger.warning(
+                "Squeeze: confidence %.3f below threshold %.3f — wall=%.2f dist=%.1f%% accel=%.2f gex=%.2f vacuum=%.2f",
+                confidence, MIN_CONFIDENCE, wall_gex, distance_pct * 100, accel_ratio or 0, gex_accel or 0, liquidity_vacuum_score,
+            )
             return None
 
         # Add trend from price window
@@ -291,6 +374,7 @@ class DeltaGammaSqueeze(BaseStrategy):
                 "gex_acceleration_ratio": round(gex_accel, 3) if gex_accel is not None else None,
                 "iv_roc": round(iv_roc, 4) if iv_roc is not None else None,
                 "liquidity_vacuum": True,
+                "liquidity_vacuum_score": round(liquidity_vacuum_score, 3),
                 "stop_adjusted": effective_stop_pct > STOP_BELOW_WALL_PCT,
             },
         )
@@ -373,14 +457,15 @@ class DeltaGammaSqueeze(BaseStrategy):
         self,
         depth_snapshot: Optional[Dict[str, Any]],
         direction: str,
-    ) -> bool:
-        """Check if opposite-side depth is collapsing (liquidity vacuum).
+    ) -> float:
+        """Score liquidity vacuum as a soft factor 0.0–1.0.
 
-        For LONG squeeze: ask_size should be collapsing (below mean).
-        For SHORT squeeze: bid_size should be collapsing (below mean).
+        1.0 = fully collapsed (vacuum present), 0.0 = thick depth (no vacuum).
+        For LONG squeeze: ask_size collapsing scores high.
+        For SHORT squeeze: bid_size collapsing scores high.
         """
         if not depth_snapshot:
-            return True  # no depth data, don't block
+            return 0.5  # neutral when no depth data
 
         if direction == "LONG":
             snap = depth_snapshot.get("ask_size", {})
@@ -391,10 +476,14 @@ class DeltaGammaSqueeze(BaseStrategy):
         mean = snap.get("mean", 0)
 
         if mean <= 0:
-            return True  # can't determine vacuum
+            return 0.5  # neutral when mean can't be determined
 
-        # Vacuum: current depth is below mean × ratio
-        return current < mean * LIQUIDITY_VACUUM_DEPTH_RATIO
+        # Score based on how collapsed relative to mean × ratio
+        threshold = mean * LIQUIDITY_VACUUM_DEPTH_RATIO
+        if current >= threshold:
+            return 0.0  # no vacuum
+        score = max(0.0, (threshold - current) / threshold)
+        return score
 
     def _compute_iv_roc(
         self,
@@ -429,8 +518,9 @@ class DeltaGammaSqueeze(BaseStrategy):
         iv_roc: Optional[float] = None,
         iv_roc_bonus: float = 0.0,
         depth_score: Optional[float] = None,
+        liquidity_vacuum_score: float = 0.5,
     ) -> float:
-        """Combine all factors into a single confidence score — Family A simple average.
+        """Combine all factors into a single confidence score — simple average.
 
         Returns 0.0–1.0.
         """
@@ -453,5 +543,8 @@ class DeltaGammaSqueeze(BaseStrategy):
         # 5. Net gamma: abs(net_gamma) from 0→5M, higher = higher
         c5 = normalize(abs(net_gamma), 0.0, 5000000.0)
 
-        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+        # 6. Liquidity vacuum: 1.0 = vacuum present, 0.0 = thick depth
+        c6 = liquidity_vacuum_score
+
+        confidence = (c1 + c2 + c3 + c4 + c5 + c6) / 6.0
         return min(1.0, max(0.0, confidence))

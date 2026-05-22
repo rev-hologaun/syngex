@@ -43,7 +43,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.ObiAggressionFlow")
 
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.0
 
 
 class ObiAggressionFlow(BaseStrategy):

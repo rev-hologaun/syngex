@@ -1432,18 +1432,33 @@ class SyngexOrchestrator:
                         walls = self._calculator.get_gamma_walls(threshold=5000)
                         if walls:
                             wall_deltas = []
+                            non_zero_count = 0
                             for wall in walls:
                                 try:
                                     ws = wall.get("strike", 0)
                                     if ws and ws > 0:
                                         dd = self._calculator.get_delta_by_strike(ws)
                                         nd = dd.get("net_delta", 0.0)
+                                        if nd != 0.0:
+                                            non_zero_count += 1
                                         wall_deltas.append(nd)
                                 except Exception:
                                     pass
                             if wall_deltas:
                                 avg_wall_delta = sum(wall_deltas) / len(wall_deltas)
                                 self._rolling_data[KEY_WALL_DELTA_5M].push(avg_wall_delta)
+                                if non_zero_count == 0 and len(walls) > 0:
+                                    if not hasattr(self, '_wall_delta_warned') or (time.monotonic() - self._wall_delta_warned) > 30:
+                                        logger.warning(
+                                            "WallDelta: %d walls found but ALL deltas are 0 (ladder has %d entries). First wall strike=%.1f",
+                                            len(walls), len(self._calculator._ladder), walls[0]["strike"],
+                                        )
+                                        self._wall_delta_warned = time.monotonic()
+                                elif non_zero_count < len(walls):
+                                    logger.debug(
+                                        "WallDelta: %d/%d walls have non-zero delta, avg=%.4f",
+                                        non_zero_count, len(walls), avg_wall_delta,
+                                    )
                 except Exception:
                     pass
 

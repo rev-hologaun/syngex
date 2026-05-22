@@ -227,12 +227,6 @@ class ConfluenceReversal(BaseStrategy):
             if distance_pct > CONFLUENCE_DISTANCE_PCT:
                 continue  # Too far from price
 
-        if not levels:
-            logger.debug(
-                "No confluence levels found on %s: %d walls checked, 0 within %.1f%% of price %.2f",
-                side, len(candidate_walls), CONFLUENCE_DISTANCE_PCT * 100, price,
-            )
-
             # Count independent structural signals
             structural_count = 1  # Wall itself
             level_info = {
@@ -274,6 +268,12 @@ class ConfluenceReversal(BaseStrategy):
                 level_info["structural_count"] = structural_count
                 level_info["score"] = structural_count
                 levels.append(level_info)
+
+        if not levels:
+            logger.debug(
+                "No confluence levels found on %s: %d walls checked, 0 within %.1f%% of price %.2f",
+                side, len(candidate_walls), CONFLUENCE_DISTANCE_PCT * 100, price,
+            )
 
         # Also check VWAP as standalone confluence level
         vw = self._get_price_window(rolling_data)

@@ -669,8 +669,10 @@ class TradeStationClient:
                 if not isinstance(leg, dict):
                     continue
                 strike = leg.get("strike", 0)
-                gamma = leg.get("gamma", 0)
-                oi = leg.get("openInterest", leg.get("open_interest", 0))
+                gamma = leg.get("Gamma", leg.get("gamma", 0))
+                oi = leg.get("DailyOpenInterest", leg.get("openInterest", leg.get("open_interest", 0)))
+                delta = leg.get("Delta", leg.get("delta", 0.0))
+                iv = leg.get("ImpliedVolatility", leg.get("impliedVolatility", leg.get("iv", 0.0)))
                 symbol = leg.get("symbol", "")
 
                 if not symbol:
@@ -686,6 +688,8 @@ class TradeStationClient:
                     "open_interest": oi,
                     "underlying_price": price,
                     "side": side_label,
+                    "delta": delta,
+                    "iv": iv,
                 })
 
         return contracts

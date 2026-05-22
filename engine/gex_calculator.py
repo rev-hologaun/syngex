@@ -944,11 +944,19 @@ class GEXCalculator:
         if strike <= 0:
             return
 
+        # Extract delta and IV from raw contract (PascalCase)
+        delta_raw = msg.get("Delta", 0.0)
+        delta = float(delta_raw) if delta_raw else 0.0
+        iv_raw = msg.get("ImpliedVolatility", 0.0)
+        iv = float(iv_raw) if iv_raw else 0.0
+
         self._update_strike({
             "strike": strike,
             "gamma": gamma,
             "open_interest": oi,
             "side": side,
+            "delta": delta,
+            "iv": iv,
         })
 
     def _process_raw_option_chain(self, chain: Dict[str, Any]) -> None:
@@ -973,8 +981,10 @@ class GEXCalculator:
                 if not isinstance(leg, dict):
                     continue
                 strike = leg.get("strike", 0)
-                gamma = leg.get("gamma", 0)
-                oi = leg.get("openInterest", leg.get("open_interest", 0))
+                gamma = leg.get("Gamma", leg.get("gamma", 0))
+                oi = leg.get("DailyOpenInterest", leg.get("openInterest", leg.get("open_interest", 0)))
+                delta = leg.get("Delta", leg.get("delta", 0.0))
+                iv = leg.get("ImpliedVolatility", leg.get("impliedVolatility", leg.get("iv", 0.0)))
                 symbol = leg.get("symbol", "")
                 if not symbol:
                     continue
@@ -984,6 +994,8 @@ class GEXCalculator:
                     "gamma": gamma,
                     "open_interest": oi,
                     "side": side_label,
+                    "delta": delta,
+                    "iv": iv,
                 })
 
     def _update_strike(self, data: Dict[str, Any]) -> None:

@@ -41,7 +41,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.DepthImbalanceMomentum")
 
-MIN_CONFIDENCE = 0.15
+MIN_CONFIDENCE = 0.0
 
 
 class DepthImbalanceMomentum(BaseStrategy):
