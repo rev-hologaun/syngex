@@ -31,14 +31,14 @@ Logic:
 
 Exit: At major Gamma Wall or when IV stabilizes
 
-Confidence factors (7 components):
-    1. Price extremeness          (0.0–0.15) — soft
-    2. IV skew acceleration        (0.0 or 0.20) — hard gate
-    3. Gamma density decline       (0.0 or 0.15) — hard gate
-    4. Volume-weighted IV          (0.0–0.10) — soft
-    5. Net gamma magnitude         (0.0–0.10) — soft
-    6. Wall proximity              (0.0–0.10) — soft
-    7. Regime intensity            (0.05–0.15) — soft
+Confidence factors (5 components, simple average):
+    1. Price extremeness          (0.0–1.0 normalized) — from price_percentile 0.75→1.0
+    2. Net gamma magnitude        (0.0–1.0 normalized) — from abs(normalized_net_gamma) 0→5
+    3. Wall proximity             (0.0–1.0 normalized) — from wall GEX 0→5M
+    4. Volume conviction          (0.0–1.0 normalized) — from total_volume 0→100k
+    5. Regime alignment           (0.0–1.0 normalized) — from regime intensity 0.05→0.15
+
+    MIN_CONFIDENCE = 0.20 (signals below this are suppressed)
 """
 
 from __future__ import annotations
@@ -70,26 +70,29 @@ MIN_PRICE_POINTS = 10
 # Min data points for IV window
 MIN_IV_POINTS = 5
 
-# Min positive net gamma threshold
-MIN_POSITIVE_GAMMA = 200000           # $200k net gamma
+# Min positive net gamma threshold (cumulative — used for sign detection only)
+MIN_POSITIVE_GAMMA = 200000           # $200k net gamma (cumulative, sign detection)
+
+# Min positive normalized net gamma threshold (per-message average)
+MIN_POSITIVE_NORMALIZED_GAMMA = 5.0   # normalized gamma threshold for signal trigger
 
 # IV decline threshold: IV at ATM must be below rolling avg by this ratio
-IV_DECLINE_RATIO = 0.95             # IV below 95% of rolling avg
+IV_DECLINE_RATIO = 0.90             # IV below 90% of rolling avg
 
 # Stop and target
 STOP_PCT = 0.006                      # 0.6% fallback stop
 TARGET_RISK_MULT = 1.5                # 1.5× risk toward mean
 
-# Min confidence threshold for signal emission (raised to 0.35 for v2)
-MIN_CONFIDENCE = 0.0
+# Min confidence threshold for signal emission
+MIN_CONFIDENCE = 0.20
 
 # v2 Volatility-Snap parameters
 IV_SKEW_OTM_PCT = 0.05              # 5% OTM for skew calculation
 IV_SKEW_ROC_WINDOW = 5              # ticks for skew ROC
-IV_SKEW_ROC_THRESHOLD = 0.15        # skew must have risen ≥15%
+IV_SKEW_ROC_THRESHOLD = 0.08        # skew must have risen ≥8%
 
 GAMMA_DENSITY_WINDOW_PCT = 0.01     # ±1% window for gamma density
-GAMMA_DENSITY_DECLINE_THRESHOLD = 0.70  # density must decline ≥30%
+GAMMA_DENSITY_DECLINE_THRESHOLD = 0.80  # density must decline ≥20%
 
 IV_VOLUME_MIN = 100                   # min volume to consider IV meaningful
 
@@ -137,7 +140,9 @@ class IVGEXDivergence(BaseStrategy):
             iv_crashing, iv_atm, iv_decline = self._check_iv_crashing(
                 gex_calc, rolling_data, underlying_price,
             )
-            if iv_crashing and net_gamma > MIN_POSITIVE_GAMMA:
+            # Use normalized net gamma for magnitude threshold (cumulative grows with msg count)
+            normalized_gamma = gex_calc.get_normalized_net_gamma()
+            if iv_crashing and normalized_gamma > MIN_POSITIVE_NORMALIZED_GAMMA:
                 # v2: IV skew acceleration hard gate
                 skew_accel = self._check_iv_skew_acceleration(
                     gex_calc, rolling_data, underlying_price, "SHORT",
@@ -214,7 +219,7 @@ class IVGEXDivergence(BaseStrategy):
             iv_expanding, iv_atm, iv_expand = self._check_iv_expanding(
                 gex_calc, rolling_data, underlying_price,
             )
-            if iv_expanding and net_gamma < -MIN_POSITIVE_GAMMA:
+            if iv_expanding and normalized_gamma < -MIN_POSITIVE_NORMALIZED_GAMMA:
                 # v2: IV skew acceleration hard gate
                 skew_accel = self._check_iv_skew_acceleration(
                     gex_calc, rolling_data, underlying_price, "LONG",
@@ -387,9 +392,7 @@ class IVGEXDivergence(BaseStrategy):
         """
         Check if IV skew is accelerating (hard gate).
 
-        For SHORT: skew = OTM Put IV - ATM IV (should be increasing)
-        For LONG:  skew = OTM Call IV - ATM IV (should be increasing)
-
+        Always uses OTM Put skew (strike below ATM) regardless of signal direction.
         Returns True if skew ROC > threshold.
         """
         atm_strike = gex_calc.get_atm_strike(price)
@@ -401,13 +404,8 @@ class IVGEXDivergence(BaseStrategy):
         if atm_iv is None or atm_iv <= 0:
             return False
 
-        # Get OTM IV based on signal type
-        if signal_type == "SHORT":
-            # OTM Put: strike below ATM
-            otm_strike = atm_strike * (1.0 - IV_SKEW_OTM_PCT)
-        else:
-            # OTM Call: strike above ATM
-            otm_strike = atm_strike * (1.0 + IV_SKEW_OTM_PCT)
+        # OTM Put skew: strike below ATM (always use put skew regardless of signal direction)
+        otm_strike = atm_strike * (1.0 - IV_SKEW_OTM_PCT)
 
         otm_iv = gex_calc.get_iv_by_strike(otm_strike)
         if otm_iv is None or otm_iv <= 0:
@@ -452,10 +450,8 @@ class IVGEXDivergence(BaseStrategy):
         if atm_iv is None or atm_iv <= 0:
             return 0.0, 0.0
 
-        if signal_type == "SHORT":
-            otm_strike = atm_strike * (1.0 - IV_SKEW_OTM_PCT)
-        else:
-            otm_strike = atm_strike * (1.0 + IV_SKEW_OTM_PCT)
+        # Always use put skew (strike below ATM)
+        otm_strike = atm_strike * (1.0 - IV_SKEW_OTM_PCT)
 
         otm_iv = gex_calc.get_iv_by_strike(otm_strike)
         if otm_iv is None or otm_iv <= 0:
@@ -667,8 +663,8 @@ class IVGEXDivergence(BaseStrategy):
         # 1. Price extremeness: price_percentile from 0.75→1.0, higher = higher
         c1 = normalize(price_percentile, 0.75, 1.0)
 
-        # 2. Net gamma: abs(net_gamma) from 0→5M, higher = higher
-        c2 = normalize(abs(net_gamma), 0.0, 5000000.0)
+        # 2. Net gamma: abs(normalized_net_gamma) from 0→5, higher = higher
+        c2 = normalize(abs(net_gamma), 0.0, 5.0)
 
         # 3. Wall proximity: wall GEX from 0→5M, higher = higher
         wall_gex = 0.0
