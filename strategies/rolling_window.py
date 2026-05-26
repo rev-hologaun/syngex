@@ -47,6 +47,18 @@ class RollingWindow:
     _trend: str = "FLAT"
     _trend_z_threshold: float = 0.5       # z-score needed to ENTER a trend
     _trend_exit_threshold: float = 0.3    # z-score below which we EXIT
+    _hard_cap: int = 2000                  # max entries for time-based windows
+
+    # --- lazy-evaluation caches ---
+    _dirty: bool = True
+    _mean_cache: Optional[float] = None
+    _median_cache: Optional[float] = None
+    _std_cache: Optional[float] = None
+    _min_cache: Optional[float] = None
+    _max_cache: Optional[float] = None
+    _p25_cache: Optional[float] = None
+    _p75_cache: Optional[float] = None
+    _trend_cache: Optional[str] = "FLAT"
 
     # ------------------------------------------------------------------
     # Core
@@ -70,6 +82,21 @@ class RollingWindow:
 
         self._values.append(value)
         self._timestamps.append(now)
+        self._dirty = True
+
+        # Hard cap: prevent unbounded growth in time-based windows
+        if self.window_type == "time" and len(self._values) > self._hard_cap:
+            while len(self._values) > self._hard_cap:
+                self._values.popleft()
+                self._timestamps.popleft()
+
+    def trim(self) -> None:
+        """Force-trim oldest entries to stay within _hard_cap."""
+        if len(self._values) > self._hard_cap:
+            while len(self._values) > self._hard_cap:
+                self._values.popleft()
+                self._timestamps.popleft()
+            self._dirty = True
 
     # ------------------------------------------------------------------
     # Statistics
@@ -88,64 +115,56 @@ class RollingWindow:
     @property
     def mean(self) -> Optional[float]:
         """Rolling mean."""
-        if not self._values:
-            return None
-        return statistics.mean(self._values)
+        if self._dirty:
+            self._refresh()
+        return self._mean_cache
 
     @property
     def median(self) -> Optional[float]:
         """Rolling median."""
-        if not self._values:
-            return None
-        return statistics.median(self._values)
+        if self._dirty:
+            self._refresh()
+        return self._median_cache
 
     @property
     def std(self) -> Optional[float]:
         """Rolling standard deviation (sample). Returns None if < 2 values."""
-        if len(self._values) < 2:
-            return None
-        return statistics.stdev(self._values)
+        if self._dirty:
+            self._refresh()
+        return self._std_cache
 
     @property
     def min(self) -> Optional[float]:
-        if not self._values:
-            return None
-        return min(self._values)
+        if self._dirty:
+            self._refresh()
+        return self._min_cache
 
     @property
     def max(self) -> Optional[float]:
-        if not self._values:
-            return None
-        return max(self._values)
+        if self._dirty:
+            self._refresh()
+        return self._max_cache
 
     @property
     def range(self) -> Optional[float]:
         """Current range (max - min)."""
-        if not self._values:
+        if self._dirty:
+            self._refresh()
+        if self._min_cache is None or self._max_cache is None:
             return None
-        return self.max - self.min
+        return self._max_cache - self._min_cache
 
     @property
     def p25(self) -> Optional[float]:
-        if len(self._values) < 2:
-            return None
-        sorted_vals = sorted(self._values)
-        n = len(sorted_vals)
-        q1_idx = n / 4
-        if q1_idx == int(q1_idx):
-            return (sorted_vals[int(q1_idx) - 1] + sorted_vals[int(q1_idx)]) / 2
-        return sorted_vals[int(q1_idx)]
+        if self._dirty:
+            self._refresh()
+        return self._p25_cache
 
     @property
     def p75(self) -> Optional[float]:
-        if len(self._values) < 2:
-            return None
-        sorted_vals = sorted(self._values)
-        n = len(sorted_vals)
-        q3_idx = 3 * n / 4
-        if q3_idx == int(q3_idx):
-            return (sorted_vals[int(q3_idx) - 1] + sorted_vals[int(q3_idx)]) / 2
-        return sorted_vals[int(q3_idx)]
+        if self._dirty:
+            self._refresh()
+        return self._p75_cache
 
     @property
     def trend(self) -> str:
@@ -154,9 +173,21 @@ class RollingWindow:
 
         Returns: "UP", "DOWN", or "FLAT"
         """
+        if self._dirty:
+            self._refresh()
+        # Always compute trend — it's idempotent and needs to run even
+        # when _dirty is False (e.g. after mean/std were accessed first).
+        self._compute_trend()
+        return self._trend_cache
+
+    def _compute_trend(self) -> None:
+        """Compute trend direction with hysteresis.
+
+        Idempotent — safe to call repeatedly with the same data.
+        """
         if len(self._values) < 4:
-            self._trend = "FLAT"
-            return "FLAT"
+            self._trend_cache = "FLAT"
+            return
 
         vals = list(self._values)
         half = len(vals) // 2
@@ -164,28 +195,24 @@ class RollingWindow:
         second_half = statistics.mean(vals[half:])
 
         diff = second_half - first_half
-        std = self.std
+        std = self._std_cache
         if std is None or std == 0:
-            self._trend = "FLAT"
-            return "FLAT"
+            self._trend_cache = "FLAT"
+            return
 
         z = diff / std
 
         # Hysteresis: different thresholds for entering vs exiting trends
-        if self._trend in ("UP", "FLAT"):
-            # Need strong signal to go UP, weak signal to stay UP
+        if self._trend_cache in ("UP", "FLAT"):
             if z > self._trend_z_threshold:
-                self._trend = "UP"
-            elif self._trend == "UP" and z < self._trend_exit_threshold:
-                self._trend = "FLAT"
-        elif self._trend == "DOWN":
-            # Need strong negative signal to go DOWN, weak signal to stay DOWN
+                self._trend_cache = "UP"
+            elif self._trend_cache == "UP" and z < self._trend_exit_threshold:
+                self._trend_cache = "FLAT"
+        elif self._trend_cache == "DOWN":
             if z < -self._trend_z_threshold:
-                self._trend = "DOWN"
+                self._trend_cache = "DOWN"
             elif z > -self._trend_exit_threshold:
-                self._trend = "FLAT"
-
-        return self._trend
+                self._trend_cache = "FLAT"
 
     @property
     def latest(self) -> Optional[float]:
@@ -239,11 +266,13 @@ class RollingWindow:
     @property
     def z_score(self) -> Optional[float]:
         """Z-score of the latest value relative to window mean/std."""
-        if self.mean is None or self.std is None or self.std == 0:
+        if self._dirty:
+            self._refresh()
+        if self._mean_cache is None or self._std_cache is None or self._std_cache == 0:
             return None
         if self.latest is None:
             return None
-        return (self.latest - self.mean) / self.std
+        return (self.latest - self._mean_cache) / self._std_cache
 
     # ------------------------------------------------------------------
     # Utilities
@@ -253,6 +282,62 @@ class RollingWindow:
         """Reset the window."""
         self._values.clear()
         self._timestamps.clear()
+        self._dirty = True
+        self._mean_cache = None
+        self._median_cache = None
+        self._std_cache = None
+        self._min_cache = None
+        self._max_cache = None
+        self._p25_cache = None
+        self._p75_cache = None
+        self._trend_cache = None
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _refresh(self) -> None:
+        """Compute all cached values in one pass.  Called when _dirty is True."""
+        # Initialize trend_cache so _compute_trend's hysteresis logic has a baseline
+        if self._trend_cache not in ("UP", "DOWN"):
+            self._trend_cache = "FLAT"
+
+        if not self._values:
+            self._mean_cache = None
+            self._median_cache = None
+            self._std_cache = None
+            self._min_cache = None
+            self._max_cache = None
+            self._p25_cache = None
+            self._p75_cache = None
+            self._dirty = False
+            return
+
+        self._mean_cache = statistics.mean(self._values)
+        self._median_cache = statistics.median(self._values)
+        self._min_cache = min(self._values)
+        self._max_cache = max(self._values)
+
+        if len(self._values) >= 2:
+            self._std_cache = statistics.stdev(self._values)
+            sorted_vals = sorted(self._values)
+            n = len(sorted_vals)
+            q1_idx = n / 4
+            if q1_idx == int(q1_idx):
+                self._p25_cache = (sorted_vals[int(q1_idx) - 1] + sorted_vals[int(q1_idx)]) / 2
+            else:
+                self._p25_cache = sorted_vals[int(q1_idx)]
+            q3_idx = 3 * n / 4
+            if q3_idx == int(q3_idx):
+                self._p75_cache = (sorted_vals[int(q3_idx) - 1] + sorted_vals[int(q3_idx)]) / 2
+            else:
+                self._p75_cache = sorted_vals[int(q3_idx)]
+        else:
+            self._std_cache = None
+            self._p25_cache = None
+            self._p75_cache = None
+
+        self._dirty = False
 
     def snapshot(self) -> Dict[str, Any]:
         """Export current state for logging/dashboard."""
