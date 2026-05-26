@@ -337,6 +337,47 @@ class SyngexOrchestrator:
         # Signal outcome tracker
         self._signal_tracker: SignalTracker | None = None
 
+        # Per-strike computation cache (eliminate redundant GEXCalculator calls)
+        self._strike_delta_cache: Dict[float, Dict[str, float]] = {}
+        self._strike_iv_cache: Dict[float, Optional[float]] = {}
+
+        # Rate-limiting: tick counter for throttling expensive per-ladder calculations
+        self._message_tick: int = 0
+        self._tick_modulus: int = 5  # run heavy calcs every Nth tick (5 = 80% reduction)
+
+        # Per-strike computation cache (eliminate redundant GEXCalculator calls)
+        self._strike_delta_cache: Dict[float, Dict[str, float]] = {}
+        self._strike_iv_cache: Dict[float, Optional[float]] = {}
+
+        # Heavy calculation results (stored as instance attrs so _report_profile can read them)
+        self._iv_skew: Optional[float] = None
+        self._extrinsic_proxy: Optional[float] = None
+        self._prob_momentum: Optional[float] = None
+        self._gamma_walls_100k: Optional[List] = None
+        self._gamma_walls_500k: Optional[List] = None
+        self._gamma_walls_5k: Optional[List] = None
+
+    # ------------------------------------------------------------------
+    # Per-strike caching helpers
+    # ------------------------------------------------------------------
+
+    def _get_delta_cached(self, strike: float) -> Dict[str, float]:
+        """Cached delta lookup — avoids repeated GEXCalculator iteration."""
+        if strike not in self._strike_delta_cache:
+            self._strike_delta_cache[strike] = self._calculator.get_delta_by_strike(strike)
+        return self._strike_delta_cache[strike]
+
+    def _get_iv_cached(self, strike: float) -> Optional[float]:
+        """Cached IV lookup — avoids repeated GEXCalculator iteration."""
+        if strike not in self._strike_iv_cache:
+            self._strike_iv_cache[strike] = self._calculator.get_iv_by_strike(strike)
+        return self._strike_iv_cache[strike]
+
+    def _clear_strike_cache(self) -> None:
+        """Clear per-strike caches (call after ladder rebuilds)."""
+        self._strike_delta_cache.clear()
+        self._strike_iv_cache.clear()
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -827,11 +868,21 @@ class SyngexOrchestrator:
     # ------------------------------------------------------------------
 
     def _on_message(self, data: Dict[str, Any]) -> None:
-        """Callback from TradeStationClient — feed to GEXCalculator + update rolling windows."""
+        """Callback from TradeStationClient — feed to GEXCalculator + update rolling windows.
+
+        Rate-limiting: Expensive per-ladder calculations (get_iv_skew, get_gamma_walls,
+        _calculate_extrinsic_proxy, _calculate_prob_momentum) run every _tick_modulus
+        messages instead of every message. This reduces full-ladder iterations by ~80%
+        during high-throughput market open.
+        """
         assert self._calculator is not None
         try:
             self._calculator.process_message(data)
             ts = time.time()
+
+            # Increment tick counter for rate-limiting
+            self._message_tick += 1
+            _is_heavy_tick = (self._message_tick % self._tick_modulus) == 0
 
             # Update rolling windows with underlying price
             if data.get("type") == MSG_TYPE_UNDERLYING_UPDATE:
@@ -899,6 +950,29 @@ class SyngexOrchestrator:
             # Update Layer 2 rolling windows
             gex_summary = self._calculator.get_greeks_summary()
             if gex_summary:
+                # ── Cache expensive per-ladder computations (run every tick) ──
+                # These iterate the full strike ladder — compute once, reuse everywhere.
+                iv_by_strike = self._calculator.get_iv_by_strike_avg()
+                atm_price = self._calculator.underlying_price
+                atm_strike = self._calculator.get_atm_strike(atm_price) if atm_price else None
+
+                # ── Heavy per-ladder calculations (rate-limited) ──
+                # These iterate the full ladder — skip on most ticks.
+                iv_skew: Optional[float] = None
+                extrinsic_proxy: Optional[float] = None
+                prob_mom: Optional[float] = None
+                gamma_walls_100k: Optional[List] = None
+                gamma_walls_500k: Optional[List] = None
+                gamma_walls_5k: Optional[List] = None
+
+                if _is_heavy_tick:
+                    iv_skew = self._calculator.get_iv_skew()
+                    extrinsic_proxy = self._calculate_extrinsic_proxy(gex_summary)
+                    prob_mom = self._calculate_prob_momentum(gex_summary)
+                    gamma_walls_100k = self._calculator.get_gamma_walls(threshold=100000)
+                    self._gamma_walls_500k = self._calculator.get_gamma_walls(threshold=500000)
+                    gamma_walls_5k = self._calculator.get_gamma_walls(threshold=5000)
+
                 net_delta = gex_summary.get("net_delta", 0.0)
                 total_vol = gex_summary.get("total_volume", 0)
                 # Push total volume for volume confirmation filter
@@ -907,9 +981,6 @@ class SyngexOrchestrator:
                 # Track total_delta_5m for delta_volume_exhaustion
                 if KEY_TOTAL_DELTA_5M in self._rolling_data:
                     self._rolling_data[KEY_TOTAL_DELTA_5M].push(net_delta)
-
-                # Per-strike IV windows for iv_gex_divergence
-                iv_by_strike = self._calculator.get_iv_by_strike_avg()
                 for strike, avg_iv in iv_by_strike.items():
                     key = f"iv_{strike}_5m"
                     if key not in self._rolling_data:
@@ -926,9 +997,8 @@ class SyngexOrchestrator:
                 )
 
                 # gamma_accel_5m — 2nd derivative of gamma (v2 Ignition-Master)
-                # iv_skew_5m — avg call IV minus avg put IV
+                # iv_skew_5m — avg call IV minus avg put IV (use cached)
                 try:
-                    iv_skew = self._calculator.get_iv_skew()
                     if iv_skew is not None:
                         self._rolling_data[KEY_IV_SKEW_5M].push(iv_skew)
                 except Exception:
@@ -950,7 +1020,6 @@ class SyngexOrchestrator:
                 # Ψ = (IV_Put_Wing - IV_Call_Wing) / IV_ATM
                 try:
                     underlying_price = self._calculator.underlying_price
-                    iv_by_strike = self._calculator.get_iv_by_strike_avg()
                     if iv_by_strike:
                         strikes = sorted(iv_by_strike.keys())
                         if len(strikes) >= 3:
@@ -1026,7 +1095,6 @@ class SyngexOrchestrator:
                 # Slope = dIV/dK (derivative of IV vs moneyness via least-squares)
                 try:
                     underlying_price = self._calculator.underlying_price
-                    iv_by_strike = self._calculator.get_iv_by_strike_avg()
                     if iv_by_strike:
                         strikes = sorted(iv_by_strike.keys())
                         if len(strikes) >= 6:
@@ -1106,8 +1174,7 @@ class SyngexOrchestrator:
                 self._rolling_data[KEY_VOLUME_UP_5M].push(self._call_update_count)
                 self._rolling_data[KEY_VOLUME_DOWN_5M].push(self._put_update_count)
 
-                # extrinsic_proxy_5m — aggregate extrinsic value proxy
-                extrinsic_proxy = self._calculate_extrinsic_proxy(gex_summary)
+                # extrinsic_proxy_5m — aggregate extrinsic value proxy (use cached)
                 if extrinsic_proxy is not None:
                     self._rolling_data[KEY_EXTRINSIC_PROXY_5M].push(extrinsic_proxy)
 
@@ -1164,12 +1231,12 @@ class SyngexOrchestrator:
                     self._persist_phi_accumulators()
 
                 # Gamma Breaker — Γ_break (Gamma Breakout Index)
-                # Γ_break = Price_Velocity × Gamma_Concentration_at_Level
+                # Γ_break = Price_Velocity × Gamma_Concentration_at_Level (use cached)
                 try:
                     price = self._calculator.underlying_price
                     if price > 0:
                         # Get nearest gamma walls
-                        walls = self._calculator.get_gamma_walls(threshold=100000)
+                        walls = gamma_walls_100k
 
                         if walls:
                             nearest_wall = walls[0]  # Largest GEX wall
@@ -1220,12 +1287,12 @@ class SyngexOrchestrator:
 
                 # Iron Anchor — Confluence Detection
                 # Ω_conf = |Price_GammaWall - Price_LiquidityWall|
-                # Match gamma walls with liquidity walls from depth aggregates
+                # Match gamma walls with liquidity walls from depth aggregates (use cached)
                 try:
                     price = self._calculator.underlying_price
                     if price > 0:
                         # Get gamma walls (major walls only)
-                        gamma_walls = self._calculator.get_gamma_walls(threshold=500000)
+                        gamma_walls = gamma_walls_500k
 
                         if gamma_walls:
                             # Get liquidity levels from depth aggregates
@@ -1333,8 +1400,7 @@ class SyngexOrchestrator:
                 except Exception:
                     pass
 
-                # prob_momentum_5m — probability distribution momentum
-                prob_mom = self._calculate_prob_momentum(gex_summary)
+                # prob_momentum_5m — probability distribution momentum (use cached)
                 if prob_mom is not None:
                     self._rolling_data[KEY_PROB_MOMENTUM_5M].push(prob_mom)
 
@@ -1360,9 +1426,7 @@ class SyngexOrchestrator:
                 except Exception:
                     pass
 
-                # Push per-strike ATM delta and IV for delta_iv_divergence
-                atm_price = self._calculator.underlying_price
-                atm_strike = self._calculator.get_atm_strike(atm_price)
+                # Push per-strike ATM delta and IV for delta_iv_divergence (atm_strike cached)
                 if atm_strike is not None:
                     delta_data = self._calculator.get_delta_by_strike(atm_strike)
                     atm_delta = delta_data.get("net_delta", 0.0)
@@ -1381,7 +1445,7 @@ class SyngexOrchestrator:
                     except Exception:
                         pass
 
-                    atm_iv = self._calculator.get_iv_by_strike(atm_strike)
+                    atm_iv = self._get_iv_cached(atm_strike)
                     if atm_iv is not None and KEY_ATM_IV_5M in self._rolling_data:
                         self._rolling_data[KEY_ATM_IV_5M].push(atm_iv)
 
@@ -1433,10 +1497,10 @@ class SyngexOrchestrator:
                 except Exception:
                     pass
 
-                # ── theta_burn v2: Wall delta tracking ──
+                # ── theta_burn v2: Wall delta tracking (use cached) ──
                 try:
                     if KEY_WALL_DELTA_5M in self._rolling_data:
-                        walls = self._calculator.get_gamma_walls(threshold=5000)
+                        walls = gamma_walls_5k
                         if walls:
                             wall_deltas = []
                             non_zero_count = 0
@@ -1591,17 +1655,14 @@ class SyngexOrchestrator:
                 except Exception:
                     pass
 
-                # ── iv_gex_divergence v2: IV skew gradient ──
+                # ── iv_gex_divergence v2: IV skew gradient (atm_strike cached) ──
                 try:
-                    atm_strike = self._calculator.get_atm_strike(
-                        self._calculator.underlying_price,
-                    )
                     if atm_strike is not None:
-                        atm_iv = self._calculator.get_iv_by_strike(atm_strike)
+                        atm_iv = self._get_iv_cached(atm_strike)
                         if atm_iv is not None and atm_iv > 0:
                             # Compute IV skew: OTM Put IV - ATM IV
                             otm_put_strike = atm_strike * 0.95  # 5% OTM
-                            otm_put_iv = self._calculator.get_iv_by_strike(otm_put_strike)
+                            otm_put_iv = self._get_iv_cached(otm_put_strike)
                             if otm_put_iv is not None and otm_put_iv > 0:
                                 iv_skew = otm_put_iv - atm_iv
                                 if KEY_IV_SKEW_GRADIENT_5M in self._rolling_data:
@@ -2529,7 +2590,7 @@ class SyngexOrchestrator:
             logger.info("  GAMMA_FLIP:  Strike $%.1f (cumulative gamma turns negative below this)", flip)
 
         # Gamma Walls
-        walls = self._calculator.get_gamma_walls(threshold=500000)
+        walls = self._gamma_walls_500k
         if walls:
             wall_parts = []
             for w in walls[:3]:
