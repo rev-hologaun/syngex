@@ -4,17 +4,26 @@ Comprehensive per-strategy performance analysis for Round 3 validation.
 Analyzes all signal_outcomes_*.jsonl files across all symbols.
 """
 
-import glob
 import json
-import math
 import os
 import sys
 from collections import defaultdict
-from datetime import datetime, timezone
 from pathlib import Path
 
 LOG_DIR = Path("/home/hologaun/projects/syngex/log")
 OUTPUT_FILE = Path("/home/hologaun/projects/syngex/analysis/analyzed_strategies_forge.md")
+
+# ── Time window definitions ──────────────────────────────────────────
+# Market opens at 9:30 AM PT. Timestamps are epoch seconds.
+# We detect the first signal timestamp as "market open" for each symbol.
+TIME_WINDOW_SIZE = 10  # seconds for temporal confluence
+
+TIME_WINDOWS = {
+    "ORB (9:30-10:00)":  (0,   30*60),    # 0-30 min
+    "Early (10:00-11:30)": (30*60, 90*60),  # 30-90 min
+    "Mid-day (11:30-14:00)": (90*60, 240*60), # 90-240 min
+    "Late (14:00-16:00)": (240*60, 480*60),  # 240-480 min
+},
 
 CONFIDENCE_BUCKETS = [
     ("10-19%",  0.10, 0.20),
@@ -26,7 +35,7 @@ CONFIDENCE_BUCKETS = [
     ("70-79%",  0.70, 0.80),
     ("80-89%",  0.80, 0.90),
     ("90-99%",  0.90, 1.00),
-    ("100%",    1.00, 1.10),
+    ("100%",    1.00, 1.01),
 ]
 
 TREND_MAP = {
@@ -41,35 +50,10 @@ REGIME_MAP = {
 }
 
 
-def binomial_z_score(win_rate_val, total, overall_wr):
-    """Calculate z-score of a win rate vs the overall win rate.
-
-    Returns (z_score, is_significant, low_sample) where:
-    - z_score: how many standard deviations away from overall WR
-    - is_significant: True if |z_score| > 1.645 (p < 0.10, one-tailed)
-    - low_sample: True if total < 30 (not enough data for reliable stats)
-    """
-    if total < 5:
-        return 0.0, False, True
-    if total < 30:
-        low_sample = True
-    else:
-        low_sample = False
-
-    # Standard error of binomial proportion
-    se = math.sqrt(overall_wr * (1 - overall_wr) / total) if total > 0 and overall_wr > 0 and overall_wr < 1 else 0.01
-    if se == 0:
-        se = 0.01  # guard against zero variance
-
-    z = (win_rate_val - overall_wr) / se
-    is_sig = abs(z) > 1.645  # p < 0.10 one-tailed
-
-    return round(z, 2), is_sig, low_sample
-
-
 def load_all_outcomes():
     """Load all signal outcome files."""
     all_signals = []
+    import glob
     files = sorted(glob.glob(str(LOG_DIR / "signal_outcomes_*.jsonl")))
     for f in files:
         symbol = Path(f).stem.replace("signal_outcomes_", "")
@@ -95,7 +79,16 @@ def bucket_confidence(conf):
     return "Other"
 
 
-def analyze_strategy(signals, market_opens=None):
+def time_window_label(hold_time_sec, resolution_time_sec, first_ts):
+    """Determine which time window a signal falls into based on resolution time."""
+    elapsed = resolution_time_sec - first_ts
+    for label, (lo, hi) in TIME_WINDOWS.items():
+        if lo <= elapsed < hi:
+            return label
+    return "Post-close / Unknown"
+
+
+def analyze_strategy(signals):
     """Analyze a single strategy across all symbols."""
     results = {}
     
@@ -109,21 +102,13 @@ def analyze_strategy(signals, market_opens=None):
                 "closed": 0,
                 "total_pnl": 0.0,
                 "total_pnl_pct": 0.0,
-                "closed_pnl": 0.0,
-                "closed_pnl_pct": 0.0,
-                "resolved_pnl": [],
                 "avg_hold_time": 0.0,
-                "confidence_buckets": defaultdict(lambda: {"total": 0, "wins": 0, "losses": 0, "closed": 0, "pnl": 0.0, "pnl_pct": 0.0, "closed_pnl": 0.0, "closed_pnl_pct": 0.0}),
+                "confidence_buckets": defaultdict(lambda: {"total": 0, "wins": 0, "losses": 0, "closed": 0, "pnl": 0.0, "pnl_pct": 0.0}),
                 "trend_perf": defaultdict(lambda: {"total": 0, "wins": 0, "losses": 0, "closed": 0, "pnl": 0.0}),
                 "regime_perf": defaultdict(lambda: {"total": 0, "wins": 0, "losses": 0, "closed": 0, "pnl": 0.0}),
-                "time_held_broad": defaultdict(lambda: {"total": 0, "wins": 0, "losses": 0, "closed": 0, "pnl": 0.0}),
-                "signal_time_window": defaultdict(lambda: {"total": 0, "wins": 0, "losses": 0, "closed": 0, "pnl": 0.0}),
-                "session_confidence": defaultdict(lambda: {"high": 0, "medium": 0, "low": 0, "total": 0}),
-                "session_confidence_perf": defaultdict(lambda: defaultdict(lambda: {
-                    "total": 0, "wins": 0, "losses": 0, "closed": 0, "pnl": 0.0,
-                })),
+                "time_window_perf": defaultdict(lambda: {"total": 0, "wins": 0, "losses": 0, "closed": 0, "pnl": 0.0}),
                 "direction_perf": defaultdict(lambda: {"total": 0, "wins": 0, "losses": 0, "closed": 0, "pnl": 0.0}),
-                "time_held_fine": defaultdict(lambda: {"total": 0, "wins": 0, "losses": 0, "closed": 0, "pnl": 0.0}),
+                "hold_time_buckets": defaultdict(lambda: {"total": 0, "wins": 0, "losses": 0, "closed": 0, "pnl": 0.0}),
                 "symbols": set(),
                 "pnl_list": [],
                 "hold_times": [],
@@ -143,15 +128,9 @@ def analyze_strategy(signals, market_opens=None):
         
         pnl = sig.get("pnl", 0.0)
         pnl_pct = sig.get("pnl_pct", 0.0)
+        r["total_pnl"] += pnl
+        r["total_pnl_pct"] += pnl_pct
         r["pnl_list"].append(pnl)
-
-        if outcome == "CLOSED":
-            r["closed_pnl"] += pnl
-            r["closed_pnl_pct"] += pnl_pct
-        else:
-            r["total_pnl"] += pnl
-            r["total_pnl_pct"] += pnl_pct
-            r["resolved_pnl"].append(pnl)
         
         hold = sig.get("hold_time", 0.0)
         r["hold_times"].append(hold)
@@ -163,13 +142,9 @@ def analyze_strategy(signals, market_opens=None):
         cb_data["total"] += 1
         if outcome == "WIN": cb_data["wins"] += 1
         elif outcome == "LOSS": cb_data["losses"] += 1
-        elif outcome == "CLOSED":
-            cb_data["closed"] += 1
-            cb_data["closed_pnl"] += pnl
-            cb_data["closed_pnl_pct"] += pnl_pct
-        else:
-            cb_data["pnl"] += pnl
-            cb_data["pnl_pct"] += pnl_pct
+        elif outcome == "CLOSED": cb_data["closed"] += 1
+        cb_data["pnl"] += pnl
+        cb_data["pnl_pct"] += pnl_pct
         
         # Trend
         meta = sig.get("metadata", {})
@@ -192,19 +167,20 @@ def analyze_strategy(signals, market_opens=None):
         elif outcome == "CLOSED": rp["closed"] += 1
         rp["pnl"] += pnl
         
-        # Time window (broad buckets — major session windows)
+        # Time window (use resolution_time - first_ts approximation)
+        # We'll use hold_time as proxy for time-of-day grouping
         tw = "Unknown"
         if hold < 30*60:
-            tw = "Time Held: <30m"
+            tw = "ORB / Early (0-30 min)"
         elif hold < 90*60:
-            tw = "Time Held: 30-90m"
+            tw = "Early (30-90 min)"
         elif hold < 240*60:
-            tw = "Time Held: 90-240m"
+            tw = "Mid-day (90-240 min)"
         elif hold < 480*60:
-            tw = "Time Held: 240-480m"
+            tw = "Late (240-480 min)"
         else:
-            tw = "Time Held: >480m"
-        twp = r["time_held_broad"][tw]
+            tw = "Extended (>8h)"
+        twp = r["time_window_perf"][tw]
         twp["total"] += 1
         if outcome == "WIN": twp["wins"] += 1
         elif outcome == "LOSS": twp["losses"] += 1
@@ -220,39 +196,7 @@ def analyze_strategy(signals, market_opens=None):
         elif outcome == "CLOSED": dp["closed"] += 1
         dp["pnl"] += pnl
         
-        # Signal generation time window (US equity session buckets in ET)
-        sig_ts = extract_signal_timestamp(sig)
-        sw_label = signal_time_window_label(sig_ts)
-        swp = r["signal_time_window"][sw_label]
-        swp["total"] += 1
-        if outcome == "WIN": swp["wins"] += 1
-        elif outcome == "LOSS": swp["losses"] += 1
-        elif outcome == "CLOSED": swp["closed"] += 1
-        swp["pnl"] += pnl
-
-        # Confidence distribution by session
-        sc = r["session_confidence"][sw_label]
-        sc["total"] += 1
-        if conf >= 0.70:
-            sc["high"] += 1
-        elif conf >= 0.50:
-            sc["medium"] += 1
-        else:
-            sc["low"] += 1
-
-        # Session × Confidence cross-tabulation
-        cb = bucket_confidence(conf)
-        scp = r["session_confidence_perf"][sw_label][cb]
-        scp["total"] += 1
-        if outcome == "WIN":
-            scp["wins"] += 1
-        elif outcome == "LOSS":
-            scp["losses"] += 1
-        elif outcome == "CLOSED":
-            scp["closed"] += 1
-        scp["pnl"] += pnl
-
-        # Hold time buckets (fine-grained — detailed hold durations)
+        # Hold time buckets
         if hold < 60:
             ht_key = "Very Fast (<1 min)"
         elif hold < 300:
@@ -265,7 +209,7 @@ def analyze_strategy(signals, market_opens=None):
             ht_key = "Long (30-60 min)"
         else:
             ht_key = "Very Long (>1h)"
-        htb = r["time_held_fine"][ht_key]
+        htb = r["hold_time_buckets"][ht_key]
         htb["total"] += 1
         if outcome == "WIN": htb["wins"] += 1
         elif outcome == "LOSS": htb["losses"] += 1
@@ -276,67 +220,18 @@ def analyze_strategy(signals, market_opens=None):
 
 
 def extract_signal_timestamp(sig):
-    """Extract epoch-second timestamp from signal_id (format: strategy_timestamp_random).
-
-    The timestamp is always the second-to-last underscore-separated part.
-    This avoids picking up digits from strategy_id (e.g. 'v2', 'v3').
-    """
+    """Extract epoch-second timestamp from signal_id (format: strategy_timestamp_random)."""
     sid = sig.get("signal_id", "")
     parts = sid.split("_")
-    # The timestamp is always the second-to-last part
-    if len(parts) < 2:
-        return 0.0
-    ts_part = parts[-2]
-    if ts_part.isdigit() and len(ts_part) >= 10:
-        ts_ms = int(ts_part)
-        if ts_ms > 1e12:
-            return ts_ms / 1000.0
-        return float(ts_ms)
+    # Find the numeric timestamp part (usually 13 digits for epoch ms)
+    for part in parts:
+        if part.isdigit() and len(part) >= 10:
+            ts_ms = int(part)
+            # If it looks like epoch milliseconds (>1e12), convert to seconds
+            if ts_ms > 1e12:
+                return ts_ms / 1000.0
+            return float(ts_ms)
     return 0.0
-
-
-def signal_et_hour(signal_epoch):
-    """Convert a UTC epoch timestamp to the hour-of-day in US Eastern time.
-
-    For May 2026, EDT is in effect (UTC-4), so we subtract 4 hours.
-    Returns the hour as a float (e.g. 9.5 for 9:30 AM ET).
-    """
-    if signal_epoch <= 0:
-        return 0.0
-    # EDT offset: UTC-4
-    et_epoch = signal_epoch - 4 * 3600
-    # Fractional hour within the day
-    et_hour = (et_epoch % 86400) / 3600.0
-    return et_hour
-
-
-def signal_time_window_label(signal_epoch):
-    """Classify signal by US equity market session bucket (ET time).
-
-    Returns one of:
-      Pre-market      — 4:00–9:30 AM ET
-      ORB (9:30-10:00) — 9:30–10:00 AM ET (open range breakout)
-      Morning (10:00-12:00) — 10:00 AM–12:00 PM ET
-      Afternoon (12:00-16:00) — 12:00–4:00 PM ET
-      After-hours (16:00-20:00) — 4:00–8:00 PM ET
-      Overnight        — outside 4:00–20:00 ET
-    """
-    if signal_epoch <= 0:
-        return "Overnight"
-    et_hour = signal_et_hour(signal_epoch)
-
-    if et_hour < 9.5:
-        return "Pre-market"
-    elif et_hour < 10.0:
-        return "ORB (9:30-10:00)"
-    elif et_hour < 12.0:
-        return "Morning (10:00-12:00)"
-    elif et_hour < 16.0:
-        return "Afternoon (12:00-16:00)"
-    elif et_hour < 20.0:
-        return "After-hours (16:00-20:00)"
-    else:
-        return "Overnight"
 
 
 # ── Phase 3: Microstructure Fingerprinting ────────────────────────
@@ -874,9 +769,7 @@ def generate_report(all_signals, strategy_results):
     lines = []
     lines.append("# Strategy Performance Analysis — Round 3 Validation")
     lines.append("")
-    report_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    report_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    lines.append(f"**Date:** {report_date}  |  **Generated:** {report_time}  |  **Total Resolved Signals:** {len(all_signals):,}  |  **Strategies Analyzed:** {len(strategy_results)}")
+    lines.append(f"**Date:** 2026-05-06  |  **Total Resolved Signals:** {len(all_signals):,}  |  **Strategies Analyzed:** {len(strategy_results)}")
     lines.append("")
     lines.append("---")
     lines.append("")
@@ -886,11 +779,7 @@ def generate_report(all_signals, strategy_results):
     total_losses = sum(r["losses"] for r in strategy_results.values())
     total_closed = sum(r["closed"] for r in strategy_results.values())
     total_pnl = sum(r["total_pnl"] for r in strategy_results.values())
-    total_closed_pnl = sum(r["closed_pnl"] for r in strategy_results.values())
     all_pnl = [s.get("pnl", 0) for s in all_signals]
-    resolved_pnl_all = []
-    for r in strategy_results.values():
-        resolved_pnl_all.extend(r.get("resolved_pnl", []))
 
     lines.append("## Overall Summary")
     lines.append("")
@@ -900,11 +789,8 @@ def generate_report(all_signals, strategy_results):
     lines.append(table_row(["Total Losses", f"{total_losses:,}"], [20, 60]))
     lines.append(table_row(["Time-Expired (CLOSED)", f"{total_closed:,}"], [20, 60]))
     lines.append(table_row(["Overall Win Rate", f"{win_rate(total_wins, total_losses, total_closed):.1f}%"], [20, 60]))
-    lines.append(table_row(["Total P&L (resolved)", f"${fmt_num_no_comma(total_pnl, 2)}"], [20, 60]))
-    lines.append(table_row(["Avg P&L per Resolved Signal", f"${fmt_num_no_comma(avg_pnl(resolved_pnl_all))}"], [20, 60]))
-    if total_closed_pnl != 0:
-        lines.append(table_row(["Total P&L (time-outs)", f"${fmt_num_no_comma(total_closed_pnl, 2)}"], [20, 60]))
-        lines.append(table_row(["Avg P&L per Signal (all)", f"${fmt_num_no_comma(avg_pnl(all_pnl))}"], [20, 60]))
+    lines.append(table_row(["Total P&L", f"${fmt_num_no_comma(total_pnl, 2)}"], [20, 60]))
+    lines.append(table_row(["Avg P&L per Signal", f"${fmt_num_no_comma(avg_pnl(all_pnl))}"], [20, 60]))
     lines.append(table_row(["Symbols Traded", ", ".join(sorted(set(s["_symbol"] for s in all_signals)))], [20, 60]))
     lines.append("")
 
@@ -918,21 +804,17 @@ def generate_report(all_signals, strategy_results):
         r = strategy_results[sid]
         total = r["total"]
         wr = win_rate(r["wins"], r["losses"], r["closed"])
-        overall_wr = win_rate(r["wins"], r["losses"], r["closed"])
         avg_p = avg_pnl(r["pnl_list"])
         avg_h = avg_hold(r["hold_times"])
         med_h = median_hold(r["hold_times"])
 
         lines.append(f"### {sid}")
         lines.append("")
-        avg_p_resolved = avg_pnl(r.get("resolved_pnl", [])) if r.get("resolved_pnl") else 0.0
-        avg_p_all = avg_pnl(r["pnl_list"]) if r["pnl_list"] else 0.0
         lines.append(
             f"**Symbols:** {', '.join(sorted(r['symbols']))}  |  "
             f"**Total Signals:** {total:,}  |  "
             f"**Win Rate:** {wr:.1f}%  |  "
-            f"**Avg P&L (resolved):** ${fmt_num(avg_p_resolved)}  |  "
-            f"**Avg P&L (all):** ${fmt_num(avg_p_all)}  |  "
+            f"**Avg P&L:** ${fmt_num(avg_p)}  |  "
             f"**Avg Hold:** {avg_h:.0f}s ({avg_h/60:.1f}m)  |  "
             f"**Median Hold:** {med_h:.0f}s"
         )
@@ -941,31 +823,27 @@ def generate_report(all_signals, strategy_results):
         # ── 1. Confidence Level Performance ──────────────────────
         lines.append("#### 1) Performance by Confidence Level")
         lines.append("")
-        widths = [14, 5, 5, 6, 6, 9, 8, 8, 8]
-        h = table_header(["Confidence", "Total", "Wins", "Losses", "Closed", "Win Rate", "Avg P&L (resolved)", "Avg P&L (all)", "Avg P&L%"], widths)
+        widths = [14, 5, 5, 6, 6, 9, 8, 8]
+        h = table_header(["Confidence", "Total", "Wins", "Losses", "Closed", "Win Rate", "Avg P&L", "Avg P&L%"], widths)
         lines.append(h)
 
         for label, lo, hi in CONFIDENCE_BUCKETS:
             cb = r["confidence_buckets"].get(label)
             if cb and cb["total"] > 0:
                 cwr = win_rate(cb["wins"], cb["losses"], cb["closed"])
-                resolved_total = cb["wins"] + cb["losses"]
-                cap_resolved = cb["pnl"] / resolved_total if resolved_total > 0 else 0
-                cap_all = (cb["pnl"] + cb["closed_pnl"]) / cb["total"] if cb["total"] > 0 else 0
-                cpp = (cb["pnl_pct"] + cb["closed_pnl_pct"]) / cb["total"] if cb["total"] > 0 else 0
+                cap = cb["pnl"] / cb["total"] if cb["total"] > 0 else 0
+                cpp = cb["pnl_pct"] / cb["total"] if cb["total"] > 0 else 0
                 lines.append(table_row([label, cb["total"], cb["wins"], cb["losses"], cb["closed"],
-                                       f"{cwr:.1f}%", f"${fmt_num(cap_resolved)}", f"${fmt_num(cap_all)}", f"{cpp:.1f}%"], widths))
+                                       f"{cwr:.1f}%", f"${fmt_num(cap)}", f"{cpp:.1f}%"], widths))
 
         # Any "Other" bucket
         for label, cb in r["confidence_buckets"].items():
             if label not in [l for l, _, _ in CONFIDENCE_BUCKETS] and cb["total"] > 0:
                 cwr = win_rate(cb["wins"], cb["losses"], cb["closed"])
-                resolved_total = cb["wins"] + cb["losses"]
-                cap_resolved = cb["pnl"] / resolved_total if resolved_total > 0 else 0
-                cap_all = (cb["pnl"] + cb["closed_pnl"]) / cb["total"] if cb["total"] > 0 else 0
-                cpp = (cb["pnl_pct"] + cb["closed_pnl_pct"]) / cb["total"] if cb["total"] > 0 else 0
+                cap = cb["pnl"] / cb["total"] if cb["total"] > 0 else 0
+                cpp = cb["pnl_pct"] / cb["total"] if cb["total"] > 0 else 0
                 lines.append(table_row([label, cb["total"], cb["wins"], cb["losses"], cb["closed"],
-                                       f"{cwr:.1f}%", f"${fmt_num(cap_resolved)}", f"${fmt_num(cap_all)}", f"{cpp:.1f}%"], widths))
+                                       f"{cwr:.1f}%", f"${fmt_num(cap)}", f"{cpp:.1f}%"], widths))
 
         lines.append("")
 
@@ -1001,17 +879,15 @@ def generate_report(all_signals, strategy_results):
 
         lines.append("")
 
-        # ── 3. Timeframe Performance (Broad) ─────────────────────
-        lines.append("#### 3) Performance by Timeframe (Time Held — Broad)")
-        lines.append("")
-        lines.append("*Broad buckets covering major session windows.*")
+        # ── 3. Timeframe Performance ─────────────────────────────
+        lines.append("#### 3) Performance by Timeframe (Hold Duration)")
         lines.append("")
         widths = [22, 5, 5, 6, 6, 9, 8]
-        h = table_header(["Time Held", "Total", "Wins", "Losses", "Closed", "Win Rate", "Avg P&L"], widths)
+        h = table_header(["Timeframe", "Total", "Wins", "Losses", "Closed", "Win Rate", "Avg P&L"], widths)
         lines.append(h)
 
-        for tk in sorted(r["time_held_broad"].keys()):
-            twp = r["time_held_broad"][tk]
+        for tk in sorted(r["time_window_perf"].keys()):
+            twp = r["time_window_perf"][tk]
             if twp["total"] > 0:
                 twr = win_rate(twp["wins"], twp["losses"], twp["closed"])
                 tap = twp["pnl"] / twp["total"]
@@ -1019,95 +895,6 @@ def generate_report(all_signals, strategy_results):
                                        f"{twr:.1f}%", f"${fmt_num(tap)}"], widths))
 
         lines.append("")
-
-        # ── 3b. Signal Generation Time ───────────────────────────
-        lines.append("#### 3b) Signal Generation Time")
-        lines.append("")
-        widths = [22, 5, 5, 6, 6, 9, 8, 10]
-        h = table_header(["Time Window", "Total", "Wins", "Losses", "Closed", "Win Rate", "Avg P&L", "Significance"], widths)
-        lines.append(h)
-
-        for sk in sorted(r["signal_time_window"].keys()):
-            sp = r["signal_time_window"][sk]
-            if sp["total"] > 0:
-                swr = win_rate(sp["wins"], sp["losses"], sp["closed"])
-                sap = sp["pnl"] / sp["total"]
-                z, is_sig, low_sample = binomial_z_score(swr, sp["total"], overall_wr)
-                if low_sample:
-                    sig_marker = "⚠️"
-                elif is_sig:
-                    sig_marker = "🟢" if z > 0 else "🔴"
-                else:
-                    sig_marker = "—"
-                lines.append(table_row([sk, sp["total"], sp["wins"], sp["losses"], sp["closed"],
-                                       f"{swr:.1f}%", f"${fmt_num(sap)}", sig_marker], widths))
-
-        lines.append("")
-
-        # ── 3c. Confidence Distribution by Session ───────────────
-        lines.append("#### 3c) Confidence Distribution by Session")
-        lines.append("")
-        lines.append("*Percentage of signals by confidence tier within each US equity session window.*")
-        lines.append("")
-        widths_sc = [22, 6, 10, 10, 10, 9, 9, 9]
-        h_sc = table_header(["Session", "Total", "High (70%+)", "Medium (50-69%)", "Low (<50%)", "High %", "Medium %", "Low %"], widths_sc)
-        lines.append(h_sc)
-
-        session_order = ["Pre-market", "ORB (9:30-10:00)", "Morning (10:00-12:00)", "Afternoon (12:00-16:00)", "After-hours (16:00-20:00)", "Overnight"]
-        for sk in session_order:
-            sc = r["session_confidence"].get(sk)
-            if sc and sc["total"] > 0:
-                high_pct = (sc["high"] / sc["total"]) * 100
-                med_pct = (sc["medium"] / sc["total"]) * 100
-                low_pct = (sc["low"] / sc["total"]) * 100
-                lines.append(table_row([sk, sc["total"], sc["high"], sc["medium"], sc["low"],
-                                       f"{high_pct:.1f}%", f"{med_pct:.1f}%", f"{low_pct:.1f}%"], widths_sc))
-
-        lines.append("")
-
-        # ── 3d. Session × Confidence Cross-Tabulation ────────────
-        # Only show for strategies with data in >=2 sessions AND >=2 confidence buckets
-        scp = r["session_confidence_perf"]
-        sessions_with_data = {s for s, buckets in scp.items() if any(b["total"] > 0 for b in buckets.values())}
-        all_conf_buckets = set()
-        for buckets in scp.values():
-            for label, data in buckets.items():
-                if data["total"] > 0:
-                    all_conf_buckets.add(label)
-
-        if len(sessions_with_data) >= 2 and len(all_conf_buckets) >= 2:
-            lines.append("#### 3d) Session × Confidence Cross-Tabulation")
-            lines.append("")
-            lines.append("*Win rate and avg P&L for each strategy, broken down by both trading session and confidence level simultaneously.*")
-            lines.append("")
-            widths_xc = [22, 10, 6, 5, 6, 6, 9, 12, 10]
-            h_xc = table_header(["Session", "Confidence", "Total", "Wins", "Losses", "Closed", "Win Rate", "Avg P&L (resolved)", "Significance"], widths_xc)
-            lines.append(h_xc)
-
-            session_order = ["Pre-market", "ORB (9:30-10:00)", "Morning (10:00-12:00)", "Afternoon (12:00-16:00)", "After-hours (16:00-20:00)", "Overnight"]
-            conf_order = [l for l, _, _ in CONFIDENCE_BUCKETS]
-
-            for sk in session_order:
-                if sk not in sessions_with_data:
-                    continue
-                for cb_label in conf_order:
-                    cell = scp[sk].get(cb_label)
-                    if not cell or cell["total"] == 0:
-                        continue
-                    cwr = win_rate(cell["wins"], cell["losses"], cell["closed"])
-                    resolved = cell["wins"] + cell["losses"]
-                    avg_p_xc = cell["pnl"] / resolved if resolved > 0 else 0.0
-                    z, is_sig, low_sample = binomial_z_score(cwr, cell["total"], overall_wr)
-                    if low_sample:
-                        sig_marker = "⚠️"
-                    elif is_sig:
-                        sig_marker = "🟢" if z > 0 else "🔴"
-                    else:
-                        sig_marker = "—"
-                    lines.append(table_row([sk, cb_label, cell["total"], cell["wins"], cell["losses"], cell["closed"],
-                                           f"{cwr:.1f}%", f"${fmt_num(avg_p_xc)}", sig_marker], widths_xc))
-
-            lines.append("")
 
         # ── 4. Direction Performance ─────────────────────────────
         lines.append("#### 4) Performance by Direction")
@@ -1126,17 +913,15 @@ def generate_report(all_signals, strategy_results):
 
         lines.append("")
 
-        # ── 5. Hold Time Distribution (Fine-Grained) ─────────────
-        lines.append("#### 5) Hold Time Distribution (Fine-Grained)")
-        lines.append("")
-        lines.append("*Fine-grained buckets covering detailed hold durations.*")
+        # ── 5. Hold Time Distribution ────────────────────────────
+        lines.append("#### 5) Hold Time Distribution")
         lines.append("")
         widths = [22, 5, 5, 6, 6, 9, 8]
         h = table_header(["Hold Time", "Total", "Wins", "Losses", "Closed", "Win Rate", "Avg P&L"], widths)
         lines.append(h)
 
-        for hk in sorted(r["time_held_fine"].keys()):
-            htb = r["time_held_fine"][hk]
+        for hk in sorted(r["hold_time_buckets"].keys()):
+            htb = r["hold_time_buckets"][hk]
             if htb["total"] > 0:
                 hwr = win_rate(htb["wins"], htb["losses"], htb["closed"])
                 hap = htb["pnl"] / htb["total"]
@@ -1307,88 +1092,6 @@ def generate_report(all_signals, strategy_results):
 
     lines.append("")
 
-    # ── Table A: Global Baseline by Session ─────────────────────
-    lines.append("### Global Baseline by Session")
-    lines.append("")
-    lines.append("*Aggregated across all strategies. StdDev = sample stddev of per-strategy win rates within each session.*")
-    lines.append("")
-    widths_session = [22, 8, 6, 6, 6, 9, 8]
-    h_session = table_header(["Session", "Total", "Wins", "Losses", "Closed", "Win Rate", "StdDev"], widths_session)
-    lines.append(h_session)
-
-    session_order = ["Pre-market", "ORB (9:30-10:00)", "Morning (10:00-12:00)", "Afternoon (12:00-16:00)", "After-hours (16:00-20:00)", "Overnight"]
-    session_agg = {s: {"total": 0, "wins": 0, "losses": 0, "closed": 0} for s in session_order}
-    session_strat_rates = {s: [] for s in session_order}
-
-    for sid, r in strategy_results.items():
-        for session, buckets in r.get("session_confidence_perf", {}).items():
-            if session not in session_agg:
-                continue
-            s_agg = session_agg[session]
-            s_rates = session_strat_rates[session]
-            session_total = 0
-            session_wins = 0
-            session_losses = 0
-            session_closed = 0
-            for conf_label, data in buckets.items():
-                if data["total"] > 0:
-                    session_total += data["total"]
-                    session_wins += data["wins"]
-                    session_losses += data["losses"]
-                    session_closed += data.get("closed", 0)
-            if session_total > 0:
-                s_agg["total"] += session_total
-                s_agg["wins"] += session_wins
-                s_agg["losses"] += session_losses
-                s_agg["closed"] += session_closed
-                s_rates.append(win_rate(session_wins, session_losses, session_closed))
-
-    for s in session_order:
-        sa = session_agg[s]
-        if sa["total"] > 0:
-            sr = session_strat_rates[s]
-            sd = 0.0
-            if len(sr) >= 2:
-                mean = sum(sr) / len(sr)
-                variance = sum((r - mean) ** 2 for r in sr) / (len(sr) - 1)
-                sd = variance ** 0.5
-            lines.append(table_row([s, sa["total"], sa["wins"], sa["losses"], sa["closed"],
-                                   f"{win_rate(sa['wins'], sa['losses'], sa['closed']):.1f}%", f"{sd:.1f}"], widths_session))
-
-    lines.append("")
-
-    # ── Table B: Global Baseline by Session × Confidence ────────
-    lines.append("### Global Baseline by Session × Confidence")
-    lines.append("")
-    lines.append("*Aggregated across all strategies. Only cells with ≥ 10 total signals shown.*")
-    lines.append("")
-    widths_xc = [22, 12, 8, 6, 6, 6, 9]
-    h_xc = table_header(["Session", "Confidence", "Total", "Wins", "Losses", "Closed", "Win Rate"], widths_xc)
-    lines.append(h_xc)
-
-    conf_order = [l for l, _, _ in CONFIDENCE_BUCKETS]
-    global_session_buckets = defaultdict(lambda: {"total": 0, "wins": 0, "losses": 0, "closed": 0})
-    for sid, r in strategy_results.items():
-        for session, buckets in r.get("session_confidence_perf", {}).items():
-            if session not in session_agg:
-                continue
-            for conf_label, data in buckets.items():
-                if data["total"] > 0:
-                    gsb = global_session_buckets[(session, conf_label)]
-                    gsb["total"] += data["total"]
-                    gsb["wins"] += data["wins"]
-                    gsb["losses"] += data["losses"]
-                    gsb["closed"] += data.get("closed", 0)
-
-    for sk in session_order:
-        for cb_label in conf_order:
-            gsb = global_session_buckets.get((sk, cb_label))
-            if gsb and gsb["total"] >= 10:
-                lines.append(table_row([sk, cb_label, gsb["total"], gsb["wins"], gsb["losses"], gsb["closed"],
-                                       f"{win_rate(gsb['wins'], gsb['losses'], gsb['closed']):.1f}%"], widths_xc))
-
-    lines.append("")
-
     # Anomalies table
     if anomalies:
         lines.append("### Detected Anomalies")
@@ -1413,129 +1116,13 @@ def generate_report(all_signals, strategy_results):
     lines.append("---")
     lines.append("")
 
-    # ── Session × Confidence Anomalies ─────────────────────────────
-    lines.append("## Session × Confidence Anomalies")
-    lines.append("")
-    lines.append("Cross-tab analysis: how each strategy performs in specific session×confidence combos")
-    lines.append("compared to the global baseline for that same combo. Flags combos where a strategy")
-    lines.append("shows a significant lift (>50% above global) or >1.5σ deviation.")
-    lines.append("")
-
-    # Compute global session×confidence baseline
-    global_session_buckets = defaultdict(lambda: {"total": 0, "wins": 0, "losses": 0, "closed": 0})
-    for sid, r in strategy_results.items():
-        for session, buckets in r.get("session_confidence_perf", {}).items():
-            for conf_label, data in buckets.items():
-                if data["total"] > 0:
-                    gsb = global_session_buckets[(session, conf_label)]
-                    gsb["total"] += data["total"]
-                    gsb["wins"] += data["wins"]
-                    gsb["losses"] += data["losses"]
-                    gsb["closed"] += data.get("closed", 0)
-
-    # Compute win_rate for each global session×confidence combo
-    for key, gsb in global_session_buckets.items():
-        gsb["win_rate"] = win_rate(gsb["wins"], gsb["losses"], gsb["closed"])
-
-    # Compute stddev per session×confidence combo for sigma calculation
-    session_conf_rates = defaultdict(list)
-    for sid, r in strategy_results.items():
-        for session, buckets in r.get("session_confidence_perf", {}).items():
-            for conf_label, data in buckets.items():
-                if data["total"] >= 5:  # minimum sample size
-                    wr = win_rate(data["wins"], data["losses"], data.get("closed", 0))
-                    session_conf_rates[(session, conf_label)].append(wr)
-
-    session_conf_stddevs = {}
-    for key, rates in session_conf_rates.items():
-        if len(rates) >= 2:
-            mean = sum(rates) / len(rates)
-            variance = sum((r - mean) ** 2 for r in rates) / (len(rates) - 1)
-            session_conf_stddevs[key] = variance ** 0.5
-        else:
-            session_conf_stddevs[key] = 0.0
-
-    # Detect session×confidence anomalies
-    session_conf_anomalies = []
-    for sid, r in strategy_results.items():
-        for session, buckets in r.get("session_confidence_perf", {}).items():
-            for conf_label, data in buckets.items():
-                if data["total"] < 5:  # minimum sample size
-                    continue
-
-                gsb = global_session_buckets.get((session, conf_label))
-                if not gsb or gsb["total"] < 10:  # minimum global sample size
-                    continue
-
-                strategy_wr = win_rate(data["wins"], data["losses"], data.get("closed", 0))
-                global_wr = gsb["win_rate"]
-
-                if global_wr == 0:
-                    continue
-
-                # Lift: how much better than global baseline
-                lift = ((strategy_wr - global_wr) / global_wr) * 100 if global_wr > 0 else 0
-
-                # Sigma deviation
-                sd = session_conf_stddevs.get((session, conf_label), 0)
-                sigma = (strategy_wr - global_wr) / sd if sd > 0 else 0
-
-                # Flag if: lift > 50% above global OR > 1.5 sigma above global
-                if lift > 50 or sigma > 1.5:
-                    session_conf_anomalies.append({
-                        "strategy": sid,
-                        "session": session,
-                        "confidence": conf_label,
-                        "strategy_wr": strategy_wr,
-                        "global_wr": global_wr,
-                        "lift": lift,
-                        "sigma": sigma,
-                        "total": data["total"],
-                        "wins": data["wins"],
-                        "losses": data["losses"],
-                    })
-
-    # Sort by lift descending
-    session_conf_anomalies.sort(key=lambda x: x["lift"], reverse=True)
-
-    if session_conf_anomalies:
-        widths = [24, 12, 12, 7, 6, 6, 8, 8, 6, 7, 12]
-        h = table_header(["Strategy", "Session", "Confidence", "Total", "Wins", "Losses",
-                          "Strat WR", "Global WR", "Lift", "Sigma", "Significance"], widths)
-        lines.append(h)
-
-        for a in session_conf_anomalies:
-            if a["sigma"] > 2.0:
-                sig = "⚡ HIGH"
-            elif a["lift"] > 100:
-                sig = "🔥 STRONG"
-            else:
-                sig = "⚠ MODERATE"
-            lines.append(table_row([
-                f"[ALPHA] {a['strategy']}", a["session"], a["confidence"],
-                a["total"], a["wins"], a["losses"],
-                f"{a['strategy_wr']:.1f}%", f"{a['global_wr']:.1f}%",
-                f"{a['lift']:.0f}%", f"{a['sigma']:.2f}", sig
-            ], widths))
-
-        lines.append("")
-        lines.append(f"**{len(session_conf_anomalies)} session×confidence anomaly(ies) detected.** "
-                     f"These represent strategy-specific edges that are active in particular sessions "
-                     f"and confidence levels — useful for time-aware strategy tuning.")
-    else:
-        lines.append("**No session×confidence anomalies detected.** Strategy performance is consistent across sessions and confidence levels.")
-
-    lines.append("")
-    lines.append("---")
-    lines.append("")
-
     # ── Cross-Strategy Rankings ──────────────────────────────────
     lines.append("## Cross-Strategy Rankings")
     lines.append("")
-    widths = [5, 24, 7, 8, 8, 14, 16, 22, 14, 14]
+    widths = [5, 24, 7, 8, 8, 16, 14, 14]
     lines.append(
         table_header(["Rank", "Strategy", "Signals", "Win Rate", "Avg P&L",
-                      "Best Confidence", "Best Session", "Best Session×Conf", "Best Market", "Best Timeframe"], widths)
+                      "Best Confidence", "Best Market", "Best Timeframe"], widths)
     )
 
     ranked = []
@@ -1563,46 +1150,21 @@ def generate_report(all_signals, strategy_results):
 
         best_tf = None
         best_tf_wr = -1
-        for tk, twp in r["time_held_broad"].items():
+        for tk, twp in r["time_window_perf"].items():
             if twp["total"] >= 5:
                 twr = win_rate(twp["wins"], twp["losses"], twp["closed"])
                 if twr > best_tf_wr:
                     best_tf_wr = twr
                     best_tf = tk
 
-        # Best session
-        best_session = None
-        best_session_wr = -1
-        for session, buckets in r.get("session_confidence_perf", {}).items():
-            session_total = sum(b["total"] for b in buckets.values())
-            session_wins = sum(b["wins"] for b in buckets.values())
-            session_losses = sum(b["losses"] for b in buckets.values())
-            if session_total >= 5:
-                s_wr = win_rate(session_wins, session_losses, 0)
-                if s_wr > best_session_wr:
-                    best_session_wr = s_wr
-                    best_session = session
-
-        # Best session × confidence combo
-        best_sc_combo = None
-        best_sc_wr = -1
-        for session, buckets in r.get("session_confidence_perf", {}).items():
-            for conf_label, data in buckets.items():
-                if data["total"] >= 5:
-                    c_wr = win_rate(data["wins"], data["losses"], data["closed"])
-                    if c_wr > best_sc_wr:
-                        best_sc_wr = c_wr
-                        best_sc_combo = f"{session} @ {conf_label}"
-
-        ranked.append((sid, r["total"], wr, avg_p, best_cb, best_session, best_sc_combo, best_mt, best_tf))
+        ranked.append((sid, r["total"], wr, avg_p, best_cb, best_mt, best_tf))
 
     ranked.sort(key=lambda x: x[3], reverse=True)
 
-    for i, (sid, total, wr, avg_p, best_cb, best_session, best_sc_combo, best_mt, best_tf) in enumerate(ranked, 1):
+    for i, (sid, total, wr, avg_p, best_cb, best_mt, best_tf) in enumerate(ranked, 1):
         lines.append(table_row([
             str(i), sid, f"{total:,}", f"{wr:.1f}%", f"${fmt_num(avg_p)}",
-            best_cb or "N/A", best_session or "N/A", best_sc_combo or "N/A",
-            best_mt or "N/A", best_tf or "N/A"
+            best_cb or "N/A", best_mt or "N/A", best_tf or "N/A"
         ], widths))
 
     lines.append("")
@@ -1722,7 +1284,6 @@ def generate_insights(sid, r):
     insights = []
     total = r["total"]
     wr = win_rate(r["wins"], r["losses"], r["closed"])
-    overall_wr = wr  # overall WR for this strategy
     avg_p = avg_pnl(r["pnl_list"])
     avg_h = avg_hold(r["hold_times"])
     
@@ -1734,22 +1295,11 @@ def generate_insights(sid, r):
     else:
         insights.append(f"⚠️ Low win rate of {wr:.1f}% — strategy needs significant tuning. Consider raising minimum confidence or adding filters.")
     
-    # P&L assessment — resolved vs all-inclusive
-    resolved_pnl = r.get("resolved_pnl", [])
-    avg_p_resolved = avg_pnl(resolved_pnl) if resolved_pnl else 0.0
-    avg_p_all = avg_pnl(r["pnl_list"]) if r["pnl_list"] else 0.0
-
-    if avg_p_resolved > 0:
-        insights.append(f"💰 Positive avg P&L per resolved signal: ${avg_p_resolved:.2f} — profitable even with {wr:.1f}% win rate (good risk/reward).")
+    # P&L assessment
+    if avg_p > 0:
+        insights.append(f"💰 Positive avg P&L of ${avg_p:.2f} per signal — profitable even with {wr:.1f}% win rate (good risk/reward).")
     else:
-        insights.append(f"📉 Negative avg P&L per resolved signal: ${avg_p_resolved:.2f} — losses outweigh wins. Review stop-loss placement and entry timing.")
-
-    if avg_p_all != avg_p_resolved:
-        closed_count = r["closed"]
-        if avg_p_all > 0:
-            insights.append(f"💰 Avg P&L per signal (incl. {closed_count} time-outs): ${avg_p_all:.2f}")
-        else:
-            insights.append(f"📉 Avg P&L per signal (incl. {closed_count} time-outs): ${avg_p_all:.2f}")
+        insights.append(f"📉 Negative avg P&L of ${avg_p:.2f} per signal — losses outweigh wins. Review stop-loss placement and entry timing.")
     
     # Confidence analysis
     best_cb = None
@@ -1787,37 +1337,17 @@ def generate_insights(sid, r):
     if best_mt:
         insights.append(f"📈 Best market type: {best_mt} (avg P&L ${best_mt_pnl:.2f}) — this strategy thrives in {best_mt.lower()} conditions.")
     
-    # Timeframe (broad)
+    # Timeframe
     best_tf = None
     best_tf_pnl = -999999
-    for tk, twp in r["time_held_broad"].items():
+    for tk, twp in r["time_window_perf"].items():
         if twp["total"] >= 5:
             tap = twp["pnl"] / twp["total"]
             if tap > best_tf_pnl:
                 best_tf_pnl = tap
                 best_tf = tk
     if best_tf:
-        insights.append(f"⏰ Best timeframe: {best_tf} (avg P&L ${best_tf_pnl:.2f}) — optimal time held is {best_tf}.")
-
-    # Signal generation time
-    best_sw = None
-    best_sw_wr = -1
-    best_sw_total = 0
-    for label, sp in r["signal_time_window"].items():
-        if sp["total"] >= 5:
-            swr = win_rate(sp["wins"], sp["losses"], sp["closed"])
-            if swr > best_sw_wr:
-                best_sw_wr = swr
-                best_sw = label
-                best_sw_total = sp["total"]
-    if best_sw:
-        _, is_sig, low_sample = binomial_z_score(best_sw_wr, best_sw_total, overall_wr)
-        if low_sample:
-            insights.append(f"⚠️ Best signal generation window: {best_sw} ({best_sw_wr:.1f}% win rate) — but only {best_sw_total} signals, results may not be statistically significant.")
-        elif is_sig:
-            insights.append(f"✅ Best signal generation window: {best_sw} ({best_sw_wr:.1f}% win rate) — statistically significant above overall WR.")
-        else:
-            insights.append(f"🕐 Best signal generation window: {best_sw} ({best_sw_wr:.1f}% win rate) — signals in this window have the highest hit rate.")
+        insights.append(f"⏰ Best timeframe: {best_tf} (avg P&L ${best_tf_pnl:.2f}) — optimal hold duration is {best_tf}.")
     
     # Hold time
     if avg_h > 600:
@@ -1837,19 +1367,7 @@ def main():
     print("Loading all signal outcomes...")
     all_signals = load_all_outcomes()
     print(f"Loaded {len(all_signals):,} resolved signals")
-
-    # Market open timestamp detection no longer needed — time windows now use ET session buckets.
-
-    # Verify timestamp extraction on first few signals
-    sample_count = 0
-    for sig in all_signals[:100]:
-        ts = extract_signal_timestamp(sig)
-        if ts > 0:
-            sample_count += 1
-            if sample_count <= 3:
-                print(f"Sample signal: {sig.get('signal_id', '')[:80]} -> {ts}")
-    print(f"Timestamp extraction: {sample_count}/100 samples had valid timestamps")
-
+    
     print("Analyzing strategies...")
     strategy_results = analyze_strategy(all_signals)
     print(f"Found {len(strategy_results)} unique strategies")

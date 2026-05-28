@@ -1,0 +1,758 @@
+# Syngex Strategy Configuration
+# Edit this file to enable/disable strategies or tune parameters.
+# Changes take effect on restart.
+
+# Global settings
+global:
+  min_confidence: 0.0
+  max_signals_per_tick: 10
+  dedup_window_seconds: 60
+
+# Layer 1: Structural (GEX + OHLC) — 8 strategies
+layer1:
+  gamma_wall_bounce:
+    enabled: true
+    tracker:
+      max_hold_seconds: 1800
+    params:
+      wall_proximity_pct: 0.005
+      stop_past_wall_pct: 0.004
+      target_risk_mult: 1.5
+      min_wall_gex: 500000
+      # Depth-aware params
+      min_liquidity_validation_score: 0.25
+      max_liquidity_decay_threshold: 0.40
+      # Wall classification params
+      filter_ghost_walls: true
+      ghost_max_age_seconds: 60
+      filter_magnets: true
+
+  magnet_accelerate:
+    enabled: true
+    tracker:
+      max_hold_seconds: 3600
+    params:
+      magnet_proximity_pct: 0.01
+      ema_fast: 9
+      ema_slow: 21
+
+  gamma_flip_breakout:
+    enabled: true
+    tracker:
+      max_hold_seconds: 3600
+    params:
+      flip_buffer_pct: 0.5
+      atr_mult: 1.5
+      # v2 Regime-Boundary params
+      flip_zone_pct: 0.015
+      negative_gamma_stop_mult: 2.5
+      positive_gamma_stop_mult: 0.75
+      min_confirmation_score: 0.3
+
+  gamma_squeeze:
+    enabled: true
+    tracker:
+      max_hold_seconds: 1800
+    params:
+      atr_threshold: 0.003
+      volume_spike_ratio: 1.5
+      # Depth-aware params (Squeeze-Force v2)
+      liquidity_vacuum_threshold: 0.2
+      wall_strength_min: 0.3
+
+  gex_imbalance:
+    enabled: true
+    tracker:
+      max_hold_seconds: 2700
+    params:
+      put_heavy_threshold: 0.4
+      call_heavy_threshold: 0.6
+      # v2 Imbalance-Velocity params
+      ratio_roc_threshold: 0.10
+      depth_alignment_min: 0.4
+      vwap_deviation_min_std: 1.5
+      regime_gamma_threshold: 500000
+
+  confluence_reversal:
+    enabled: true
+    tracker:
+      max_hold_seconds: 3600
+    params:
+      min_confluence_score: 2
+      velocity_min_zscore: 1.0
+      velocity_min_volume_mult: 1.2
+      iv_weight_max: 1.5
+      iv_weight_skew_threshold: 0.05
+      depth_spike_threshold: 1.5
+      negative_gamma_stop_mult: 1.5
+      positive_gamma_stop_mult: 0.75
+
+  vol_compression_range:
+    enabled: true
+    tracker:
+      max_hold_seconds: 7200
+    params:
+      compression_threshold_pct: 0.5
+      wall_proximity_pct: 0.005
+      # v2 Compression-Master params
+      iv_compression_std_threshold: 0.03
+      depth_spike_threshold: 1.3
+      regime_gamma_intensity_threshold: 500000
+      positive_gamma_stop_mult: 0.7
+
+  gex_divergence:
+    enabled: true
+    tracker:
+      max_hold_seconds: 3600
+    params:
+      # v2 Structural-Decay params
+      accel_window_short: 10
+      accel_window_long: 30
+      accel_min_gamma: 0.0003
+      accel_min_price: 0.0002
+      wall_proximity_pct: 0.005
+      wall_proximity_bonus: 0.15
+      liquidity_decay_threshold: 0.3
+      regime_intensity_threshold: 500000
+      strong_regime_conf_bonus: 0.1
+
+# Layer 2: Alpha Greeks — 5 strategies
+layer2:
+  delta_gamma_squeeze:
+    enabled: true
+    tracker:
+      max_hold_seconds: 1800
+    params:
+      call_wall_proximity_pct: 0.02
+      delta_accel_ratio: 1.15
+      volume_spike_ratio: 1.2
+      min_data_points: 3
+      # v2 Gamma-Velocity params
+      gex_accel_ratio: 1.10
+      delta_accel_min: 1.05
+      gex_accel_min: 1.05
+      liquidity_vacuum_depth_ratio: 0.8
+      iv_roc_threshold: 0.02
+      iv_conf_bonus: 0.08
+      accel_stop_widen_mult: 1.5
+
+  delta_volume_exhaustion:
+    enabled: true
+    tracker:
+      max_hold_seconds: 2700
+    params:
+      # === v1 params (kept for backwards compat) ===
+      delta_decline_ratio: 0.90
+      volume_decline_ratio: 0.85
+      trend_duration: 3
+
+      # === v2 Exhaustion-Master params ===
+      # Liquidity vacuum
+      liquidity_vacuum_ratio_stability: 0.15
+      liquidity_vacuum_spread_widen_mult: 1.2
+
+      # IV acceleration
+      iv_accel_window: 5
+      iv_accel_bonus: 0.15
+      iv_accel_penalty: -0.05
+
+      # Wall proximity
+      wall_proximity_pct: 0.003
+      wall_proximity_bonus: 0.10
+
+      # Regime-adaptive targets
+      negative_gamma_target_mult: 1.5
+      positive_gamma_target_mult: 0.8
+      neutral_gamma_target_mult: 1.0
+      gamma_intensity_threshold: 500000
+
+  call_put_flow_asymmetry:
+    enabled: true
+    tracker:
+      max_hold_seconds: 3600
+    params:
+      # === v1 params (kept for backwards compat) ===
+      flow_threshold: 1.5
+      iv_skew_threshold: 0.03
+      stop_pct: 0.006
+      target_risk_mult: 2.0
+
+      # === v2 Flow-Velocity params ===
+      # Flow acceleration
+      flow_ratio_roc_window: 5
+      flow_ratio_roc_threshold: 0.20
+
+      # Flow breadth
+      flow_breadth_threshold: 0.30
+
+      # Regime intensity
+      gamma_intensity_high_threshold: 500000
+      gamma_intensity_low_threshold: 200000
+      gamma_intensity_high_mult: 1.3
+      gamma_intensity_low_mult: 0.8
+
+      # Wall proximity
+      wall_proximity_pct: 0.005
+      wall_proximity_bonus: 0.10
+
+  iv_gex_divergence:
+    enabled: true
+    tracker:
+      max_hold_seconds: 2700
+    params:
+      # === v1 params (kept for backwards compat) ===
+      iv_decline_pct: 0.05
+      stop_pct: 0.006
+      target_risk_mult: 1.5
+
+      # === v2 Volatility-Snap params ===
+      # IV skew gradient
+      iv_skew_otm_pct: 0.05
+      iv_skew_roc_window: 5
+      iv_skew_roc_threshold: 0.15
+
+      # Gamma density
+      gamma_density_window_pct: 0.01
+      gamma_density_decline_threshold: 0.70
+
+      # Volume-weighted IV
+      iv_volume_min: 100
+
+      # Wall-based stops
+      wall_stop_buffer_pct: 0.002
+      wall_stop_max_distance_pct: 0.02
+      fallback_stop_pct: 0.006
+
+  delta_iv_divergence:
+    enabled: true
+    tracker:
+      max_hold_seconds: 2700
+    params:
+      # === v1 params (kept for backwards compat) ===
+      stop_pct: 0.008
+      target_risk_mult: 2.0
+
+      # === v2 Tail-Risk Divergence params ===
+      # Skew gradient
+      skew_otm_pct: 0.05
+      skew_divergence_threshold: 0.10
+
+      # Decoupling coefficient
+      decoupling_corr_window: 10
+      decoupling_history_window: 30
+      decoupling_threshold: 0.50
+
+      # Gamma regime
+      gamma_density_window_pct: 0.01
+      gamma_density_decline_threshold: 0.70
+
+      # Volatility-scaled targets
+      target_iv_expansion_mult: 2.0
+      target_iv_expansion_cap: 4.0
+
+      # Wall proximity
+      wall_proximity_pct: 0.01
+      wall_proximity_bonus: 0.10
+
+  vamp_momentum:
+    enabled: true
+    tracker:
+      max_hold_seconds: 1800
+    params:
+      # === Core VAMP params ===
+      vamp_mid_dev_threshold: 0.0005       # Δ_VAMP threshold for signal
+      vamp_roc_window: 5                    # Ticks for ROC calculation
+      vamp_roc_threshold: 0.0               # ROC must be > 0 for LONG, < 0 for SHORT
+      min_vamp_data_points: 10              # Min data points for VAMP stability
+
+      # === Gate A: Participant Conviction ===
+      min_avg_participants: 1.5             # Avg participants over top 10
+
+      # === Gate B: Liquidity Density ===
+      liquidity_density_min_mult: 1.2       # Σ size(top 10) > MA(total_depth, 60s) × 1.2
+      depth_ma_window_seconds: 60           # Rolling window for depth MA
+
+      # === Gate C: Spread Stability ===
+      spread_stability_ma_seconds: 300      # 5m MA for spread comparison
+
+      # === Execution ===
+      stop_pct: 0.005                       # 0.5% stop loss
+      target_risk_mult: 1.5                 # 1.5× risk for target
+
+  obi_aggression_flow:
+    enabled: true
+    tracker:
+      max_hold_seconds: 900
+    params:
+      obi_threshold: 0.75
+      af_threshold: 0.5
+      min_obi_data_points: 10
+      min_af_data_points: 5
+      volume_spike_mult: 2.0
+      trade_size_ma_window: 300
+      min_avg_participants: 1.0
+      max_spread_multiplier: 1.5
+      stop_pct: 0.005
+      target_risk_mult: 1.5
+
+  depth_decay_momentum:
+    enabled: true
+    tracker:
+      max_hold_seconds: 1800
+    params:
+      depth_decay_threshold: 0.15
+      depth_decay_lookback: 5
+      min_depth_decay_data_points: 10
+      max_vol_ratio: 0.2
+      min_top5_depth: 100
+      max_evap_participants: 2
+      use_vamp_bias: true
+      stop_pct: 0.005
+      target_risk_mult: 1.5
+
+  depth_imbalance_momentum:
+    enabled: true
+    tracker:
+      max_hold_seconds: 1800
+    params:
+      # === Core IR params ===
+      ir_threshold_long: 3.0
+      ir_threshold_short: 0.6
+      ir_exit_threshold: 1.5
+      min_ir_data_points: 10
+      ir_roc_window: 5
+      ir_roc_threshold_long: 0.0
+      ir_roc_threshold_short: 0.0
+      min_avg_participants: 2.0
+      max_total_depth_decay: 0.05
+      volume_min_mult: 1.0
+      use_vamp_validation: true
+      stop_pct: 0.008
+      target_risk_mult: 2.0
+
+  exchange_flow_concentration:
+    enabled: true
+    tracker:
+      max_hold_seconds: 1800
+    params:
+      # === Core VSI params ===
+      vsi_threshold_long: 2.0
+      vsi_threshold_short: 0.5
+      vsi_roc_threshold_long: 0.0
+      vsi_roc_threshold_short: 0.0
+      min_vsi_data_points: 10
+      # Gate A: Exchange Dominance
+      min_exchange_dominance: 0.15
+      # Gate B: IEX Intent
+      max_iex_intent: 0.35
+      # Gate C: Volume Confirmation
+      volume_min_mult: 0.8
+      # Execution
+      stop_pct: 0.005
+      target_risk_mult: 1.5
+
+  participant_diversity_conviction:
+    enabled: true
+    tracker:
+      max_hold_seconds: 3600
+    params:
+      min_participants: 3.0
+      min_exchanges: 2
+      conviction_threshold: 0.7
+      conviction_exit: 0.4
+      max_participants_norm: 5.0
+      max_exchanges_norm: 4.0
+      min_size_ratio: 0.5
+      stop_pct: 0.008
+      target_risk_mult: 2.0
+
+  participant_divergence_scalper:
+    enabled: true
+    tracker:
+      max_hold_seconds: 180
+    params:
+      fragility_threshold: 0.5
+      robust_threshold: 0.3
+      decay_velocity_threshold: 0.0
+      wall_size_mult: 5.0
+      vol_ratio_spoof: 0.1
+      vol_ratio_robust: 0.5
+      max_spread_mult: 2.0
+      stop_pct: 0.003
+      target_risk_mult: 1.5
+
+  exchange_flow_imbalance:
+    enabled: true
+    tracker:
+      max_hold_seconds: 2700
+    params:
+      vsi_threshold: 0.3
+      vsi_roc_threshold: 0.0
+      min_vsi_data_points: 10
+      iex_intent_threshold: 0.15
+      venue_concentration_threshold: 0.3
+      max_spread_mult: 2.0
+      use_vamp_validation: true
+      stop_pct: 0.005
+      target_risk_mult: 2.0
+
+  exchange_flow_asymmetry:
+    enabled: true
+    tracker:
+      max_hold_seconds: 3600
+    params:
+      esi_threshold: 0.8
+      memx_deviation_threshold: 0.15
+      bats_deviation_threshold: -0.15
+      volume_ratio_threshold: 1.5
+      min_data_points: 10
+      stop_pct: 0.008
+      target_risk_mult: 2.5
+      max_spread_mult: 2.0
+
+  order_book_fragmentation:
+    enabled: true
+    tracker:
+      max_hold_seconds: 300
+    params:
+      frag_threshold: 0.5
+      decay_threshold: -0.1
+      wall_significance_mult: 3.0
+      price_proximity_pct: 0.001
+      vol_ratio_spoof: 0.1
+      vol_ratio_robust: 0.5
+      max_spread_mult: 2.0
+      stop_pct: 0.003
+      target_risk_mult: 3.0
+
+  order_book_stacking:
+    enabled: true
+    tracker:
+      max_hold_seconds: 300
+    params:
+      sis_threshold: 4.0
+      magnitude_factor: 3.0
+      min_participants: 2
+      price_tolerance: 0.001
+      roc_threshold: -0.5
+      vol_ratio_breach: 0.15
+      max_spread_mult: 2.0
+      stop_pct: 0.003
+      target_risk_mult: 3.0
+
+  vortex_compression_breakout:
+    enabled: true
+    tracker:
+      max_hold_seconds: 1800
+    params:
+      spread_z_threshold: -2.0
+      liq_density_threshold: 5000.0
+      vol_spike_threshold: 1.5
+      spread_widening_threshold: 0.0
+      participant_equilibrium_threshold: 1.0
+      use_vamp_validation: true
+      min_data_points: 10
+      stop_pct: 0.005
+      target_risk_mult: 2.0
+
+# Layer 3: Micro-Signal (1Hz) — 4 strategies
+layer3:
+  gamma_volume_convergence:
+    enabled: true
+    tracker:
+      max_hold_seconds: 900
+    params:
+      # === v1 params (kept for backwards compat) ===
+      delta_accel_ratio: 1.15
+      gamma_spike_ratio: 1.20
+      volume_spike_ratio: 1.20
+      stop_pct: 0.005
+      target_pct: 0.010
+      min_data_points: 3
+
+      # === v2 Ignition-Master params ===
+      # Aggressor-weighted volume
+      aggressor_ratio_threshold_long: 0.60
+      aggressor_ratio_threshold_short: 0.40
+      volume_spike_ratio: 1.20
+
+      # Gamma acceleration
+      gamma_accel_window: 5
+      gamma_accel_threshold: 0.10
+
+      # Delta-gamma coupling
+      coupling_min_ratio: 0.5
+
+      # ATR-normalized targets
+      atr_mult: 1.5
+      atr_min_target_pct: 0.003
+      atr_max_target_pct: 0.020
+
+  iv_band_breakout:
+    enabled: true
+    tracker:
+      max_hold_seconds: 2700
+    params:
+      # === v1 params (kept for backwards compat) ===
+      delta_decel_ratio: 0.95
+      price_compression_ratio: 0.40
+      stop_pct: 0.005
+      target_pct: 0.010
+      min_data_points: 3
+
+      # === v2 Breakout-Master params ===
+      # Skew compression
+      skew_otm_pct: 0.05
+      skew_compression_pct: 0.25
+
+      # Gamma regime
+      positive_gamma_target_mult: 2.5
+      negative_gamma_target_mult: 1.5
+
+      # Delta acceleration
+      delta_accel_threshold: 1.10
+
+      # IV-expansion targets
+      target_iv_expansion_mult: 2.5
+      target_iv_expansion_neg_mult: 1.5
+      target_iv_expansion_cap: 4.0
+      target_min_pct: 0.005
+
+  strike_concentration:
+    enabled: true
+    tracker:
+      max_hold_seconds: 900
+    params:
+      top_oi_strikes_count: 3
+      bounce_proximity_pct: 0.003
+      slice_body_ratio: 0.5
+      slice_volume_ratio: 1.20
+      stop_pct: 0.003
+      min_data_points: 3
+      # v2 Liquidity-Momentum params
+      liquidity_vacuum_ratio: 3.0
+      delta_accel_threshold: 1.15
+      gamma_magnitude_threshold: 0.50
+      bounce_target_mult: 1.5
+      slice_target_mult: 2.0
+      atr_normalization_cap: 3.0
+      target_min_pct: 0.003
+
+  theta_burn:
+    enabled: true
+    tracker:
+      max_hold_seconds: 480
+    params:
+      # === v1 params (kept for backwards compat) ===
+      min_net_gamma: 10000.0
+      wall_proximity_pct: 0.005
+      stop_past_wall_pct: 0.003
+      min_target_pct: 0.002
+      max_target_pct: 0.004
+      range_narrowness_ratio: 0.30
+      min_data_points: 3
+
+      # === v2 Pinning-Master params ===
+      # Wall liquidity
+      wall_min_bid_depth: 100
+      wall_min_ask_depth: 100
+      wall_vacuum_depth: 50
+
+      # Delta-gamma divergence
+      divergence_threshold: 0.15    # min divergence score for hard rejection
+
+      # IV-scaled targets
+      iv_target_bounce_max_pct: 0.006
+      iv_target_slice_max_pct: 0.008
+      iv_target_bounce_min_pct: 0.002
+
+# Layer 4: Full-Data (v2) — 4 strategies
+full_data:
+  iv_skew_squeeze:
+    enabled: true
+    tracker:
+      max_hold_seconds: 14400
+    params:
+      # === v1 params (kept for backwards compat) ===
+      skew_extreme_positive: 0.30
+      skew_extreme_negative: -0.10
+      price_stable_threshold: 0.005
+      min_net_gamma: 5000.0
+      stop_pct: 0.005
+      target_pct: 0.008
+      min_data_points: 5
+      min_skew_data_points: 10
+
+      # === v2 Skew-Velocity params ===
+      skew_roc_threshold: 0.05
+      vol_weighted_stability_min: 0.50
+      vol_fragile_threshold: 0.30
+      delta_roc_threshold: 0.05
+      target_iv_expansion_mult: 1.6
+      target_iv_expansion_cap: 2.0
+      target_min_pct: 0.005
+
+  prob_weighted_magnet:
+    enabled: true
+    tracker:
+      max_hold_seconds: 2700
+    params:
+      min_oi_concentration: 5.0
+      consolidation_ratio: 0.40
+      delta_accel_ratio: 1.10
+      min_net_gamma: 5000.0
+      stop_pct: 0.005
+      target_risk_mult: 1.5
+      min_data_points: 3
+
+      # === v2 Velocity-Magnet params ===
+      delta_roc_threshold: 0.05
+      liquidity_vacuum_ratio: 0.30
+      gamma_scale_base: 2.0
+      target_mult_cap: 3.0
+      target_min_pct: 0.005
+
+  prob_distribution_shift:
+    enabled: true
+    tracker:
+      max_hold_seconds: 7200
+    params:
+      z_score_threshold: 2.0
+      min_consecutive_signals: 3
+      min_net_gamma: 5000.0
+      stop_pct: 0.005
+      target_pct: 0.008
+      min_strikes_with_data: 5
+      min_data_points: 10
+      # v2 Momentum-Master params
+      momentum_accel_threshold: 0.10
+      capital_breadth_threshold: 0.10
+      target_iv_expansion_mult: 1.6
+      target_iv_expansion_cap: 2.5
+      target_min_pct: 0.005
+
+  extrinsic_intrinsic_flow:
+    enabled: true
+    tracker:
+      max_hold_seconds: 10800
+    params:
+      extrinsic_expansion_threshold: 0.05
+      extrinsic_collapse_threshold: 0.10
+      volume_spike_ratio: 1.50
+      min_net_gamma: 5000.0
+      stop_pct: 0.005
+      target_pct: 0.008
+      min_data_points: 10
+      # v2 Conviction-Master params
+      extrinsic_accel_threshold: 0.10
+      aggressor_threshold: 0.55
+      target_iv_expansion_mult: 1.6
+      target_iv_expansion_fade_mult: 1.2
+      target_iv_expansion_cap: 2.5
+      target_min_pct: 0.005
+
+  ghost_premium:
+    enabled: true
+    tracker:
+      max_hold_seconds: 7200
+    params:
+      # === Core PDR params ===
+      min_pdr: 0.60
+      min_pdr_data_points: 10
+      # === Gate A: Ask Size Sigma ===
+      ask_size_sigma_mult: 2.0
+      min_ask_size_sigma: 1.0
+      # === Gate B: Stability ===
+      max_net_change_pct: 0.02
+      # === Execution ===
+      stop_pct: 0.005
+      target_risk_mult: 2.0
+
+  skew_dynamics:
+    enabled: true
+    tracker:
+      max_hold_seconds: 14400
+    params:
+      min_psi_sigma: 2.0
+      min_psi_data_points: 10
+      stop_pct: 0.005
+      target_risk_mult: 2.0
+      liquidity_oi_threshold: 100
+
+  smile_dynamics:
+    enabled: true
+    tracker:
+      max_hold_seconds: 14400
+    params:
+      min_omega_sigma: 2.0
+      min_omega_data_points: 10
+      stop_pct: 0.005
+      target_risk_mult: 2.0
+      liquidity_oi_threshold: 100
+
+  extrinsic_flow:
+    enabled: true
+    tracker:
+      max_hold_seconds: 14400
+    params:
+      phi_call_threshold: 3.0
+      phi_put_threshold: 0.3
+      min_phi_data_points: 10
+      phi_sigma_mult: 2.0
+      stop_pct: 0.005
+      target_risk_mult: 2.0
+
+  gamma_breaker:
+    enabled: true
+    tracker:
+      max_hold_seconds: 1800
+    params:
+      min_gamma_break: 0.0005
+      min_wall_gex_sigma: 2.0
+      min_wall_distance_pct: 0.005
+      volume_spike_mult: 1.5
+      stop_pct: 0.005
+      target_risk_mult: 2.0
+
+  iron_anchor:
+    enabled: true
+    tracker:
+      max_hold_seconds: 3600
+    params:
+      max_confluence_distance: 1.0
+      min_liq_wall_sigma: 3.0
+      min_gamma_wall_gex: 500000
+      exhaustion_velocity_mult: 0.8
+      min_data_points: 10
+      stop_pct: 0.008
+      target_risk_mult: 1.5
+
+  sentiment_sync:
+    enabled: true
+    tracker:
+      max_hold_seconds: 3600
+    params:
+      min_sig_sigma: 2.0
+      min_data_points: 10
+      volume_min_mult: 1.0
+      price_confirm_pct: 0.001
+      stop_pct: 0.005
+      target_risk_mult: 2.0
+
+  whale_tracker:
+    enabled: true
+    tracker:
+      max_hold_seconds: 3600
+    params:
+      min_conc_sigma: 5.0
+      max_participants: 2
+      min_biggest_size_sigma: 3.0
+      stop_pct: 0.005
+      target_risk_mult: 2.0
+
+# Layer 0: Master Filter
+filter:
+  net_gamma:
+    enabled: true
+    params:
+      flip_buffer: 0.5

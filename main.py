@@ -2553,11 +2553,6 @@ class SyngexOrchestrator:
         signals = self._strategy_engine.process(data)
 
         if signals:
-            # Track new signals for outcome resolution
-            if self._signal_tracker:
-                for s in signals:
-                    self._signal_tracker.track(s.to_dict())
-
             for s in signals:
                 logger.info("SIGNAL  |  %s  |  %s  |  conf=%.2f  |  %s",
                            s.strategy_id, s.direction.value, s.confidence, s.reason)
