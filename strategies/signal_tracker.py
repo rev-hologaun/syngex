@@ -234,8 +234,9 @@ class SignalTracker:
         hold_time = timestamp - open_sig.timestamp
 
         # Check time expiry first (use per-strategy hold time if set, else global default)
+        # max_hold == 0 means no time limit (disabled)
         max_hold = open_sig.max_hold_seconds if open_sig.max_hold_seconds > 0 else self.max_hold_seconds
-        if hold_time > max_hold:
+        if max_hold > 0 and hold_time > max_hold:
             exit_price = price
             pnl = self._calc_pnl(open_sig.direction, open_sig.entry, exit_price)
             pnl_pct = (pnl / open_sig.risk * 100) if open_sig.risk > 0 else 0.0

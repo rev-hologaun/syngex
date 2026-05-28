@@ -417,7 +417,7 @@ class SyngexOrchestrator:
         # Signal tracker for outcome resolution (symbol-specific log)
         log_dir = self._data_dir.parent / "log"
         self._signal_tracker = SignalTracker(
-            max_hold_seconds=900,  # global default
+            max_hold_seconds=0,  # no global max hold (0 = disabled)
             strategy_hold_times=strategy_hold_times,
             log_dir=str(log_dir),
             symbol=self.symbol,
