@@ -13,7 +13,7 @@ layer1:
   gamma_wall_bounce:
     enabled: true
     tracker:
-      max_hold_seconds: 1800
+      max_hold_seconds: 0
     params:
       wall_proximity_pct: 0.005
       stop_past_wall_pct: 0.004
@@ -30,7 +30,7 @@ layer1:
   magnet_accelerate:
     enabled: true
     tracker:
-      max_hold_seconds: 3600
+      max_hold_seconds: 0
     params:
       magnet_proximity_pct: 0.01
       ema_fast: 9
@@ -39,7 +39,7 @@ layer1:
   gamma_flip_breakout:
     enabled: true
     tracker:
-      max_hold_seconds: 3600
+      max_hold_seconds: 0
     params:
       flip_buffer_pct: 0.5
       atr_mult: 1.5
@@ -52,7 +52,7 @@ layer1:
   gamma_squeeze:
     enabled: true
     tracker:
-      max_hold_seconds: 1800
+      max_hold_seconds: 0
     params:
       atr_threshold: 0.003
       volume_spike_ratio: 1.5
@@ -63,7 +63,7 @@ layer1:
   gex_imbalance:
     enabled: true
     tracker:
-      max_hold_seconds: 2700
+      max_hold_seconds: 0
     params:
       put_heavy_threshold: 0.4
       call_heavy_threshold: 0.6
@@ -76,7 +76,7 @@ layer1:
   confluence_reversal:
     enabled: true
     tracker:
-      max_hold_seconds: 3600
+      max_hold_seconds: 0
     params:
       min_confluence_score: 2
       velocity_min_zscore: 1.0
@@ -90,7 +90,7 @@ layer1:
   vol_compression_range:
     enabled: true
     tracker:
-      max_hold_seconds: 7200
+      max_hold_seconds: 0
     params:
       compression_threshold_pct: 0.5
       wall_proximity_pct: 0.005
@@ -103,7 +103,7 @@ layer1:
   gex_divergence:
     enabled: true
     tracker:
-      max_hold_seconds: 3600
+      max_hold_seconds: 0
     params:
       # v2 Structural-Decay params
       accel_window_short: 10
@@ -121,7 +121,7 @@ layer2:
   delta_gamma_squeeze:
     enabled: true
     tracker:
-      max_hold_seconds: 1800
+      max_hold_seconds: 0
     params:
       call_wall_proximity_pct: 0.02
       delta_accel_ratio: 1.15
@@ -139,7 +139,7 @@ layer2:
   delta_volume_exhaustion:
     enabled: true
     tracker:
-      max_hold_seconds: 2700
+      max_hold_seconds: 0
     params:
       # === v1 params (kept for backwards compat) ===
       delta_decline_ratio: 0.90
@@ -169,7 +169,7 @@ layer2:
   call_put_flow_asymmetry:
     enabled: true
     tracker:
-      max_hold_seconds: 3600
+      max_hold_seconds: 0
     params:
       # === v1 params (kept for backwards compat) ===
       flow_threshold: 1.5
@@ -198,7 +198,7 @@ layer2:
   iv_gex_divergence:
     enabled: true
     tracker:
-      max_hold_seconds: 2700
+      max_hold_seconds: 0
     params:
       # === v1 params (kept for backwards compat) ===
       iv_decline_pct: 0.05
@@ -226,7 +226,7 @@ layer2:
   delta_iv_divergence:
     enabled: true
     tracker:
-      max_hold_seconds: 2700
+      max_hold_seconds: 0
     params:
       # === v1 params (kept for backwards compat) ===
       stop_pct: 0.008
@@ -257,7 +257,7 @@ layer2:
   vamp_momentum:
     enabled: true
     tracker:
-      max_hold_seconds: 1800
+      max_hold_seconds: 0
     params:
       # === Core VAMP params ===
       vamp_mid_dev_threshold: 0.0005       # Δ_VAMP threshold for signal
@@ -282,7 +282,7 @@ layer2:
   obi_aggression_flow:
     enabled: true
     tracker:
-      max_hold_seconds: 900
+      max_hold_seconds: 0
     params:
       obi_threshold: 0.75
       af_threshold: 0.5
@@ -298,7 +298,7 @@ layer2:
   depth_decay_momentum:
     enabled: true
     tracker:
-      max_hold_seconds: 1800
+      max_hold_seconds: 0
     params:
       depth_decay_threshold: 0.15
       depth_decay_lookback: 5
@@ -313,7 +313,7 @@ layer2:
   depth_imbalance_momentum:
     enabled: true
     tracker:
-      max_hold_seconds: 1800
+      max_hold_seconds: 0
     params:
       # === Core IR params ===
       ir_threshold_long: 3.0
@@ -333,7 +333,7 @@ layer2:
   exchange_flow_concentration:
     enabled: true
     tracker:
-      max_hold_seconds: 1800
+      max_hold_seconds: 0
     params:
       # === Core VSI params ===
       vsi_threshold_long: 2.0
@@ -354,7 +354,7 @@ layer2:
   participant_diversity_conviction:
     enabled: true
     tracker:
-      max_hold_seconds: 3600
+      max_hold_seconds: 0
     params:
       min_participants: 3.0
       min_exchanges: 2
@@ -369,7 +369,7 @@ layer2:
   participant_divergence_scalper:
     enabled: true
     tracker:
-      max_hold_seconds: 180
+      max_hold_seconds: 0
     params:
       fragility_threshold: 0.5
       robust_threshold: 0.3
@@ -384,7 +384,7 @@ layer2:
   exchange_flow_imbalance:
     enabled: true
     tracker:
-      max_hold_seconds: 2700
+      max_hold_seconds: 0
     params:
       vsi_threshold: 0.3
       vsi_roc_threshold: 0.0
@@ -399,7 +399,7 @@ layer2:
   exchange_flow_asymmetry:
     enabled: true
     tracker:
-      max_hold_seconds: 3600
+      max_hold_seconds: 0
     params:
       esi_threshold: 0.8
       memx_deviation_threshold: 0.15
@@ -413,7 +413,7 @@ layer2:
   order_book_fragmentation:
     enabled: true
     tracker:
-      max_hold_seconds: 300
+      max_hold_seconds: 0
     params:
       frag_threshold: 0.5
       decay_threshold: -0.1
@@ -428,7 +428,7 @@ layer2:
   order_book_stacking:
     enabled: true
     tracker:
-      max_hold_seconds: 300
+      max_hold_seconds: 0
     params:
       sis_threshold: 4.0
       magnitude_factor: 3.0
@@ -443,7 +443,7 @@ layer2:
   vortex_compression_breakout:
     enabled: true
     tracker:
-      max_hold_seconds: 1800
+      max_hold_seconds: 0
     params:
       spread_z_threshold: -2.0
       liq_density_threshold: 5000.0
@@ -460,7 +460,7 @@ layer3:
   gamma_volume_convergence:
     enabled: true
     tracker:
-      max_hold_seconds: 900
+      max_hold_seconds: 0
     params:
       # === v1 params (kept for backwards compat) ===
       delta_accel_ratio: 1.15
@@ -491,7 +491,7 @@ layer3:
   iv_band_breakout:
     enabled: true
     tracker:
-      max_hold_seconds: 2700
+      max_hold_seconds: 0
     params:
       # === v1 params (kept for backwards compat) ===
       delta_decel_ratio: 0.95
@@ -521,7 +521,7 @@ layer3:
   strike_concentration:
     enabled: true
     tracker:
-      max_hold_seconds: 900
+      max_hold_seconds: 0
     params:
       top_oi_strikes_count: 3
       bounce_proximity_pct: 0.003
@@ -541,7 +541,7 @@ layer3:
   theta_burn:
     enabled: true
     tracker:
-      max_hold_seconds: 480
+      max_hold_seconds: 0
     params:
       # === v1 params (kept for backwards compat) ===
       min_net_gamma: 10000.0
@@ -571,7 +571,7 @@ full_data:
   iv_skew_squeeze:
     enabled: true
     tracker:
-      max_hold_seconds: 14400
+      max_hold_seconds: 0
     params:
       # === v1 params (kept for backwards compat) ===
       skew_extreme_positive: 0.30
@@ -595,7 +595,7 @@ full_data:
   prob_weighted_magnet:
     enabled: true
     tracker:
-      max_hold_seconds: 2700
+      max_hold_seconds: 0
     params:
       min_oi_concentration: 5.0
       consolidation_ratio: 0.40
@@ -615,7 +615,7 @@ full_data:
   prob_distribution_shift:
     enabled: true
     tracker:
-      max_hold_seconds: 7200
+      max_hold_seconds: 0
     params:
       z_score_threshold: 2.0
       min_consecutive_signals: 3
@@ -634,7 +634,7 @@ full_data:
   extrinsic_intrinsic_flow:
     enabled: true
     tracker:
-      max_hold_seconds: 10800
+      max_hold_seconds: 0
     params:
       extrinsic_expansion_threshold: 0.05
       extrinsic_collapse_threshold: 0.10
@@ -654,7 +654,7 @@ full_data:
   ghost_premium:
     enabled: true
     tracker:
-      max_hold_seconds: 7200
+      max_hold_seconds: 0
     params:
       # === Core PDR params ===
       min_pdr: 0.60
@@ -671,7 +671,7 @@ full_data:
   skew_dynamics:
     enabled: true
     tracker:
-      max_hold_seconds: 14400
+      max_hold_seconds: 0
     params:
       min_psi_sigma: 2.0
       min_psi_data_points: 10
@@ -682,7 +682,7 @@ full_data:
   smile_dynamics:
     enabled: true
     tracker:
-      max_hold_seconds: 14400
+      max_hold_seconds: 0
     params:
       min_omega_sigma: 2.0
       min_omega_data_points: 10
@@ -693,7 +693,7 @@ full_data:
   extrinsic_flow:
     enabled: true
     tracker:
-      max_hold_seconds: 14400
+      max_hold_seconds: 0
     params:
       phi_call_threshold: 3.0
       phi_put_threshold: 0.3
@@ -705,7 +705,7 @@ full_data:
   gamma_breaker:
     enabled: true
     tracker:
-      max_hold_seconds: 1800
+      max_hold_seconds: 0
     params:
       min_gamma_break: 0.0005
       min_wall_gex_sigma: 2.0
@@ -717,7 +717,7 @@ full_data:
   iron_anchor:
     enabled: true
     tracker:
-      max_hold_seconds: 3600
+      max_hold_seconds: 0
     params:
       max_confluence_distance: 1.0
       min_liq_wall_sigma: 3.0
@@ -730,7 +730,7 @@ full_data:
   sentiment_sync:
     enabled: true
     tracker:
-      max_hold_seconds: 3600
+      max_hold_seconds: 0
     params:
       min_sig_sigma: 2.0
       min_data_points: 10
@@ -742,7 +742,7 @@ full_data:
   whale_tracker:
     enabled: true
     tracker:
-      max_hold_seconds: 3600
+      max_hold_seconds: 0
     params:
       min_conc_sigma: 5.0
       max_participants: 2
