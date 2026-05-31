@@ -976,7 +976,7 @@ class GEXCalculator:
         """
         # Extract underlying price
         underlying = chain.get("underlying", {})
-        price = underlying.get("lastPrice") or underlying.get("last") or 0.0
+        price = _safe_float(underlying.get("lastPrice") or underlying.get("last") or 0.0)
         if price and price > 0:
             self._update_underlying_price(price)
 
@@ -988,11 +988,11 @@ class GEXCalculator:
             for leg in leg_list:
                 if not isinstance(leg, dict):
                     continue
-                strike = leg.get("strike", 0)
-                gamma = leg.get("Gamma", leg.get("gamma", 0))
-                oi = leg.get("DailyOpenInterest", leg.get("openInterest", leg.get("open_interest", 0)))
-                delta = leg.get("Delta", leg.get("delta", 0.0))
-                iv = leg.get("ImpliedVolatility", leg.get("impliedVolatility", leg.get("iv", 0.0)))
+                strike = _safe_float(leg.get("strike", 0))
+                gamma = _safe_float(leg.get("Gamma", leg.get("gamma", 0)))
+                oi = _safe_float(leg.get("DailyOpenInterest", leg.get("openInterest", leg.get("open_interest", 0))))
+                delta = _safe_float(leg.get("Delta", leg.get("delta", 0.0)))
+                iv = _safe_float(leg.get("ImpliedVolatility", leg.get("impliedVolatility", leg.get("iv", 0.0))))
                 symbol = leg.get("symbol", "")
                 if not symbol:
                     continue
@@ -1014,7 +1014,7 @@ class GEXCalculator:
         for field in numeric_fields:
             value = data.get(field)
             if isinstance(value, str):
-                logger.error(
+                logger.debug(
                     "TYPE GUARD: %s in _update_strike: expected float, got str: %s",
                     field, value,
                 )

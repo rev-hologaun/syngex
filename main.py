@@ -345,10 +345,6 @@ class SyngexOrchestrator:
         self._message_tick: int = 0
         self._tick_modulus: int = 5  # run heavy calcs every Nth tick (5 = 80% reduction)
 
-        # Per-strike computation cache (eliminate redundant GEXCalculator calls)
-        self._strike_delta_cache: Dict[float, Dict[str, float]] = {}
-        self._strike_iv_cache: Dict[float, Optional[float]] = {}
-
         # Heavy calculation results (stored as instance attrs so _report_profile can read them)
         self._iv_skew: Optional[float] = None
         self._extrinsic_proxy: Optional[float] = None
@@ -1736,12 +1732,12 @@ class SyngexOrchestrator:
                 # Aggregate size from all bid/ask levels
                 if msg_type == MSG_TYPE_MARKET_DEPTH_QUOTES:
                     # Per-exchange: Size field is string → int
-                    total_bid_size = sum(int(b.get("Size", 0)) for b in bids)
-                    total_ask_size = sum(int(a.get("Size", 0)) for a in asks)
+                    total_bid_size = sum(b.get("Size", 0) for b in bids)
+                    total_ask_size = sum(a.get("Size", 0) for a in asks)
                 else:
                     # Aggregated: TotalSize field
-                    total_bid_size = sum(int(b.get("TotalSize", 0)) for b in bids)
-                    total_ask_size = sum(int(a.get("TotalSize", 0)) for a in asks)
+                    total_bid_size = sum(b.get("TotalSize", 0) for b in bids)
+                    total_ask_size = sum(a.get("TotalSize", 0) for a in asks)
 
                 # ── Exchange Flow Concentration: parse per-exchange sizes (quotes only) ──
                 if msg_type == MSG_TYPE_MARKET_DEPTH_QUOTES:
@@ -1963,10 +1959,10 @@ class SyngexOrchestrator:
 
                     # ── Participant Diversity Conviction: parse participants + exchanges ──
                     top_bid_participants = (
-                        max(int(b.get("num_participants", 0)) for b in bids) if bids else 0
+                        max(b.get("num_participants", 0) for b in bids) if bids else 0
                     )
                     top_ask_participants = (
-                        max(int(a.get("num_participants", 0)) for a in asks) if asks else 0
+                        max(a.get("num_participants", 0) for a in asks) if asks else 0
                     )
 
                     # Unique exchanges across all levels
@@ -1976,12 +1972,12 @@ class SyngexOrchestrator:
                     # Avg participants across top N levels
                     top_n = min(5, len(bids)) if bids else 0
                     avg_bid_participants = (
-                        sum(int(b.get("num_participants", 0)) for b in bids[:top_n]) / top_n
+                        sum(b.get("num_participants", 0) for b in bids[:top_n]) / top_n
                         if top_n > 0 else 0
                     )
                     top_n_ask = min(5, len(asks)) if asks else 0
                     avg_ask_participants = (
-                        sum(int(a.get("num_participants", 0)) for a in asks[:top_n_ask]) / top_n_ask
+                        sum(a.get("num_participants", 0) for a in asks[:top_n_ask]) / top_n_ask
                         if top_n_ask > 0 else 0
                     )
 
@@ -2026,8 +2022,8 @@ class SyngexOrchestrator:
                     frag_ask = _compute_fragility(asks, "ask_exchanges")
 
                     # Track strongest wall per side (level with max size)
-                    top_bid_level = max(bids, key=lambda b: int(b.get("Size", 0)), default=None)
-                    top_ask_level = max(asks, key=lambda a: int(a.get("Size", 0)), default=None)
+                    top_bid_level = max(bids, key=lambda b: b.get("Size", 0), default=None)
+                    top_ask_level = max(asks, key=lambda a: a.get("Size", 0), default=None)
                     top_bid_wall_size = int(top_bid_level.get("Size", 0)) if top_bid_level else 0
                     top_ask_wall_size = int(top_ask_level.get("Size", 0)) if top_ask_level else 0
 

@@ -37,6 +37,20 @@ from strategies.rolling_keys import (
 logger = logging.getLogger("Syngex.Ingestor.TradeStationClient")
 
 
+def _safe_int(val, default=0):
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(val, default=0.0):
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
+
+
 class TradeStationClient:
     """
     HTTP-streaming client for TradeStation SIM API.
@@ -468,18 +482,6 @@ class TradeStationClient:
         """
         # Build exchange→size maps from the full bid/ask arrays
         # (each entry is one exchange, so we aggregate by exchange name)
-        def _safe_int(val, default=0):
-            try:
-                return int(val)
-            except (TypeError, ValueError):
-                return default
-
-        def _safe_float(val, default=0.0):
-            try:
-                return float(val)
-            except (TypeError, ValueError):
-                return default
-
         bid_exchange_map: Dict[str, int] = {}
         for b in data.get("Bids", []):
             venue = b.get("Name", "")
@@ -611,18 +613,6 @@ class TradeStationClient:
         We normalize to lowercase 'price' for main.py's float() calls but keep
         PascalCase for the fields main.py reads directly.
         """
-        def _safe_int(val, default=0):
-            try:
-                return int(val)
-            except (TypeError, ValueError):
-                return default
-
-        def _safe_float(val, default=0.0):
-            try:
-                return float(val)
-            except (TypeError, ValueError):
-                return default
-
         bids = []
         for b in data.get("Bids", []):
             bids.append({
@@ -675,12 +665,6 @@ class TradeStationClient:
         if not isinstance(chain, dict):
             logger.warning("Option chain response is not a dict — skipping")
             return contracts
-
-        def _safe_float(val, default=0.0):
-            try:
-                return float(val)
-            except (TypeError, ValueError):
-                return default
 
         # Extract underlying price and emit as a separate message
         underlying = chain.get("underlying", {})
