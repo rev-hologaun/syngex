@@ -28,6 +28,14 @@ from strategies.rolling_keys import (
 logger = logging.getLogger("Syngex.Engine.GEXCalculator")
 
 
+def _safe_float(v: Any, default: float = 0.0) -> float:
+    """Safely convert a value to float, returning default on failure."""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
 @dataclass
 class _StrikeBucket:
     """Aggregate state for a single strike price.
@@ -409,15 +417,15 @@ class GEXCalculator:
         summary: Dict[float, Dict[str, float]] = {}
         for strike, bucket in self._ladder.items():
             summary[strike] = {
-                "net_gamma": bucket.normalized_gamma(),
-                "call_gamma": bucket.normalized_call_gamma(),
-                "put_gamma": bucket.normalized_put_gamma(),
-                "call_oi": bucket.call_oi,
-                "put_oi": bucket.put_oi,
-                "net_oi": bucket.net_oi,
-                "net_delta": bucket.net_delta,
-                "call_delta_sum": bucket.call_delta,
-                "put_delta_sum": bucket.put_delta,
+                "net_gamma": _safe_float(bucket.normalized_gamma()),
+                "call_gamma": _safe_float(bucket.normalized_call_gamma()),
+                "put_gamma": _safe_float(bucket.normalized_put_gamma()),
+                "call_oi": _safe_float(bucket.call_oi),
+                "put_oi": _safe_float(bucket.put_oi),
+                "net_oi": _safe_float(bucket.net_oi),
+                "net_delta": _safe_float(bucket.net_delta),
+                "call_delta_sum": _safe_float(bucket.call_delta),
+                "put_delta_sum": _safe_float(bucket.put_delta),
             }
         return summary
 
@@ -999,12 +1007,24 @@ class GEXCalculator:
                 })
 
     def _update_strike(self, data: Dict[str, Any]) -> None:
-        strike = data["strike"]
-        gamma = data["gamma"]
-        oi = data["open_interest"]
+        # Type guard: ensure numeric fields are actually numeric, not strings.
+        # Stream messages can contain string-encoded numbers (e.g. "0.02")
+        # that would silently corrupt calculations if used directly.
+        numeric_fields = ["strike", "gamma", "open_interest", "delta", "iv"]
+        for field in numeric_fields:
+            value = data.get(field)
+            if isinstance(value, str):
+                logger.error(
+                    "TYPE GUARD: %s in _update_strike: expected float, got str: %s",
+                    field, value,
+                )
+
+        strike = _safe_float(data.get("strike", 0.0))
+        gamma = _safe_float(data.get("gamma", 0.0))
+        oi = _safe_float(data.get("open_interest", 0.0))
         side = data.get("side", "")
-        delta = data.get("delta", 0.0)  # Optional from stream greeks
-        iv = data.get("iv", 0.0)  # Optional IV from stream greeks
+        delta = _safe_float(data.get("delta", 0.0))  # Optional from stream greeks
+        iv = _safe_float(data.get("iv", 0.0))  # Optional IV from stream greeks
 
         # Determine sign: call = +1, put = -1
         is_call = side == "call"

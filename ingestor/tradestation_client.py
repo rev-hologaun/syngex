@@ -468,41 +468,53 @@ class TradeStationClient:
         """
         # Build exchange→size maps from the full bid/ask arrays
         # (each entry is one exchange, so we aggregate by exchange name)
+        def _safe_int(val, default=0):
+            try:
+                return int(val)
+            except (TypeError, ValueError):
+                return default
+
+        def _safe_float(val, default=0.0):
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                return default
+
         bid_exchange_map: Dict[str, int] = {}
         for b in data.get("Bids", []):
             venue = b.get("Name", "")
-            size = int(b.get("Size", 0))
+            size = _safe_int(b.get("Size", 0))
             if venue:
                 bid_exchange_map[venue] = bid_exchange_map.get(venue, 0) + size
 
         ask_exchange_map: Dict[str, int] = {}
         for a in data.get("Asks", []):
             venue = a.get("Name", "")
-            size = int(a.get("Size", 0))
+            size = _safe_int(a.get("Size", 0))
             if venue:
                 ask_exchange_map[venue] = ask_exchange_map.get(venue, 0) + size
 
         bids = []
         for b in data.get("Bids", []):
             bids.append({
-                "Price": b.get("Price", 0),
-                "Size": b.get("Size", 0),
-                "OrderCount": b.get("OrderCount", 0),
+                "Price": _safe_float(b.get("Price", 0)),
+                "Size": _safe_int(b.get("Size", 0)),
+                "OrderCount": _safe_int(b.get("OrderCount", 0)),
                 "TimeStamp": b.get("TimeStamp", ""),
-                "exchange": b.get("Name", ""),
-                "num_participants": b.get("OrderCount", 0),
+                "exchange": str(b.get("Name", "")),
+                "num_participants": _safe_int(b.get("OrderCount", 0)),
                 "bid_exchanges": bid_exchange_map,
                 "ask_exchanges": ask_exchange_map,
             })
         asks = []
         for a in data.get("Asks", []):
             asks.append({
-                "Price": a.get("Price", 0),
-                "Size": a.get("Size", 0),
-                "OrderCount": a.get("OrderCount", 0),
+                "Price": _safe_float(a.get("Price", 0)),
+                "Size": _safe_int(a.get("Size", 0)),
+                "OrderCount": _safe_int(a.get("OrderCount", 0)),
                 "TimeStamp": a.get("TimeStamp", ""),
-                "exchange": a.get("Name", ""),
-                "num_participants": a.get("OrderCount", 0),
+                "exchange": str(a.get("Name", "")),
+                "num_participants": _safe_int(a.get("OrderCount", 0)),
                 "bid_exchanges": bid_exchange_map,
                 "ask_exchanges": ask_exchange_map,
             })
@@ -599,27 +611,39 @@ class TradeStationClient:
         We normalize to lowercase 'price' for main.py's float() calls but keep
         PascalCase for the fields main.py reads directly.
         """
+        def _safe_int(val, default=0):
+            try:
+                return int(val)
+            except (TypeError, ValueError):
+                return default
+
+        def _safe_float(val, default=0.0):
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                return default
+
         bids = []
         for b in data.get("Bids", []):
             bids.append({
-                "Price": b.get("Price", 0),
-                "TotalSize": b.get("TotalSize", 0),
-                "BiggestSize": b.get("BiggestSize", 0),
-                "SmallestSize": b.get("SmallestSize", 0),
-                "NumParticipants": b.get("NumParticipants", 0),
-                "TotalOrderCount": b.get("TotalOrderCount", 0),
+                "Price": _safe_float(b.get("Price", 0)),
+                "TotalSize": _safe_int(b.get("TotalSize", 0)),
+                "BiggestSize": _safe_int(b.get("BiggestSize", 0)),
+                "SmallestSize": _safe_int(b.get("SmallestSize", 0)),
+                "NumParticipants": _safe_int(b.get("NumParticipants", 0)),
+                "TotalOrderCount": _safe_int(b.get("TotalOrderCount", 0)),
                 "EarliestTime": b.get("EarliestTime", ""),
                 "LatestTime": b.get("LatestTime", ""),
             })
         asks = []
         for a in data.get("Asks", []):
             asks.append({
-                "Price": a.get("Price", 0),
-                "TotalSize": a.get("TotalSize", 0),
-                "BiggestSize": a.get("BiggestSize", 0),
-                "SmallestSize": a.get("SmallestSize", 0),
-                "NumParticipants": a.get("NumParticipants", 0),
-                "TotalOrderCount": a.get("TotalOrderCount", 0),
+                "Price": _safe_float(a.get("Price", 0)),
+                "TotalSize": _safe_int(a.get("TotalSize", 0)),
+                "BiggestSize": _safe_int(a.get("BiggestSize", 0)),
+                "SmallestSize": _safe_int(a.get("SmallestSize", 0)),
+                "NumParticipants": _safe_int(a.get("NumParticipants", 0)),
+                "TotalOrderCount": _safe_int(a.get("TotalOrderCount", 0)),
                 "EarliestTime": a.get("EarliestTime", ""),
                 "LatestTime": a.get("LatestTime", ""),
             })
@@ -652,13 +676,19 @@ class TradeStationClient:
             logger.warning("Option chain response is not a dict — skipping")
             return contracts
 
+        def _safe_float(val, default=0.0):
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                return default
+
         # Extract underlying price and emit as a separate message
         underlying = chain.get("underlying", {})
         price = underlying.get("lastPrice") or underlying.get("last") or 0.0
         if price and price > 0:
             contracts.append({
                 "type": MSG_TYPE_UNDERLYING_UPDATE,
-                "price": price,
+                "price": _safe_float(price),
             })
 
         for side_key in ("calls", "puts"):
@@ -668,11 +698,11 @@ class TradeStationClient:
             for leg in leg_list:
                 if not isinstance(leg, dict):
                     continue
-                strike = leg.get("strike", 0)
-                gamma = leg.get("Gamma", leg.get("gamma", 0))
-                oi = leg.get("DailyOpenInterest", leg.get("openInterest", leg.get("open_interest", 0)))
-                delta = leg.get("Delta", leg.get("delta", 0.0))
-                iv = leg.get("ImpliedVolatility", leg.get("impliedVolatility", leg.get("iv", 0.0)))
+                strike = _safe_float(leg.get("strike", 0))
+                gamma = _safe_float(leg.get("Gamma", leg.get("gamma", 0)))
+                oi = _safe_float(leg.get("DailyOpenInterest", leg.get("openInterest", leg.get("open_interest", 0))))
+                delta = _safe_float(leg.get("Delta", leg.get("delta", 0.0)))
+                iv = _safe_float(leg.get("ImpliedVolatility", leg.get("impliedVolatility", leg.get("iv", 0.0))))
                 symbol = leg.get("symbol", "")
 
                 if not symbol:

@@ -3056,17 +3056,18 @@ class SyngexOrchestrator:
         ]:
             rw = self._rolling_data.get(rw_key)
             if rw and rw.count > 0:
+                vals = rw.values
                 snap[short_key] = {
-                    "current": rw.values[-1] if rw.values else 0,
-                    "mean": sum(rw.values) / len(rw.values) if rw.values else 0,
+                    "current": float(vals[-1]) if vals else 0.0,
+                    "mean": float(sum(vals)) / float(len(vals)) if vals else 0.0,
                     "count": rw.count,
                 }
         # Non-rolling instance vars that strategies depend on
-        snap["last_size"] = self._last_size
-        snap["bid_avg_participants"] = self._bid_avg_participants
-        snap["ask_avg_participants"] = self._ask_avg_participants
-        snap["bid_max_participants"] = self._bid_max_participants
-        snap["ask_max_participants"] = self._ask_max_participants
+        snap["last_size"] = float(self._last_size) if self._last_size else 0.0
+        snap["bid_avg_participants"] = float(self._bid_avg_participants)
+        snap["ask_avg_participants"] = float(self._ask_avg_participants)
+        snap["bid_max_participants"] = float(self._bid_max_participants)
+        snap["ask_max_participants"] = float(self._ask_max_participants)
         return snap
 
 
