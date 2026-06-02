@@ -11,17 +11,19 @@ LONG: Δ_VAMP > +threshold AND ROC(VAMP) > 0
 SHORT: Δ_VAMP < -threshold AND ROC(VAMP) < 0
 
 Hard gates (all must pass):
-    Gate A: Avg participants >= min_avg_participants (default 1.5)
-    Gate B: Σ size(top 10) > MA(total depth, 60s) × 1.05
+    Gate A: Avg participants >= min_avg_participants (default 1.3)
+    Gate B: Σ size(top 10) > MA(total depth, 60s) × 1.0
 
-Confidence model (5 components, simple average):
+Confidence model (7 components, simple average):
     1. VAMP deviation magnitude     (0.0–0.25)
     2. VAMP ROC strength            (0.0–0.20)
     3. Participant conviction       (0.0–0.15)
     4. Liquidity density            (0.0–0.15)
     5. Spread stability             (0.0–0.10)
+    6. Regime confidence            (0.0–1.0)
+    7. Wall proximity bonus         (0.0–0.15)
 
-MIN_CONFIDENCE = 0.20
+MIN_CONFIDENCE = 0.10
 """
 
 from __future__ import annotations
@@ -43,7 +45,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.VampMomentum")
 
-MIN_CONFIDENCE = 0.20
+MIN_CONFIDENCE = 0.10
 
 
 class VampMomentum(BaseStrategy):
@@ -137,35 +139,58 @@ class VampMomentum(BaseStrategy):
             n_levels = len(bid_levels) + len(ask_levels)
             avg_participants = total_participants / n_levels if n_levels > 0 else 0.0
 
-        # 4. Apply 3 HARD GATES
-        # Gate A: Participant conviction
-        min_avg_participants = params.get("min_avg_participants", 1.5)
-        gate_a = avg_participants >= min_avg_participants
+        # 4. Soft gate scores (0.0-1.0) — replace hard gates
+        min_avg_participants = params.get("min_avg_participants", 1.3)
+        # Gate A: participant score — 0.0 at 1.0, 1.0 at 2.0
+        gate_a_score = min(1.0, avg_participants / 2.0)
 
-        # Gate B: Liquidity density
-        liquidity_density_min_mult = params.get("liquidity_density_min_mult", 1.05)
+        # Gate B: liquidity density score — 0.0 at 0.5×MA, 1.0 at 2.0×MA
+        liquidity_density_min_mult = params.get("liquidity_density_min_mult", 1.0)
         depth_ma_window = params.get("depth_ma_window_seconds", 60)
-        gate_b = True
+        gate_b_score = 0.0
         if depth_density_history and depth_density_history.count > 0:
             ma_depth = depth_density_history.mean or 0
             if ma_depth > 0:
-                gate_b = current_total_size > ma_depth * liquidity_density_min_mult
+                density_ratio = current_total_size / ma_depth
+                gate_b_score = max(0.0, min(1.0, (density_ratio - 0.5) / 1.5))
+        else:
+            gate_b_score = 0.5  # neutral when no history
 
-        all_gates_pass = gate_a and gate_b
-        if not all_gates_pass:
-            return []
+        # Combined gate score — minimum of both (both need some strength)
+        combined_gate_score = min(gate_a_score, gate_b_score) * 0.7 + 0.3 * max(gate_a_score, gate_b_score)
 
-        # 5. Signal direction check
-        vamp_mid_dev_threshold = params.get("vamp_mid_dev_threshold", 0.0005)
+        # 5. Signal direction check — combined trigger score (60% deviation + 40% ROC)
+        vamp_mid_dev_threshold = params.get("vamp_mid_dev_threshold", 0.0003)
         vamp_roc_threshold = params.get("vamp_roc_threshold", 0.0)
 
+        # Deviation score: 0.0 at threshold, 1.0 at 5× threshold
+        dev_threshold = vamp_mid_dev_threshold
+        if abs(vamp_mid_dev) >= dev_threshold:
+            dev_score = min(1.0, abs(vamp_mid_dev) / (dev_threshold * 5))
+        else:
+            dev_score = abs(vamp_mid_dev) / (dev_threshold * 5) * 0.5  # partial credit below threshold
+
+        # ROC score: 0.0 at 0, 1.0 at 0.01
+        roc_score = min(1.0, abs(vamp_roc) / 0.01) if vamp_roc != 0 else 0.0
+
+        # Combined trigger: 60% deviation + 40% ROC
+        combined_trigger = 0.6 * dev_score + 0.4 * roc_score
+
+        # Direction: whichever side has higher combined score
+        long_score = 0.6 * dev_score + 0.4 * (1.0 if vamp_roc > vamp_roc_threshold else 0.0)
+        short_score = 0.6 * dev_score + 0.4 * (1.0 if vamp_roc < vamp_roc_threshold else 0.0)
+
         direction = None
-        if vamp_mid_dev > vamp_mid_dev_threshold and vamp_roc > vamp_roc_threshold:
+        if long_score > short_score and long_score > 0.20:
             direction = "LONG"
-        elif vamp_mid_dev < -vamp_mid_dev_threshold and vamp_roc < vamp_roc_threshold:
+        elif short_score > long_score and short_score > 0.20:
             direction = "SHORT"
 
         if direction is None:
+            return []
+
+        # 5b. Gate score filter — combined gate must be at least 0.15
+        if combined_gate_score < 0.15:
             return []
 
         # 6. Compute confidence (7-component model)
@@ -173,15 +198,12 @@ class VampMomentum(BaseStrategy):
             vamp_mid_dev, vamp_roc, avg_participants,
             current_total_size, depth_density_history,
             current_spread, spread_ma_window,
-            direction, regime, gex_calc,
+            direction, regime, gex_calc, underlying_price,
             bid_levels, ask_levels,
         )
 
-        min_confidence = MIN_CONFIDENCE
-        max_confidence = 1.0
-        confidence = max(min_confidence, confidence)
-
-        if confidence < min_confidence:
+        # No clamping — confidence is computed from components, not forced up
+        if confidence < MIN_CONFIDENCE:
             return []
 
         # 7. Build signal with entry/stop/target
@@ -222,8 +244,9 @@ class VampMomentum(BaseStrategy):
                 "total_size": round(current_total_size, 2),
                 "spread": round(current_spread, 4),
                 "gates": {
-                    "A_participants": gate_a,
-                    "B_liquidity_density": gate_b,
+                    "A_participants_score": round(gate_a_score, 3),
+                    "B_liquidity_density_score": round(gate_b_score, 3),
+                    "combined_gate_score": round(combined_gate_score, 3),
                 },
                 "bid_levels_count": len(bid_levels),
                 "ask_levels_count": len(ask_levels),
@@ -242,14 +265,15 @@ class VampMomentum(BaseStrategy):
         direction: str,
         regime: str,
         gex_calc: Any,
+        underlying_price: float,
         bid_levels: List[Dict[str, Any]],
         ask_levels: List[Dict[str, Any]],
         depth_score: Optional[float] = None,
     ) -> float:
         """
-        Compute 5-component simple average confidence score (Family A).
+        Compute 7-component simple average confidence score.
 
-        Each component normalizes to [0,1], then average equally (÷5).
+        Each component normalizes to [0,1], then average equally (÷7).
 
         Returns 0.0–1.0.
         """
@@ -259,7 +283,7 @@ class VampMomentum(BaseStrategy):
         params = self._params
 
         # 1. VAMP deviation: abs(vamp_mid_dev) from 0→0.0025 (threshold=0.0005, 5x=0.0025), higher = higher
-        dev_threshold = params.get("vamp_mid_dev_threshold", 0.0005)
+        dev_threshold = params.get("vamp_mid_dev_threshold", 0.0003)
         c1 = normalize(abs(vamp_mid_dev), 0.0, dev_threshold * 5.0)
 
         # 2. VAMP ROC: abs(vamp_roc) from 0→0.01, aligned = 1.0, misaligned = 0.25
@@ -268,11 +292,11 @@ class VampMomentum(BaseStrategy):
         if roc_aligned:
             c2 = normalize(roc_magnitude, 0.0, 0.01)
         else:
-            c2 = 0.25  # baseline for misaligned
+            c2 = 0.10  # minimal baseline for misaligned ROC
 
-        # 3. Participant conviction: avg_participants from min_participants→2×min_participants, higher = higher
-        min_participants = params.get("min_avg_participants", 1.5)
-        c3 = normalize(avg_participants, min_participants, min_participants * 2.0)
+        # 3. Participant conviction: avg_participants from 1.0→3.0, higher = higher
+        # (relaxed from min_participants→2×min_participants to 1.0→3.0 for softer scale)
+        c3 = normalize(avg_participants, 1.0, 5.0)
 
         # 4. Liquidity density: density_ratio from 0→2.0, higher = higher
         density_ratio = 0.0
@@ -287,8 +311,72 @@ class VampMomentum(BaseStrategy):
         if spread_ma_window and spread_ma_window.count > 0:
             ma_spread = spread_ma_window.mean or 0
             if ma_spread > 0:
-                spread_ratio = current_spread / ma_spread
-        c5 = 1.0 - normalize(spread_ratio, 0.0, 1.0)
+                spread_ratio = min(2.0, current_spread / ma_spread)  # cap at 2× MA
+        c5 = 1.0 - normalize(spread_ratio, 0.0, 2.0)  # normalize against 0→2.0 range
 
-        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+        # 6. Regime confidence — 1.0 for low-vol regimes, 0.6 for mixed, 0.25 for high-vol
+        regime_score = self._regime_confidence(regime)
+
+        # 7. Wall proximity bonus — check if near gamma wall
+        wall_score = self._wall_proximity_score(gex_calc, underlying_price, direction)
+
+        confidence = (c1 + c2 + c3 + c4 + c5 + regime_score + wall_score) / 7.0
         return min(1.0, max(0.0, confidence))
+
+    def _regime_confidence(self, regime: str) -> float:
+        """Regime confidence component (0.0–1.0).
+
+        Low-vol regimes support cleaner momentum signals.
+        High-vol regimes are noisy — reduce confidence.
+        """
+        regime_lower = regime.lower() if regime else ""
+        if "low" in regime_lower or "calm" in regime_lower:
+            return 1.0
+        elif "medium" in regime_lower or "moderate" in regime_lower or "mixed" in regime_lower:
+            return 0.6
+        elif "high" in regime_lower or "volatile" in regime_lower or "stress" in regime_lower:
+            return 0.25
+        else:
+            return 0.5  # unknown regime — neutral
+
+    def _wall_proximity_score(self, gex_calc: Any, price: float, direction: str) -> float:
+        """Wall proximity confidence component (0.0–0.15).
+
+        When near a gamma wall, price tends to be attracted/repelled.
+        Proximity to a wall in the trade direction boosts confidence.
+        """
+        WALL_PROX_PCT = 0.01  # 1% proximity threshold
+        WALL_PROX_BONUS = 0.15  # max bonus
+
+        if gex_calc is None:
+            return 0.0
+
+        try:
+            walls = gex_calc.get_walls() if hasattr(gex_calc, "get_walls") else []
+            if not walls:
+                return 0.0
+
+            best_dist = float("inf")
+            for wall in walls:
+                wall_strike = wall.get("strike", 0)
+                if wall_strike <= 0:
+                    continue
+                dist = abs(wall_strike - price) / price
+
+                # Check if wall is on the favorable side
+                favorable = False
+                if direction == "LONG" and wall_strike > price:
+                    favorable = True  # call wall above = resistance
+                elif direction == "SHORT" and wall_strike < price:
+                    favorable = True  # put wall below = support
+
+                if favorable and dist < best_dist:
+                    best_dist = dist
+
+            if best_dist <= WALL_PROX_PCT:
+                # Linear scale: 0% = full bonus, threshold = 0
+                return WALL_PROX_BONUS * (1.0 - best_dist / WALL_PROX_PCT)
+        except Exception:
+            pass
+
+        return 0.0
