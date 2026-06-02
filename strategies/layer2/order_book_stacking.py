@@ -21,17 +21,20 @@ Signal types:
     STACK_BOUNCE_SHORT: Mean reversion rejection off ask stack
     STACK_BREACH_LONG:  Momentum breakdown as bid stack evaporates
 
-Hard gates (all must pass):
-    Gate A: Stack size >= 3× average level size (significant stack)
-    Gate B: >= 2 unique participants (anti-spoof)
-    Gate C: Volume/depth ratio confirms real consumption for breach signals
+This is a **filter-style structural concentration engine** — it produces graded signal strength
+based on SIS magnitude and ROC direction, not binary pass/fail.
 
-Confidence model (5 components, sum to 1.0):
-    1. Stack intensity magnitude    (0.0–0.35)
-    2. Stack decay velocity         (0.0–0.25)
-    3. Participant diversity        (0.0–0.15)
-    4. Volume confirmation          (0.0–0.15)
-    5. Spread tightness             (0.0–0.10)
+Signal strength per type:
+    strength = sis_component + roc_component (continuous 0–1)
+    signal_strength = strength * 0.5 + mag * 0.15 + parts * 0.15 + vol * 0.10 + spread * 0.10
+    Emit when signal_strength >= 0.25 and sis_strength >= 0.15
+
+Confidence model (5 components, weighted sum to 1.0):
+    1. SIS intensity        (weight 0.35)
+    2. ROC magnitude        (weight 0.25)
+    3. Volume confirmation  (weight 0.15)
+    4. Spread tightness     (weight 0.10)
+    5. Participant diversity (weight 0.15)
 """
 
 from __future__ import annotations
@@ -69,7 +72,7 @@ def normalize(val: float, vmin: float, vmax: float) -> float:
 
 logger = logging.getLogger("Syngex.Strategies.OrderBookStacking")
 
-MIN_CONFIDENCE = 0.0
+MIN_CONFIDENCE = 0.25
 
 
 class OrderBookStacking(BaseStrategy):
@@ -124,32 +127,54 @@ class OrderBookStacking(BaseStrategy):
         current_bid_roc = sis_bid_roc_window.values[-1]
         current_ask_roc = sis_ask_roc_window.values[-1]
 
-        # 2. Determine signal direction and type
+        # 2. Compute continuous strength for each of the 4 signal types
         sis_threshold = params.get("sis_threshold", 4.0)
-        magnitude_factor = params.get("magnitude_factor", 3.0)
-        min_participants = params.get("min_participants", 2)
-        price_tolerance = params.get("price_tolerance", 0.001)
         roc_threshold = params.get("roc_threshold", -0.5)
+        moderate_threshold = params.get("moderate_threshold", 2.0)
 
-        # Stack Bounce LONG — massive bid stack holding
-        stack_bounce_long = current_sis_bid > sis_threshold
+        # STACK_BOUNCE_LONG — massive bid stack holding (high SIS, neutral/positive ROC)
+        stack_bounce_long_strength = 0.0
+        if current_sis_bid > moderate_threshold and current_bid_roc >= roc_threshold:
+            # Strength proportional to how much SIS exceeds moderate threshold
+            stack_bounce_long_strength = (current_sis_bid - moderate_threshold) / (sis_threshold - moderate_threshold)
+            # ROC bonus: positive ROC (stack building) = stronger bounce
+            if current_bid_roc > 0:
+                stack_bounce_long_strength *= min(1.0, current_bid_roc / 0.5)
 
-        # Stack Breach SHORT — massive ask stack being eaten
-        stack_breach_short = (
-            current_sis_ask > sis_threshold
-            and current_ask_roc < roc_threshold
-        )
+        # STACK_BREACH_SHORT — massive ask stack being eaten (high SIS, negative ROC)
+        stack_breach_short_strength = 0.0
+        if current_sis_ask > moderate_threshold and current_ask_roc < roc_threshold:
+            stack_breach_short_strength = (current_sis_ask - moderate_threshold) / (sis_threshold - moderate_threshold)
+            # ROC urgency: more negative ROC = stronger breach
+            roc_magnitude = abs(current_ask_roc)
+            stack_breach_short_strength *= min(1.0, roc_magnitude / max(0.01, abs(roc_threshold)))
 
-        # Stack Bounce SHORT — massive ask stack holding
-        stack_bounce_short = current_sis_ask > sis_threshold
+        # STACK_BOUNCE_SHORT — massive ask stack holding
+        stack_bounce_short_strength = 0.0
+        if current_sis_ask > moderate_threshold and current_ask_roc >= roc_threshold:
+            stack_bounce_short_strength = (current_sis_ask - moderate_threshold) / (sis_threshold - moderate_threshold)
+            if current_ask_roc > 0:
+                stack_bounce_short_strength *= min(1.0, current_ask_roc / 0.5)
 
-        # Stack Breach LONG — massive bid stack evaporating
-        stack_breach_long = (
-            current_sis_bid > sis_threshold
-            and current_bid_roc < roc_threshold
-        )
+        # STACK_BREACH_LONG — massive bid stack evaporating
+        stack_breach_long_strength = 0.0
+        if current_sis_bid > moderate_threshold and current_bid_roc < roc_threshold:
+            stack_breach_long_strength = (current_sis_bid - moderate_threshold) / (sis_threshold - moderate_threshold)
+            roc_magnitude = abs(current_bid_roc)
+            stack_breach_long_strength *= min(1.0, roc_magnitude / max(0.01, abs(roc_threshold)))
 
-        if not stack_bounce_long and not stack_breach_short and not stack_bounce_short and not stack_breach_long:
+        # Find the strongest signal
+        candidates = [
+            ("STACK_BOUNCE_LONG", "LONG", stack_bounce_long_strength, 0.0),
+            ("STACK_BREACH_SHORT", "SHORT", stack_breach_short_strength, abs(current_ask_roc)),
+            ("STACK_BOUNCE_SHORT", "SHORT", stack_bounce_short_strength, 0.0),
+            ("STACK_BREACH_LONG", "LONG", stack_breach_long_strength, abs(current_bid_roc)),
+        ]
+        candidates.sort(key=lambda x: x[2], reverse=True)
+        signal_type, direction, strength, roc_strength = candidates[0]
+
+        # Emit only if strongest signal exceeds minimum strength
+        if strength < 0.15:
             return []
 
         # 3. Compute vol_ratio, spread, and stack significance for gates
@@ -158,68 +183,39 @@ class OrderBookStacking(BaseStrategy):
         avg_spread = self._compute_avg_spread(rolling_data)
         avg_level_size = self._compute_avg_level_size(rolling_data)
 
-        # 4. Build candidate signals and pick the strongest
-        candidates = []
+        # 5. Extract regime and gex_calc from data for confidence model
+        regime = data.get("regime", "neutral")
+        gex_calc = data.get("gex_calculator", {})
 
-        if stack_bounce_long:
-            candidates.append(("STACK_BOUNCE_LONG", "LONG", current_sis_bid, 0.0))
-        if stack_breach_short:
-            candidates.append(("STACK_BREACH_SHORT", "SHORT", current_sis_ask, abs(current_ask_roc)))
-        if stack_bounce_short:
-            candidates.append(("STACK_BOUNCE_SHORT", "SHORT", current_sis_ask, 0.0))
-        if stack_breach_long:
-            candidates.append(("STACK_BREACH_LONG", "LONG", current_sis_bid, abs(current_bid_roc)))
-
-        if not candidates:
-            return []
-
-        # Pick the strongest signal by combined strength
-        candidates.sort(key=lambda x: x[2] + x[3], reverse=True)
-        signal_type, direction, strength, roc_strength = candidates[0]
-
-        # 5. Apply HARD GATES
-        # Gate A: Magnitude — stack must be >= 3× average level size
-        gate_a = self._gate_a_magnitude(
-            direction, magnitude_factor, avg_level_size, rolling_data
+        # 6. Compute soft gate scores (replaces hard gates)
+        mag_score = self._gate_a_magnitude_score(
+            direction, avg_level_size, rolling_data
         )
-        if not gate_a:
-            logger.debug(
-                "Stacking: Gate A failed — stack not significant enough for %s",
-                direction,
-            )
-            return []
-
-        # Gate B: Participant gate — >= 2 unique participants
-        gate_b = self._gate_b_participants(
-            direction, min_participants, rolling_data
+        part_score = self._gate_b_participants_score(
+            direction, rolling_data
         )
-        if not gate_b:
+        vol_score = self._gate_c_vol_score(signal_type, vol_ratio)
+        spread_score = self._gate_d_spread_score(spread, avg_spread)
+
+        # Combine into signal_strength
+        signal_strength = (
+            strength * 0.5
+            + mag_score * 0.15
+            + part_score * 0.15
+            + vol_score * 0.10
+            + spread_score * 0.10
+        )
+
+        # Emit when signal_strength >= threshold
+        if signal_strength < 0.25:
             logger.debug(
-                "Stacking: Gate B failed — insufficient participants for %s (%s)",
-                direction, signal_type,
+                "Stacking: signal_strength %.3f below threshold for %s (%s)",
+                signal_strength, direction, signal_type,
             )
             return []
 
-        # Gate C: Volume/depth ratio for breach signals
-        gate_c = self._gate_c_vol_depth(signal_type, vol_ratio, params)
-        if not gate_c:
-            logger.debug(
-                "Stacking: Gate C failed — vol/depth mismatch for %s (%s)",
-                direction, signal_type,
-            )
-            return []
-
-        # Gate D: Spread tightness
-        gate_d = self._gate_d_spread(spread, avg_spread, params)
-        if not gate_d:
-            logger.debug(
-                "Stacking: Gate D failed — spread too wide for %s",
-                direction,
-            )
-            return []
-
-        # 6. Compute confidence (5-component model)
-        confidence = self._compute_confidence(
+        # 7. Compute confidence (5-component model)
+        confidence, conf_breakdown = self._compute_confidence(
             signal_type, direction,
             current_sis_bid, current_sis_ask,
             current_bid_roc, current_ask_roc,
@@ -228,13 +224,9 @@ class OrderBookStacking(BaseStrategy):
         )
 
         min_confidence = MIN_CONFIDENCE
-        max_confidence = 1.0
         confidence = max(min_confidence, confidence)
 
-        if confidence < min_confidence:
-            return []
-
-        # 7. Build signal with entry/stop/target
+        # 8. Build signal with entry/stop/target
         stop_pct = params.get("stop_pct", 0.003)
         target_risk_mult = params.get("target_risk_mult", 3.0)
 
@@ -266,6 +258,9 @@ class OrderBookStacking(BaseStrategy):
             metadata={
                 "signal_type": signal_type,
                 "direction": direction,
+                "strength": round(strength, 4),
+                "roc_strength": round(roc_strength, 4),
+                "signal_strength": round(signal_strength, 4),
                 "sis_bid": round(current_sis_bid, 4),
                 "sis_ask": round(current_sis_ask, 4),
                 "bid_roc": round(current_bid_roc, 6),
@@ -273,34 +268,33 @@ class OrderBookStacking(BaseStrategy):
                 "vol_ratio": round(vol_ratio, 4),
                 "spread": round(spread, 4),
                 "avg_spread": round(avg_spread, 4),
-                "gates": {
-                    "A_magnitude": gate_a,
-                    "B_participants": gate_b,
-                    "C_vol_depth": gate_c,
-                    "D_spread": gate_d,
-                },
+                "magnitude_score": round(mag_score, 4),
+                "participants_score": round(part_score, 4),
+                "volume_score": round(vol_score, 4),
+                "spread_score": round(spread_score, 4),
+                "conf_breakdown": conf_breakdown,
+                "regime": regime,
             },
         )]
 
     # ------------------------------------------------------------------
-    # Gate helpers
+    # Gate helpers (soft scores)
     # ------------------------------------------------------------------
 
-    def _gate_a_magnitude(
+    def _gate_a_magnitude_score(
         self,
         direction: str,
-        magnitude_factor: float,
         avg_level_size: float,
         rolling_data: Dict[str, Any],
-    ) -> bool:
+    ) -> float:
         """
-        Gate A: Stack magnitude.
+        Gate A: Magnitude score (soft).
 
-        The stack on the signal side must be >= magnitude_factor ×
-        average level size. Ensures we're looking at a real stack, not noise.
+        Returns a float 0.0–1.0 based on how large the wall is
+        relative to the average level size.
         """
         if avg_level_size <= 0:
-            return True  # Can't compute — pass
+            return 0.5  # Can't compute — neutral
 
         top_wall_key = (
             KEY_TOP_WALL_BID_SIZE_5M if direction == "LONG" else KEY_TOP_WALL_ASK_SIZE_5M
@@ -308,25 +302,24 @@ class OrderBookStacking(BaseStrategy):
         top_wall_rw = rolling_data.get(top_wall_key)
 
         if not top_wall_rw or top_wall_rw.count < 1:
-            return True  # Can't evaluate — pass
+            return 0.5  # Can't evaluate — neutral
 
         current_wall = top_wall_rw.values[-1]
         if current_wall <= 0:
-            return False
+            return 0.0
 
-        return current_wall >= avg_level_size * magnitude_factor
+        wall_ratio = current_wall / avg_level_size
+        return min(1.0, wall_ratio / 10.0)
 
-    def _gate_b_participants(
+    def _gate_b_participants_score(
         self,
         direction: str,
-        min_participants: int,
         rolling_data: Dict[str, Any],
-    ) -> bool:
+    ) -> float:
         """
-        Gate B: Participant diversity.
+        Gate B: Participant score (soft).
 
-        The stack must have >= min_participants unique participants
-        to avoid single-player spoofing.
+        Returns a float 0.0–1.0 based on unique participant count.
         """
         bid_participants_window = rolling_data.get(KEY_BID_PARTICIPANTS_5M)
         ask_participants_window = rolling_data.get(KEY_ASK_PARTICIPANTS_5M)
@@ -337,46 +330,42 @@ class OrderBookStacking(BaseStrategy):
             window = ask_participants_window
 
         if not window or window.count < 1:
-            return True  # Can't evaluate — pass
+            return 0.5  # Can't evaluate — neutral
 
         current_participants = window.values[-1]
-        return current_participants >= min_participants
+        return min(1.0, current_participants / 5.0)
 
-    def _gate_c_vol_depth(
+    def _gate_c_vol_score(
         self,
         signal_type: str,
         vol_ratio: float,
-        params: Dict[str, Any],
-    ) -> bool:
+    ) -> float:
         """
-        Gate C: Volume/depth ratio.
+        Gate C: Volume score (soft).
 
-        For breach signals: confirm volume/depth ratio indicates real
-        consumption, not just evaporation.
+        For breach signals: volume/depth ratio indicates real consumption.
+        For bounce signals: no volume requirement.
         """
         if signal_type.startswith("STACK_BREACH"):
-            # Breach signals: need evidence of real volume consumption
-            threshold = params.get("vol_ratio_breach", 0.15)
-            return vol_ratio >= threshold
+            return min(1.0, vol_ratio / 1.0)
         else:
-            # Bounce signals: no volume requirement needed
-            return True
+            return 1.0
 
-    def _gate_d_spread(
+    def _gate_d_spread_score(
         self,
         spread: float,
         avg_spread: float,
-        params: Dict[str, Any],
-    ) -> bool:
+    ) -> float:
         """
-        Gate D: Spread tightness.
+        Gate D: Spread score (soft).
 
-        Current spread must be < max_spread_mult × average spread.
+        Returns a float 0.0–1.0 based on current vs average spread.
+        Lower spread ratio = higher score.
         """
-        max_spread_mult = params.get("max_spread_mult", 2.0)
         if avg_spread <= 0:
-            return True  # Can't evaluate — pass
-        return spread < avg_spread * max_spread_mult
+            return 0.5
+        spread_ratio = spread / avg_spread
+        return max(0.0, 1.0 - (spread_ratio - 1.0) / 2.0)
 
     # ------------------------------------------------------------------
     # Metric helpers
@@ -426,7 +415,7 @@ class OrderBookStacking(BaseStrategy):
         return 0.0  # Can't compute
 
     # ------------------------------------------------------------------
-    # Confidence model (5 components, sum to 1.0)
+    # Confidence model (5 components, weighted sum to 1.0)
     # ------------------------------------------------------------------
 
     def _compute_confidence(
@@ -434,36 +423,55 @@ class OrderBookStacking(BaseStrategy):
         vol_ratio, spread, avg_spread, rolling_data, data, params, regime,
         gex_calc, depth_score=None,
     ):
-        """Combine all factors into a single confidence score — 5 components.
+        """Combine all factors into a single confidence score — 5 weighted components.
 
-        Returns 0.0–1.0.
+        Returns (confidence: float, breakdown: dict).
         """
-        intensity_threshold = params.get("intensity_threshold", 0.5)
-
-        # Select based on signal type and direction
-        if signal_type.startswith("SPOOF"):
-            intensity = top_wall_size
-            decay_val = decay
+        # Direction-specific values
+        if direction == "LONG":
+            sis = sis_bid
+            roc = bid_roc
         else:
-            intensity = avg_level_size / top_wall_size if top_wall_size > 0 else 1.0
-            decay_val = decay
+            sis = sis_ask
+            roc = ask_roc
 
-        # 1. Intensity: intensity from threshold→2.0, higher = higher
-        c1 = normalize(intensity, intensity_threshold, 2.0)
+        # c1: SIS intensity (weight 0.35) — main anchor
+        c1 = min(1.0, sis / 8.0)  # scales 0→1 as SIS grows from 0→8
 
-        # 2. Decay: abs(decay_val) from 0→0.5, higher = higher
-        c2 = normalize(abs(decay_val), 0.0, 0.5)
+        # c2: ROC magnitude (weight 0.25) — urgency of stack change
+        c2 = min(1.0, abs(roc) / 2.0)  # scales 0→1 as |ROC| grows from 0→2
 
-        # 3. Wall significance: wall_ratio from 1→10, higher = higher
-        wall_ratio = top_wall_size / avg_level_size if avg_level_size > 0 else 1.0
-        c3 = normalize(wall_ratio, 1.0, 10.0)
+        # c3: Volume confirmation (weight 0.15)
+        c3 = normalize(vol_ratio, 0.0, 2.0)
 
-        # 4. Volume: vol_ratio from 0→2.0, higher = higher
-        c4 = normalize(vol_ratio, 0.0, 2.0)
+        # c4: Spread tightness (weight 0.10)
+        if avg_spread > 0:
+            spread_ratio = spread / avg_spread
+            c4 = max(0.0, 1.0 - (spread_ratio - 1.0) / 2.0)
+        else:
+            c4 = 0.5
 
-        # 5. Spread stability: spread_ratio from 0→1.5, lower = more stable, invert
-        spread_ratio = spread / avg_spread if avg_spread > 0 else 1.0
-        c5 = 1.0 - normalize(spread_ratio, 0.0, 1.5)
+        # c5: Participant diversity (weight 0.15)
+        bid_part_window = rolling_data.get(KEY_BID_PARTICIPANTS_5M)
+        ask_part_window = rolling_data.get(KEY_ASK_PARTICIPANTS_5M)
+        if direction == "LONG":
+            part_window = bid_part_window
+        else:
+            part_window = ask_part_window
 
-        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
-        return min(1.0, max(0.0, confidence))
+        if part_window and part_window.count >= 1:
+            current_parts = part_window.values[-1]
+            c5 = min(1.0, current_parts / 5.0)  # scales 0→1 as participants grow from 0→5
+        else:
+            c5 = 0.5  # neutral when no data
+
+        # Weighted average
+        confidence = (c1 * 0.35 + c2 * 0.25 + c3 * 0.15 + c4 * 0.10 + c5 * 0.15)
+        breakdown = {
+            "c1_sis": round(c1, 3),
+            "c2_roc": round(c2, 3),
+            "c3_volume": round(c3, 3),
+            "c4_spread": round(c4, 3),
+            "c5_participants": round(c5, 3),
+        }
+        return min(1.0, max(0.0, confidence)), breakdown
