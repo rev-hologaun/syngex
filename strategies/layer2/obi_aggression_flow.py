@@ -43,7 +43,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.ObiAggressionFlow")
 
-MIN_CONFIDENCE = 0.0
+MIN_CONFIDENCE = 0.10
 
 # Throttle info-level logging to once per N evaluation cycles
 _eval_counter = 0
@@ -95,8 +95,8 @@ class ObiAggressionFlow(BaseStrategy):
         _eval_counter += 1
 
         # --- 3. Master trigger: OBI × AF ---
-        obi_threshold = params.get("obi_threshold", 0.75)
-        af_threshold = params.get("af_threshold", 0.5)
+        obi_threshold = params.get("obi_threshold", 0.60)
+        af_threshold = params.get("af_threshold", 0.40)
         min_obi_points = params.get("min_obi_data_points", 10)
         min_af_points = params.get("min_af_data_points", 5)
 
@@ -105,13 +105,17 @@ class ObiAggressionFlow(BaseStrategy):
         if af_window.count < min_af_points:
             return []
 
-        # LONG: OBI > threshold AND AF > threshold
-        # SHORT: OBI < -threshold AND AF < -threshold
+        # Combined score approach: OBI and AF agree on direction
+        combined = abs(current_obi) + abs(current_af)
+        combined_threshold = obi_threshold + af_threshold  # 0.60 + 0.40 = 1.0
+
         direction = None
-        if current_obi > obi_threshold and current_af > af_threshold:
-            direction = "LONG"
-        elif current_obi < -obi_threshold and current_af < -af_threshold:
-            direction = "SHORT"
+        if combined > combined_threshold:
+            direction = "LONG" if current_obi > 0 else "SHORT"
+        elif abs(current_obi) > obi_threshold and current_obi * current_af > 0:
+            direction = "LONG" if current_obi > 0 else "SHORT"
+        elif abs(current_af) > af_threshold and current_obi * current_af > 0:
+            direction = "LONG" if current_af > 0 else "SHORT"
 
         if direction is None:
             logger.debug(
@@ -120,22 +124,16 @@ class ObiAggressionFlow(BaseStrategy):
             )
             return []
 
-        # --- 4. Apply 3 HARD GATES ---
-        gate_a, gate_b, gate_c = self._evaluate_gates(
+        # --- 4. Evaluate gates (now returns scores, not bools) ---
+        gate_a_score, gate_b_score, gate_c_score = self._evaluate_gates(
             data, rolling_data, params, direction,
         )
-
-        if not (gate_a and gate_b and gate_c):
-            logger.warning(
-                "OBI_AF gate failed: direction=%s gates=[A=%s B=%s C=%s]",
-                direction, gate_a, gate_b, gate_c,
-            )
-            return []
 
         # --- 5. Compute confidence (7-component model) ---
         confidence = self._compute_confidence(
             current_obi, current_af, data, rolling_data, params,
             direction, regime, gex_calc,
+            gate_a_score, gate_b_score, gate_c_score,
         )
 
         min_confidence = MIN_CONFIDENCE
@@ -189,9 +187,9 @@ class ObiAggressionFlow(BaseStrategy):
                 "af": round(current_af, 4),
                 "obi_af_product": round(current_obi * current_af, 4),
                 "gates": {
-                    "A_volume_spike": gate_a,
-                    "B_participant_diversity": gate_b,
-                    "C_spread_stability": gate_c,
+                    "A_volume_spike": round(gate_a_score, 3),
+                    "B_participant_diversity": round(gate_b_score, 3),
+                    "C_spread_stability": round(gate_c_score, 3),
                 },
                 "regime": regime,
                 "risk": round(stop_distance, 4),
@@ -209,81 +207,55 @@ class ObiAggressionFlow(BaseStrategy):
         direction: str,
     ) -> tuple:
         """
-        Evaluate the 3 hard gates. All must pass for signal emission.
-
-        Gate A: Latest trade size > volume_spike_mult × MA(trade_size)
-        Gate B: Avg participants > min_avg_participants
-        Gate C: Current spread < max_spread_multiplier × MA(spread)
+        Evaluate gates and return confidence scores (0.0–1.0) for each.
         """
-        # --- Gate A: Volume threshold ---
-        trade_size_mult = params.get("volume_spike_mult", 2.0)
+        # --- Gate A: Volume score ---
+        trade_size_mult = params.get("volume_spike_mult", 1.5)
         trade_size_window = rolling_data.get(KEY_TRADE_SIZE_5M)
-        gate_a = True
+        gate_a_score = 1.0
         if trade_size_window and trade_size_window.count > 0:
-            avg_trade_size = sum(trade_size_window.values) / len(
-                trade_size_window.values
-            )
-            # Get latest trade size from depth snapshot or quotes
+            avg_trade_size = sum(trade_size_window.values) / len(trade_size_window.values)
             depth_snapshot = data.get("depth_snapshot", {})
             latest_trade_size = depth_snapshot.get("last_size", 0)
-            if avg_trade_size > 0:
-                # No trade data yet → skip gate (treat as pass)
-                if latest_trade_size == 0:
-                    logger.debug(
-                        "OBI_AF Gate A: last_size=0 (no trade data yet), skipping",
-                    )
-                    gate_a = True
+            if avg_trade_size > 0 and latest_trade_size > 0:
+                trade_size_ratio = latest_trade_size / avg_trade_size
+                if trade_size_ratio >= trade_size_mult:
+                    gate_a_score = 1.0
+                elif trade_size_ratio >= 1.0:
+                    gate_a_score = trade_size_ratio / trade_size_mult
                 else:
-                    trade_size_ratio = latest_trade_size / avg_trade_size
-                    gate_a = latest_trade_size > avg_trade_size * trade_size_mult
-                    if _eval_counter % _EVAL_THROTTLE == 0:
-                        logger.info(
-                            "OBI_AF Gate A (Volume Spike): last_size=%d avg_trade_size=%.1f ratio=%.2f threshold=%.1f | %s",
-                            latest_trade_size, avg_trade_size,
-                            trade_size_ratio, trade_size_mult,
-                            "PASS" if gate_a else "FAIL",
-                        )
+                    gate_a_score = 0.0
 
-        # --- Gate B: Participant diversity ---
+        # --- Gate B: Participant score ---
         min_avg_participants = params.get("min_avg_participants", 1.0)
-        gate_b = True
+        gate_b_score = 1.0
         depth_snapshot = data.get("depth_snapshot", {})
         bid_avg = depth_snapshot.get("bid_avg_participants", 0)
         ask_avg = depth_snapshot.get("ask_avg_participants", 0)
         if bid_avg > 0 or ask_avg > 0:
             avg_participants = (bid_avg + ask_avg) / 2
-            gate_b = avg_participants >= min_avg_participants
-            if _eval_counter % _EVAL_THROTTLE == 0:
-                logger.info(
-                    "OBI_AF Gate B (Participant Diversity): bid_avg=%d ask_avg=%d avg_participants=%.1f min=%s | %s",
-                    bid_avg, ask_avg, avg_participants, min_avg_participants,
-                    "PASS" if gate_b else "FAIL",
-                )
-        else:
-            # No participant data yet → skip gate (treat as pass)
-            logger.debug(
-                "OBI_AF Gate B: both participant avgs=0 (no participant data yet), skipping",
-            )
-            gate_b = True
+            if avg_participants >= min_avg_participants:
+                gate_b_score = 1.0
+            else:
+                gate_b_score = avg_participants / min_avg_participants
 
-        # --- Gate C: Spread stability ---
+        # --- Gate C: Spread score ---
         max_spread_mult = params.get("max_spread_multiplier", 1.5)
-        gate_c = True
+        gate_c_score = 1.0
         spread_window = rolling_data.get(KEY_DEPTH_SPREAD_5M)
         if spread_window and spread_window.count > 0:
             ma_spread = spread_window.mean or 0
             current_spread = depth_snapshot.get("spread", 0)
             if ma_spread > 0:
-                gate_c = current_spread < ma_spread * max_spread_mult
-                if _eval_counter % _EVAL_THROTTLE == 0:
-                    logger.info(
-                        "OBI_AF Gate C (Spread Stability): current_spread=%.4f ma_spread=%.4f ratio=%.2f max_mult=%s | %s",
-                        current_spread, ma_spread,
-                        current_spread / ma_spread if ma_spread > 0 else 0,
-                        max_spread_mult, "PASS" if gate_c else "FAIL",
-                    )
+                spread_ratio = current_spread / ma_spread
+                if spread_ratio <= 1.0:
+                    gate_c_score = 1.0
+                elif spread_ratio <= max_spread_mult:
+                    gate_c_score = 1.0 - (spread_ratio - 1.0) / max_spread_mult * 0.5
+                else:
+                    gate_c_score = 0.5
 
-        return gate_a, gate_b, gate_c
+        return gate_a_score, gate_b_score, gate_c_score
 
     def _compute_confidence(
         self,
@@ -295,7 +267,9 @@ class ObiAggressionFlow(BaseStrategy):
         direction: str,
         regime: str,
         gex_calc: Any,
-        depth_score: Optional[float] = None,
+        gate_a_score: float = 1.0,
+        gate_b_score: float = 1.0,
+        gate_c_score: float = 1.0,
     ) -> float:
         """
         Compute 5-component simple average confidence score (Family A).
@@ -307,9 +281,9 @@ class ObiAggressionFlow(BaseStrategy):
         def normalize(val: float, vmin: float, vmax: float) -> float:
             return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
 
-        obi_threshold = params.get("obi_threshold", 0.75)
-        af_threshold = params.get("af_threshold", 0.5)
-        trade_size_mult = params.get("volume_spike_mult", 2.0)
+        obi_threshold = params.get("obi_threshold", 0.60)
+        af_threshold = params.get("af_threshold", 0.40)
+        trade_size_mult = params.get("volume_spike_mult", 1.5)
 
         # 1. OBI magnitude: abs(current_obi) from 0→1.0, higher = higher
         c1 = normalize(abs(current_obi), 0.0, 1.0)
@@ -325,6 +299,7 @@ class ObiAggressionFlow(BaseStrategy):
         # 4. Volume spike: trade_size_ratio from 0→trade_size_mult, higher = higher
         trade_size_window = rolling_data.get(KEY_TRADE_SIZE_5M)
         trade_size_ratio = 1.0
+        latest_trade_size = 0
         if trade_size_window and trade_size_window.count > 0:
             avg_trade_size = sum(trade_size_window.values) / len(trade_size_window.values)
             depth_snapshot = data.get("depth_snapshot", {})
@@ -349,7 +324,9 @@ class ObiAggressionFlow(BaseStrategy):
         else:
             c5 = normalize(avg_participants, 0.0, min_avg_participants * 2.0)
 
-        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+        c6 = gate_a_score  # Volume spike score
+        c7 = gate_b_score  # Participant diversity score
+        confidence = (c1 + c2 + c3 + c4 + c5 + c6 + c7) / 7.0
         confidence = min(1.0, max(0.0, confidence))
 
         global _eval_counter

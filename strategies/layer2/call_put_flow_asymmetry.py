@@ -49,16 +49,16 @@ logger = logging.getLogger("Syngex.Strategies.CallPutFlowAsymmetry")
 # ---------------------------------------------------------------------------
 
 # Flow score threshold: call score must exceed put score by this ratio
-FLOW_THRESHOLD = 1.5                # Call Score > 1.5× Put Score
+FLOW_THRESHOLD = 1.2                # Call Score > 1.2× Put Score
 
 # Minimum greeks data points for aggregation
-MIN_GREEKS_POINTS = 3
+MIN_GREEKS_POINTS = 2
 
 # IV skew threshold: call IV must be below put IV by this amount
-IV_SKEW_THRESHOLD = 0.03            # 3% IV difference
+IV_SKEW_THRESHOLD = 0.015            # 1.5% IV difference
 
 # Minimum confidence to emit (v2: raised from 0.35)
-MIN_CONFIDENCE = 0.0
+MIN_CONFIDENCE = 0.10
 
 # Stop and target
 STOP_PCT = 0.006                    # 0.6% stop
@@ -204,58 +204,62 @@ class CallPutFlowAsymmetry(BaseStrategy):
         rolling_data: Dict[str, Any],
         flow_ratio: float,
         direction: str,
-    ) -> bool:
+    ) -> float:
         """
-        Check if flow ratio is accelerating (rate-of-change detection).
+        Check if flow ratio is accelerating. Returns 0.0–1.0 score.
 
-        Reads KEY_FLOW_RATIO_5M rolling window and computes ROC over
-        the last 5 data points.
-
-        For call-dominant (LONG): ROC > 0.20 (ratio rising ≥20%)
-        For put-dominant (SHORT): ROC < -0.20 (ratio falling ≥20%)
-
-        Returns True if acceleration gate passes, False otherwise.
+        For call-dominant (LONG): ROC > 0.20 → 1.0, ROC > 0 → partial credit
+        For put-dominant (SHORT): ROC < -0.20 → 1.0, ROC < 0 → partial credit
         """
         window = rolling_data.get(KEY_FLOW_RATIO_5M)
         if window is None or window.count < 5:
-            return False
+            return 0.0
 
         try:
             values = window.values
             if len(values) < 5:
-                return False
+                return 0.0
 
             current = values[-1]
             value_5_ago = values[-5]
 
             if value_5_ago == 0:
-                return False
+                return 0.0
 
             flow_roc = (current - value_5_ago) / value_5_ago
 
             if direction == "LONG":
-                # Call-dominant: ratio should be rising
-                return flow_roc > 0.20
+                if flow_roc > 0.20:
+                    return 1.0
+                elif flow_roc > 0:
+                    return flow_roc / 0.20  # partial credit
+                else:
+                    return 0.0
             else:
-                # Put-dominant: ratio should be falling
-                return flow_roc < -0.20
+                if flow_roc < -0.20:
+                    return 1.0
+                elif flow_roc < 0:
+                    return abs(flow_roc) / 0.20  # partial credit
+                else:
+                    return 0.0
         except (IndexError, TypeError):
-            return False
+            return 0.0
 
     def _check_flow_breadth(
         self,
         flow_breadth: Optional[float],
-    ) -> bool:
+    ) -> float:
         """
         Check if flow is broad-based across strikes.
-
-        Hard gate: breadth > 0.30 (at least 30% of strikes participating)
-
-        Returns True if breadth gate passes, False otherwise.
+        Returns 0.0–1.0 score.
         """
         if flow_breadth is None:
-            return False
-        return flow_breadth > 0.30
+            return 0.0
+        # breadth > 0.30 → 1.0, linear interpolation from 0.0 to 0.30
+        if flow_breadth >= 0.30:
+            return 1.0
+        else:
+            return flow_breadth / 0.30
 
     def _compute_regime_intensity(self, net_gamma: float) -> float:
         """
@@ -332,8 +336,8 @@ class CallPutFlowAsymmetry(BaseStrategy):
     def _compute_confidence(
         self,
         flow_ratio: float,
-        flow_roc: bool,
-        flow_breadth: bool,
+        flow_roc: float,        # was: bool, now: float 0.0-1.0
+        flow_breadth: float,    # was: bool, now: float 0.0-1.0
         iv_aligned: bool,
         vol_aligned: bool,
         net_gamma: float,
@@ -345,65 +349,62 @@ class CallPutFlowAsymmetry(BaseStrategy):
         """
         Combine flow asymmetry factors into confidence (v2 Flow-Velocity).
 
-        7 components:
-            1. Flow ratio magnitude: 0.0–0.15 (soft)
-            2. Flow acceleration: 0.0 or 0.20 (hard gate)
-            3. Flow breadth: 0.0 or 0.15 (hard gate)
-            4. IV skew alignment: 0.0–0.15 (soft)
-            5. Volume alignment: 0.0–0.10 (soft)
-            6. Regime intensity: 0.0–0.10 (soft)
-            7. Wall proximity bonus: +0.0 to +0.10 (bonus)
+        7-component AVERAGE (each normalized to 0.0–1.0, then divided by 7):
+            1. Flow ratio magnitude: 0.0–1.0
+            2. Flow acceleration: 0.0–1.0
+            3. Flow breadth: 0.0–1.0
+            4. IV skew alignment: 0.0–1.0
+            5. Volume alignment: 0.0–1.0
+            6. Regime intensity: 0.0–1.0
+            7. Wall proximity: 0.0–1.0
 
         Returns 0.0–1.0.
         """
-        # 1. Flow ratio magnitude (0.0–0.15)
-        ratio_conf = self._ratio_confidence(flow_ratio)
+        # 1. Flow ratio magnitude: normalize to 0.0–1.0
+        ratio_conf = self._ratio_confidence_normalized(flow_ratio)
 
-        # 2. Flow acceleration (hard gate — 0.0 or 0.20)
-        accel_conf = 0.20 if flow_roc else 0.0
+        # 2. Flow acceleration: already 0.0–1.0 from _check_flow_acceleration
+        accel_conf = flow_roc
 
-        # 3. Flow breadth (hard gate — 0.0 or 0.15)
-        breadth_conf = 0.15 if flow_breadth else 0.0
+        # 3. Flow breadth: already 0.0–1.0 from _check_flow_breadth
+        breadth_conf = flow_breadth
 
-        # 4. IV skew alignment (soft — 0.0–0.15)
-        iv_conf = 0.15 if iv_aligned else 0.0
+        # 4. IV skew alignment: 0.0 or 1.0
+        iv_conf = 1.0 if iv_aligned else 0.0
 
-        # 5. Volume alignment (soft — 0.0–0.10)
-        vol_conf = 0.10 if vol_aligned else 0.0
+        # 5. Volume alignment: 0.0 or 1.0
+        vol_conf = 1.0 if vol_aligned else 0.0
 
-        # 6. Regime intensity (soft — 0.0–0.10)
+        # 6. Regime intensity: normalize to 0.0–1.0
         regime_mult = self._compute_regime_intensity(net_gamma)
-        regime_conf = 0.025 + 0.075 * (regime_mult - 0.8) / (1.3 - 0.8)
+        # regime_mult ranges from 0.8 to 1.3, normalize to 0.0–1.0
+        regime_conf = (regime_mult - 0.8) / (1.3 - 0.8)  # 0.0 to 1.0
 
-        confidence = ratio_conf + accel_conf + breadth_conf + iv_conf + vol_conf + regime_conf
+        confidence = (ratio_conf + accel_conf + breadth_conf + iv_conf + vol_conf + regime_conf) / 6.0
 
-        # 7. Wall proximity bonus (+0.0 to +0.10)
+        # 7. Wall proximity bonus: add up to +0.10 (as a fraction of total)
         wall_bonus, wall_dist_pct, wall_type = self._check_wall_proximity(
             gex_calc, price, direction
         )
-        confidence += wall_bonus
+        confidence += wall_bonus / 7.0  # bonus is 1/7th of total
 
         return min(1.0, max(0.0, confidence))
 
-    def _ratio_confidence(self, flow_ratio: float) -> float:
+    def _ratio_confidence_normalized(self, flow_ratio: float) -> float:
         """
-        Compute confidence component from flow ratio magnitude.
+        Compute normalized confidence component from flow ratio magnitude.
+        Returns 0.0–1.0.
 
-        Uses logarithmic scaling:
-            ratio = threshold → 0.0
-            ratio = 10.0 → 0.15
-
-        Handles both call-dominant (ratio > 1) and put-dominant cases.
+        Uses logarithmic scaling from FLOW_THRESHOLD to 10.0.
         """
-        # Normalize: for put-dominant, invert the ratio
         if flow_ratio < 1.0:
             normalized = 1.0 / flow_ratio if flow_ratio > 0 else 10.0
         else:
             normalized = flow_ratio
 
-        # Logarithmic scaling from threshold to 10.0
         log_ratio = min(normalized, 10.0)
-        return 0.15 * min(1.0, (log_ratio - FLOW_THRESHOLD) / (10.0 - FLOW_THRESHOLD))
+        # Return 0.0–1.0 (remove the 0.15 weight — caller divides by 7)
+        return min(1.0, (log_ratio - FLOW_THRESHOLD) / (10.0 - FLOW_THRESHOLD))
 
     def _evaluate_call_dominant(
         self,
@@ -430,14 +431,13 @@ class CallPutFlowAsymmetry(BaseStrategy):
         # Check volume dominance
         vol_up = self._check_volume_up(rolling_data)
 
-        # Flow acceleration hard gate
+        # Flow acceleration score (0.0 or 1.0)
         flow_roc = self._check_flow_acceleration(rolling_data, flow_ratio, "LONG")
 
-        # Flow breadth hard gate
+        # Flow breadth score (0.0 or 1.0)
         breadth_pass = self._check_flow_breadth(flow_breadth)
 
-        if not flow_roc or not breadth_pass:
-            return []
+        # No early return — scores feed into confidence
 
         confidence = self._compute_confidence(
             flow_ratio, flow_roc, breadth_pass,
@@ -524,14 +524,13 @@ class CallPutFlowAsymmetry(BaseStrategy):
         # Check volume down (volume spike on selling)
         vol_down = self._check_volume_down(rolling_data)
 
-        # Flow acceleration hard gate
+        # Flow acceleration score (0.0 or 1.0)
         flow_roc = self._check_flow_acceleration(rolling_data, flow_ratio, "SHORT")
 
-        # Flow breadth hard gate
+        # Flow breadth score (0.0 or 1.0)
         breadth_pass = self._check_flow_breadth(flow_breadth)
 
-        if not flow_roc or not breadth_pass:
-            return []
+        # No early return — scores feed into confidence
 
         confidence = self._compute_confidence(
             flow_ratio, flow_roc, breadth_pass,

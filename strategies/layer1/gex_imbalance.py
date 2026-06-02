@@ -47,20 +47,20 @@ logger = logging.getLogger("Syngex.Strategies.GEXImbalance")
 # Constants
 # ---------------------------------------------------------------------------
 
-PUT_HEAVY_RATIO = 0.5        # < 0.5 → long bias
-CALL_HEAVY_RATIO = 0.65      # > 0.65 → short bias
+PUT_HEAVY_RATIO = 0.45        # < 0.45 → long bias
+CALL_HEAVY_RATIO = 0.60      # > 0.60 → short bias
 STRONG_PUT_RATIO = 0.25      # very strong long signal
 STRONG_CALL_RATIO = 0.75     # very strong short signal
-MIN_MESSAGES = 20            # minimum data points for signal quality
+MIN_MESSAGES = 10            # minimum data points for signal quality
 STOP_VOL_MULT = 2.5          # stop = 2.5x rolling price std dev
 TARGET_RISK_MULT = 1.5       # target = 1.5x stop distance
-MIN_CONFIDENCE = 0.20        # Minimum confidence to emit signal
+MIN_CONFIDENCE = 0.10        # Minimum confidence to emit signal
 
 # v2 Imbalance-Velocity constants
 RATIO_ROC_WINDOW = 5         # Number of ticks back for ROC
 RATIO_ROC_THRESHOLD = 0.10   # Minimum ROC to trigger (10% change)
 REGIME_GAMMA_THRESHOLD = 500000
-VWAP_DEVIATION_MIN_STD = 1.5
+VWAP_DEVIATION_MIN_STD = 1.0
 
 
 class GEXImbalance(BaseStrategy):
@@ -126,30 +126,34 @@ class GEXImbalance(BaseStrategy):
         self._update_ratio_history(ratio, ts)
         roc = self._get_ratio_roc()
 
-        # ROC gating: velocity must align with bias direction
+        # ROC modifier: velocity alignment with bias direction
+        roc_modifier = 0.0
         if roc is not None:
-            if bias == "LONG" and roc >= -RATIO_ROC_THRESHOLD:
-                return []  # ROC not negative enough for LONG
-            if bias == "SHORT" and roc <= RATIO_ROC_THRESHOLD:
-                return []  # ROC not positive enough for SHORT
+            if bias == "LONG":
+                if roc < -RATIO_ROC_THRESHOLD:
+                    roc_modifier = 0.1   # strong alignment bonus
+                elif roc >= 0:
+                    roc_modifier = -0.1  # opposes bias penalty
+                # else -RATIO_ROC_THRESHOLD <= roc < 0: slight alignment, neutral modifier
+            elif bias == "SHORT":
+                if roc > RATIO_ROC_THRESHOLD:
+                    roc_modifier = 0.1
+                elif roc <= 0:
+                    roc_modifier = -0.1
 
-        # Depth alignment check
+        # Depth alignment check (no hard gate — handled in confidence)
         depth_alignment = self._check_depth_alignment(bias, depth_snapshot)
-        if depth_alignment is not None and depth_alignment < 0.4:
-            return []  # Liquidity doesn't support bias
 
-        # VWAP deviation check (distance-based)
+        # VWAP deviation check (no hard gate — handled in confidence)
         vwap_dev = self._check_vwap_deviation(underlying_price, rolling_data, bias)
-        if vwap_dev is None or vwap_dev < VWAP_DEVIATION_MIN_STD:
-            return []  # Not sufficiently deviated from VWAP
 
         # Regime intensity
         regime_intensity = self._compute_regime_intensity(regime, net_gamma, bias)
 
-        # Compute confidence with 6-component scoring
+        # Compute confidence with 5-component scoring
         confidence = self._compute_confidence_v2(
             ratio, bias_strength, bias, regime_intensity, total_msgs,
-            vwap_dev, roc, depth_alignment
+            vwap_dev, roc, depth_alignment, roc_modifier
         )
         if confidence < MIN_CONFIDENCE:
             return []
@@ -366,12 +370,13 @@ class GEXImbalance(BaseStrategy):
         regime_intensity: float, total_msgs: int,
         vwap_dev: Optional[float], roc: Optional[float],
         depth_alignment: Optional[float],
+        roc_modifier: float = 0.0,
         depth_score: Optional[float] = None,
     ) -> float:
         """
         Compute confidence for GEX imbalance signal.
 
-        Family A — simple average of 4 normalized components:
+        5-component average:
 
             1. Ratio extremity: how extreme the call/put ratio is.
                For put-heavy: ratio in [0, PUT_HEAVY_RATIO], lower = higher.
@@ -379,9 +384,7 @@ class GEXImbalance(BaseStrategy):
             2. Bias strength: in [0, 1], how extreme the imbalance is.
             3. Depth alignment: in [0, 1], liquidity support for bias.
             4. VWAP deviation: in [0, 3.0] std-dev units, further = higher.
-
-        Future (Phase 5):
-            depth_score: if provided, used as 5th component.
+            5. ROC modifier: alignment bonus/penalty from ratio velocity.
 
         Returns 0.0–1.0.
         """
@@ -410,6 +413,6 @@ class GEXImbalance(BaseStrategy):
         else:
             norm_vwap = 0.0  # no data
 
-        confidence = (norm_ratio + norm_bias + norm_depth + norm_vwap) / 4.0
+        confidence = (norm_ratio + norm_bias + norm_depth + norm_vwap + roc_modifier) / 5.0
 
         return min(1.0, max(0.0, confidence))

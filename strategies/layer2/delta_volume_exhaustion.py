@@ -50,13 +50,13 @@ logger = logging.getLogger("Syngex.Strategies.DeltaVolumeExhaustion")
 # ---------------------------------------------------------------------------
 
 # Min data points for trend detection
-MIN_TREND_POINTS = 5
+MIN_TREND_POINTS = 3
 
 # Min data points for delta/volume rolling windows
 MIN_GREEKS_POINTS = 5
 
 # Delta must be below rolling avg by this ratio
-DELTA_DECLINE_RATIO = 0.95            # Delta below 95% of rolling avg (was 90%)
+DELTA_DECLINE_RATIO = 0.90            # Delta below 90% of rolling avg
 
 # Trend must be sustained for this many points
 MIN_TREND_DURATION = 2                # At least 2 candles in trend (was 3)
@@ -65,15 +65,15 @@ MIN_TREND_DURATION = 2                # At least 2 candles in trend (was 3)
 STOP_PCT = 0.008                      # 0.8% beyond swing
 
 # Minimum confidence to emit a signal
-MIN_CONFIDENCE = 0.0
+MIN_CONFIDENCE = 0.10
 
 # Target: mean reversion to rolling average
 MEAN_REVERSION_MULT = 1.0             # 1.0× distance — target is the rolling mean
 
 # --- v2 Exhaustion-Master params ---
 # Liquidity vacuum
-LIQUIDITY_VACUUM_RATIO_STABILITY = 0.30   # ratio must be within 30% of rolling mean
-LIQUIDITY_VACUUM_SPREAD_WIDEN_MULT = 1.5  # spread must be > 1.5× rolling mean
+LIQUIDITY_VACUUM_RATIO_STABILITY = 0.40   # ratio must be within 40% of rolling mean
+LIQUIDITY_VACUUM_SPREAD_WIDEN_MULT = 1.3  # spread must be > 1.3× rolling mean
 
 # IV acceleration
 IV_ACCEL_WINDOW = 5                         # window for IV ROC calculation
@@ -188,29 +188,25 @@ class DeltaVolumeExhaustion(BaseStrategy):
         if price_window is None or price_window.count < MIN_TREND_POINTS:
             return None
 
-        if price_window.trend != trend_direction:
-            return None
+        # 1. Trend direction modifier
+        trend_direction_modifier = -0.15 if price_window.trend != trend_direction else 0.0
 
-        # Check trend duration: need sustained movement
+        # 2. Trend strength (no hard gate — feeds into confidence as c1)
         trend_strength = self._trend_strength(price_window)
-        if trend_strength < 0.5:
-            return None
 
-        # 2. Check delta decline (hard gate)
-        delta_decline = self._check_delta_decline(rolling_data, total_delta)
-        if not delta_decline:
-            return None
+        # 3. Delta decline score (0.0-1.0 float, no hard gate)
+        delta_score = self._delta_decline_score(rolling_data, total_delta)
 
-        # 3. Check liquidity vacuum (hard gate) — replaces volume decline
-        liq_vacuum, bid_ask_ratio, current_spread, mean_spread = (
+        # 4. Liquidity vacuum components (no hard gate — individual components feed into confidence)
+        liq_vacuum, bid_ask_ratio, current_spread, mean_spread, ratio_stable, spread_widened = (
             self._check_liquidity_vacuum(rolling_data, depth_snapshot)
         )
-        if not liq_vacuum:
-            return None
 
-        # 4. Compute confidence (v2 — 6 components)
+        # 5. Compute confidence (v2 — with modifier components)
         confidence = self._compute_confidence(
-            trend_strength, delta_decline, liq_vacuum,
+            trend_strength, delta_score, liq_vacuum,
+            ratio_stable, spread_widened,
+            trend_direction_modifier,
             net_gamma, regime, trend_direction,
             rolling_data=rolling_data,
         )
@@ -260,7 +256,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
                 "exhausted_trend": trend_direction,
                 "trend_strength": round(trend_strength, 3),
                 "total_delta": round(total_delta, 2),
-                "delta_decline": delta_decline,
+                "delta_decline": delta_score,
 
                 # === v2 new fields ===
                 "liquidity_vacuum": liq_vacuum,
@@ -297,7 +293,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
         self,
         rolling_data: Dict[str, Any],
         depth_snapshot: Optional[Dict[str, Any]],
-    ) -> tuple[bool, float, float, float]:
+    ) -> tuple[bool, float, float, float, bool, bool]:
         """
         Check for liquidity vacuum via depth snapshot analysis.
 
@@ -312,17 +308,18 @@ class DeltaVolumeExhaustion(BaseStrategy):
             depth_snapshot: Depth snapshot with bid_size/ask_size/spread
 
         Returns:
-            Tuple of (liq_vacuum_detected, bid_ask_ratio, current_spread, mean_spread)
+            Tuple of (liq_vacuum_detected, bid_ask_ratio, current_spread,
+                      mean_spread, ratio_stable, spread_widened)
         """
         # Get current bid/ask sizes from depth_snapshot
         if depth_snapshot is None:
-            return False, 0.0, 0.0, 0.0
+            return False, 0.0, 0.0, 0.0, False, False
 
         bid_current = depth_snapshot.get("bid_size", {}).get("current", 0)
         ask_current = depth_snapshot.get("ask_size", {}).get("current", 0)
 
         if ask_current <= 0:
-            return False, 0.0, 0.0, 0.0
+            return False, 0.0, 0.0, 0.0, False, False
 
         bid_ask_ratio = bid_current / ask_current
 
@@ -348,7 +345,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
                 ratio_stable = False
         else:
             # No rolling data — can't confirm stabilization
-            return False, bid_ask_ratio, current_spread, mean_spread or 0.0
+            return False, bid_ask_ratio, current_spread, mean_spread or 0.0, ratio_stable, spread_widened
 
         # Condition 2: Spread has widened > 1.5× rolling mean
         if mean_spread and mean_spread > 0:
@@ -359,7 +356,30 @@ class DeltaVolumeExhaustion(BaseStrategy):
             spread_widened = False
 
         liq_vacuum = ratio_stable and spread_widened
-        return liq_vacuum, bid_ask_ratio, current_spread, mean_spread or 0.0
+        return liq_vacuum, bid_ask_ratio, current_spread, mean_spread or 0.0, ratio_stable, spread_widened
+
+    # ------------------------------------------------------------------
+    # Soft Factor: Delta Decline Score
+    # ------------------------------------------------------------------
+
+    def _delta_decline_score(self, rolling_data: Dict[str, Any], total_delta: float) -> float:
+        """Return a 0.0-1.0 score for delta decline strength."""
+        window = rolling_data.get(KEY_TOTAL_DELTA_5M)
+        if window is None or window.count < 3:
+            return 0.0
+        avg = window.mean
+        if avg is None or avg == 0:
+            return 0.0
+        ratio = abs(total_delta) / abs(avg)
+        # ratio < 0.90 = strong decline = 1.0
+        # ratio >= 1.0 = delta increasing = 0.0
+        # linear interpolation between 0.90 and 1.0
+        if ratio <= 0.90:
+            return 1.0
+        elif ratio >= 1.0:
+            return 0.0
+        else:
+            return max(0.0, 1.0 - (ratio - 0.90) / 0.10)
 
     # ------------------------------------------------------------------
     # Soft Factor: IV Acceleration
@@ -500,26 +520,29 @@ class DeltaVolumeExhaustion(BaseStrategy):
     def _compute_confidence(
         self,
         trend_strength: float,
-        delta_decline: bool,
-        liquidity_vacuum: bool,
+        delta_score: float,
+        liq_vacuum: bool,
+        ratio_stable: bool,
+        spread_widened: bool,
+        trend_direction_modifier: float,
         net_gamma: float,
         regime: str,
         trend_direction: str,
         rolling_data: Optional[Dict[str, Any]] = None,
-        depth_score: Optional[float] = None,
     ) -> float:
-        """Combine all v2 factors into confidence score (Family A simple average)."""
+        """Combine all v2 factors into confidence score with modifier components."""
         def normalize(val, vmin, vmax):
             return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
 
         # 1. Trend strength: trend_strength from 0→1, higher = higher
         c1 = normalize(trend_strength, 0.0, 1.0)
 
-        # 2. Delta decline: bool → 0 or 1
-        c2 = 1.0 if delta_decline else 0.0
+        # 2. Delta score: float 0.0-1.0 (was bool)
+        c2 = delta_score
 
-        # 3. Liquidity vacuum: bool → 0 or 1
-        c3 = 1.0 if liquidity_vacuum else 0.0
+        # 3. Liquidity vacuum: average of ratio_stable and spread_widened
+        liq_score = (0.5 if ratio_stable else 0.0) + (0.5 if spread_widened else 0.0)
+        c3 = liq_score
 
         # 4. IV acceleration: iv_conf from -0.05→0.15, map to [0,1]
         iv_conf = 0.0
@@ -537,6 +560,10 @@ class DeltaVolumeExhaustion(BaseStrategy):
         c5 = normalize(abs(net_gamma), 0.0, 5000000.0)
 
         confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+
+        # Apply trend direction modifier
+        confidence += trend_direction_modifier
+
         return min(1.0, max(0.0, confidence))
 
     def _regime_alignment(
