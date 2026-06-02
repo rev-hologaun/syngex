@@ -55,7 +55,7 @@ MIN_DIVERSION_STRENGTH = 0.2
 STOP_PCT = 0.008  # 0.8%
 
 # Confidence threshold
-MIN_CONFIDENCE = 0.20
+MIN_CONFIDENCE = 0.10
 
 # Skew divergence threshold
 SK_DIV_THRESHOLD = 0.10
@@ -180,27 +180,19 @@ class DeltaIVDivergence(BaseStrategy):
         if divergence_strength < MIN_DIVERSION_STRENGTH:
             return None
 
-        # ── v2 hard gates ──
+        # ── v2 soft gates (graded scores 0.0-1.0) ──
 
-        # 1. Skew divergence (edge signal confirmed)
-        skew_divergence = self._check_skew_divergence(
-            rolling_data, direction,
-        )
-        if not skew_divergence:
-            return None
+        # 1. Skew divergence score
+        skew_score = self._skew_divergence_score(rolling_data)
 
-        # 2. Decoupling coefficient (correlation collapsed)
-        decoupling = self._check_decoupling(
-            rolling_data, DECOUPLE_HISTORY_WINDOW, DECOUPLE_THRESHOLD,
-        )
-        if not decoupling:
-            return None
+        # 2. Decoupling score
+        decouple_score = self._decoupling_score(rolling_data)
 
-        # 3. Gamma regime filter (moving into unstable zone)
-        gamma_decline = self._check_gamma_regime(
-            gex_calc, rolling_data, price,
-        )
-        if not gamma_decline:
+        # 3. Gamma regime score
+        gamma_score = self._gamma_regime_score(gex_calc, rolling_data, price)
+
+        # Minimum acceptable signal from soft gates (any one zero = dead)
+        if skew_score + decouple_score + gamma_score < 0.15:
             return None
 
         # ── v2 soft factors ──
@@ -216,9 +208,9 @@ class DeltaIVDivergence(BaseStrategy):
 
         # Compute confidence
         confidence = self._compute_confidence(
-            skew_divergence=True,  # already passed hard gate
-            decoupling=True,       # already passed hard gate
-            gamma_decline=True,    # already passed hard gate
+            skew_score=skew_score,
+            decouple_score=decouple_score,
+            gamma_score=gamma_score,
             divergence_strength=divergence_strength,
             iv_expansion=iv_expansion,
             net_gamma=net_gamma,
@@ -335,6 +327,99 @@ class DeltaIVDivergence(BaseStrategy):
 
         # Hard gate
         return skew_div > 0.10
+
+    def _skew_divergence_score(
+        self, rolling_data: Dict[str, Any],
+    ) -> float:
+        """Compute skew divergence score 0.0-1.0.
+        Returns 0.0 if insufficient data, otherwise linear scale from threshold→max.
+        """
+        otm_delta_window = rolling_data.get(KEY_OTM_DELTA_5M)
+        atm_delta_window = rolling_data.get(KEY_ATM_DELTA_5M)
+
+        if otm_delta_window is None or atm_delta_window is None:
+            return 0.0
+        if otm_delta_window.count < 6 or atm_delta_window.count < 6:
+            return 0.0
+
+        otm_vals = otm_delta_window.values
+        atm_vals = atm_delta_window.values
+
+        otm_current = otm_vals[-1]
+        otm_5_ago = otm_vals[-6] if len(otm_vals) >= 6 else otm_vals[0]
+        atm_current = atm_vals[-1]
+        atm_5_ago = atm_vals[-6] if len(atm_vals) >= 6 else atm_vals[0]
+
+        otm_roc = (otm_current - otm_5_ago) / max(abs(otm_5_ago), 0.001)
+        atm_roc = (atm_current - atm_5_ago) / max(abs(atm_5_ago), 0.001)
+
+        skew_div = abs(otm_roc - atm_roc) / max(abs(atm_roc), 0.001)
+
+        # Score: 0.0 at threshold, 1.0 at 3× threshold
+        threshold = 0.10
+        if skew_div <= threshold:
+            return 0.0
+        score = min(1.0, (skew_div - threshold) / (threshold * 2))
+        return round(score, 3)
+
+    def _decoupling_score(
+        self, rolling_data: Dict[str, Any],
+    ) -> float:
+        """Compute decoupling score 0.0-1.0.
+        Higher score = more decoupled (current_corr much lower than mean_corr).
+        Returns 0.0 if insufficient data.
+        """
+        corr_window = rolling_data.get(KEY_DELTA_IV_CORR_5M)
+        if corr_window is None or corr_window.count < 2:
+            return 0.0
+
+        corr_vals = corr_window.values
+        current_corr = corr_vals[-1]
+
+        history = min(30, len(corr_vals) - 1)
+        if history < 1:
+            return 0.0
+        mean_corr = statistics.mean(corr_vals[-(history + 1):-1]) if history > 0 else current_corr
+
+        if abs(mean_corr) < 0.01:
+            return 0.0
+
+        # Ratio of current to mean correlation
+        ratio = abs(current_corr) / abs(mean_corr)
+        # score = 1.0 when ratio = 0 (complete decoupling), 0.0 when ratio >= 1.0
+        score = max(0.0, 1.0 - ratio)
+        return round(min(1.0, max(0.0, score)), 3)
+
+    def _gamma_regime_score(
+        self, gex_calc: Any, rolling_data: Dict[str, Any], price: float,
+    ) -> float:
+        """Compute gamma regime score 0.0-1.0.
+        Higher score = more declining gamma (more unstable).
+        Returns 0.0 if insufficient data.
+        """
+        if gex_calc is None:
+            return 0.0
+
+        gamma_density = self._compute_gamma_density(gex_calc, price)
+        if gamma_density is None:
+            return 0.0
+
+        gamma_window = rolling_data.get(KEY_GAMMA_DENSITY_5M)
+        if gamma_window is None:
+            return 0.0
+        if gamma_window.count < 3:
+            return 0.0
+
+        current = gamma_window.latest or gamma_density
+        mean_density = gamma_window.mean or 0.0
+
+        if mean_density <= 0:
+            return 0.0
+
+        # ratio = current / mean. Score = 1.0 when ratio = 0 (no gamma), 0.0 when ratio >= 1.0
+        ratio = current / mean_density
+        score = max(0.0, 1.0 - ratio)
+        return round(min(1.0, max(0.0, score)), 3)
 
     def _get_skew_divergence_value(
         self, rolling_data: Dict[str, Any], direction: str,
@@ -616,9 +701,9 @@ class DeltaIVDivergence(BaseStrategy):
 
     def _compute_confidence(
         self,
-        skew_divergence: bool,
-        decoupling: bool,
-        gamma_decline: bool,
+        skew_score: float,
+        decouple_score: float,
+        gamma_score: float,
         divergence_strength: float,
         iv_expansion: float,
         net_gamma: float,
@@ -632,20 +717,19 @@ class DeltaIVDivergence(BaseStrategy):
         def normalize(val, vmin, vmax):
             return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
 
-        # 1. Skew divergence: bool → 0 or 1 (remove hard gate, normalize)
-        c1 = 1.0 if skew_divergence else 0.0
+        # 1. Skew divergence score (0.0-1.0 continuous)
+        c1 = skew_score
 
-        # 2. Decoupling: bool → 0 or 1
-        c2 = 1.0 if decoupling else 0.0
+        # 2. Decoupling score (0.0-1.0 continuous)
+        c2 = decouple_score
 
-        # 3. Gamma decline: bool → 0 or 1
-        c3 = 1.0 if gamma_decline else 0.0
+        # 3. Gamma regime score (0.0-1.0 continuous)
+        c3 = gamma_score
 
-        # 4. Divergence strength: divergence_strength from 0→2.0, higher = higher
+        # 4. Divergence strength: from 0→2.0, higher = higher
         c4 = normalize(divergence_strength, 0.0, 2.0)
 
         # 5. Net gamma: abs(net_gamma) from 0→500k, higher = higher
-        # Use greeks_summary if available for more accurate net gamma (Fix 7)
         if greeks_summary:
             net_gamma_from_summary = 0.0
             for strike_data in greeks_summary.values():
