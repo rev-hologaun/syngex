@@ -415,13 +415,13 @@ layer2:
     params:
       frag_threshold: 0.5
       decay_threshold: -0.1
+      robust_threshold: 0.3
       wall_significance_mult: 3.0
       price_proximity_pct: 0.001
-      vol_ratio_spoof: 0.1
-      vol_ratio_robust: 0.5
       max_spread_mult: 2.0
       stop_pct: 0.003
       target_risk_mult: 3.0
+      min_fragility_strength: 0.2
 
   order_book_stacking:
     enabled: true

@@ -17,18 +17,21 @@ Signal types:
     ROBUST BOUNCE LONG:  Robust Bid Wall holds → bounce
     ROBUST BOUNCE SHORT: Robust Ask Wall holds → rejection
 
-Hard gates (all must pass):
-    Gate A: Wall size >= 3× average level size (significant wall)
-    Gate B: VAMP deviation confirms price movement (the "Void" check)
-    Gate C: Volume/depth ratio matches signal type (low for spoof, high for robust)
+This is a **filter-style structural integrity engine** — it produces graded signal strength
+based on wall fragility and decay, not binary pass/fail.
+
+Signal strength per type:
+    strength = fragility_component + decay_component (continuous 0–1)
+    signal_strength = strength * 0.5 + wall * 0.15 + void * 0.15 + vol * 0.10 + spread * 0.10
+    Emit when signal_strength >= 0.28 and fragility_strength >= 0.2
 
 Confidence model (6 components, sum to 1.0):
     1. Fragility magnitude        (0.0–0.30)
-    2. Decay velocity             (0.0–0.25)
-    3. Wall significance          (0.0–0.15)
-    4. VAMP validation            (0.0–0.15)
+    2. Decay velocity             (0.0–0.20)
+    3. Wall significance          (0.0–0.10)
+    4. VAMP validation            (0.0–0.10)
     5. Volume confirmation        (0.0–0.10)
-    6. Spread tightness           (0.0–0.05)
+    6. Spread tightness           (0.0–0.20)
 """
 
 from __future__ import annotations
@@ -58,7 +61,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.OrderBookFragmentation")
 
-MIN_CONFIDENCE = 0.0
+MIN_CONFIDENCE = 0.25
 
 
 def normalize(val: float, vmin: float, vmax: float) -> float:
@@ -90,7 +93,7 @@ class OrderBookFragmentation(BaseStrategy):
         Evaluate current state for order book fragmentation signal.
 
         Returns a single LONG or SHORT signal when conditions are met,
-        or empty list when gates fail or no clear signal.
+        or empty list when scores are too low or no clear signal.
         """
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
@@ -120,105 +123,85 @@ class OrderBookFragmentation(BaseStrategy):
         current_decay_bid = decay_bid_window.values[-1]
         current_decay_ask = decay_ask_window.values[-1]
 
-        # 2. Determine signal direction and type
+        # 2. Determine signal direction and type (continuous strengths)
         frag_threshold = params.get("frag_threshold", 0.5)
         decay_threshold = params.get("decay_threshold", -0.1)
-        wall_significance_mult = params.get("wall_significance_mult", 3.0)
-        price_proximity_pct = params.get("price_proximity_pct", 0.001)
-        vol_ratio_spoof = params.get("vol_ratio_spoof", 0.1)
-        vol_ratio_robust = params.get("vol_ratio_robust", 0.5)
-        max_spread_mult = params.get("max_spread_mult", 2.0)
+        robust_threshold = params.get("robust_threshold", 0.3)
 
-        # Spoof Breach LONG — fragile ask wall evaporating
-        spoof_long = (
-            current_frag_ask > frag_threshold
-            and current_decay_ask < decay_threshold
-        )
-        # Spoof Breach SHORT — fragile bid wall evaporating
-        spoof_short = (
-            current_frag_bid > frag_threshold
-            and current_decay_bid < decay_threshold
-        )
-        # Robust Bounce LONG — robust bid wall holding
-        robust_long = (
-            current_frag_bid < frag_threshold
-            and current_decay_bid > decay_threshold
-        )
-        # Robust Bounce SHORT — robust ask wall holding
-        robust_short = (
-            current_frag_ask < frag_threshold
-            and current_decay_ask > decay_threshold
-        )
+        # Compute continuous strength for each of the 4 signal types
+        # Spoof LONG: fragile ask wall (high frag_ask, decay < threshold)
+        spoof_long_strength = 0.0
+        if current_frag_ask > robust_threshold and current_decay_ask < decay_threshold:
+            spoof_long_strength = (current_frag_ask - robust_threshold) / (frag_threshold - robust_threshold)
+            # Decay urgency: more negative decay = stronger signal
+            decay_magnitude = abs(current_decay_ask)
+            spoof_long_strength *= min(1.0, decay_magnitude / max(0.01, abs(decay_threshold)))
 
-        if not spoof_long and not spoof_short and not robust_long and not robust_short:
+        # Spoof SHORT: fragile bid wall
+        spoof_short_strength = 0.0
+        if current_frag_bid > robust_threshold and current_decay_bid < decay_threshold:
+            spoof_short_strength = (current_frag_bid - robust_threshold) / (frag_threshold - robust_threshold)
+            decay_magnitude = abs(current_decay_bid)
+            spoof_short_strength *= min(1.0, decay_magnitude / max(0.01, abs(decay_threshold)))
+
+        # Robust LONG: robust bid wall (low frag_bid, decay > threshold)
+        robust_long_strength = 0.0
+        if current_frag_bid < frag_threshold and current_decay_bid > decay_threshold:
+            robust_long_strength = (frag_threshold - current_frag_bid) / (frag_threshold - robust_threshold)
+            decay_magnitude = abs(current_decay_bid)
+            robust_long_strength *= min(1.0, decay_magnitude / max(0.01, abs(decay_threshold)))
+
+        # Robust SHORT: robust ask wall
+        robust_short_strength = 0.0
+        if current_frag_ask < frag_threshold and current_decay_ask > decay_threshold:
+            robust_short_strength = (frag_threshold - current_frag_ask) / (frag_threshold - robust_threshold)
+            decay_magnitude = abs(current_decay_ask)
+            robust_short_strength *= min(1.0, decay_magnitude / max(0.01, abs(decay_threshold)))
+
+        # Find the strongest signal
+        candidates = [
+            ("SPOOF_LONG", "LONG", spoof_long_strength, current_decay_ask),
+            ("SPOOF_SHORT", "SHORT", spoof_short_strength, current_decay_bid),
+            ("ROBUST_LONG", "LONG", robust_long_strength, current_decay_bid),
+            ("ROBUST_SHORT", "SHORT", robust_short_strength, current_decay_ask),
+        ]
+        candidates.sort(key=lambda x: x[2], reverse=True)
+        signal_type, direction, strength, decay_strength = candidates[0]
+
+        # Emit only if strongest signal exceeds minimum strength
+        if strength < 0.2:
             return []
 
-        # 3. Compute vol_ratio, spread, and wall significance for gates
+        # 3. Compute vol_ratio, spread, and avg_wall_size for scoring
         vol_ratio = self._compute_vol_ratio(rolling_data)
         spread = self._compute_spread(rolling_data)
         avg_spread = self._compute_avg_spread(rolling_data)
         avg_wall_size = self._compute_avg_wall_size(rolling_data)
 
-        # 4. Build candidate signals and pick the strongest
-        candidates = []
+        # 4. Compute soft scores (replaces hard gates)
+        wall_score = self._gate_a_wall_score(direction, avg_wall_size, rolling_data)
+        void_score = self._gate_b_void_score(signal_type, direction, rolling_data)
+        vol_score = self._gate_c_vol_score(signal_type, vol_ratio)
+        spread_score = self._gate_d_spread_score(spread, avg_spread)
 
-        if spoof_long:
-            candidates.append(("SPOOF_LONG", "LONG", current_frag_ask, current_decay_ask))
-        if spoof_short:
-            candidates.append(("SPOOF_SHORT", "SHORT", current_frag_bid, current_decay_bid))
-        if robust_long:
-            candidates.append(("ROBUST_LONG", "LONG", 1.0 - current_frag_bid, current_decay_bid))
-        if robust_short:
-            candidates.append(("ROBUST_SHORT", "SHORT", 1.0 - current_frag_ask, current_decay_ask))
-
-        if not candidates:
-            return []
-
-        # Pick the strongest signal by combined strength
-        candidates.sort(key=lambda x: x[2] + abs(x[3]), reverse=True)
-        signal_type, direction, strength, decay_strength = candidates[0]
-
-        # 5. Apply HARD GATES
-        # Gate A: Wall significance
-        gate_a = self._gate_a_wall_significance(
-            direction, wall_significance_mult, avg_wall_size, rolling_data
+        # 5. Combine into signal_strength
+        signal_strength = (
+            strength * 0.5
+            + wall_score * 0.15
+            + void_score * 0.15
+            + vol_score * 0.10
+            + spread_score * 0.10
         )
-        if not gate_a:
-            logger.debug(
-                "OB Fragmentation: Gate A failed — wall not significant enough for %s",
-                direction,
-            )
-            return []
 
-        # Gate B: The "Void" Check — VAMP deviation confirms price movement
-        gate_b = self._gate_b_void_check(signal_type, direction, rolling_data)
-        if not gate_b:
+        if signal_strength < 0.28:
             logger.debug(
-                "OB Fragmentation: Gate B failed — VAMP void check for %s (%s)",
-                direction, signal_type,
-            )
-            return []
-
-        # Gate C: Volume/depth ratio
-        gate_c = self._gate_c_vol_depth(signal_type, vol_ratio, params)
-        if not gate_c:
-            logger.debug(
-                "OB Fragmentation: Gate C failed — vol/depth mismatch for %s (%s)",
-                direction, signal_type,
-            )
-            return []
-
-        # Gate D: Spread tightness
-        gate_d = self._gate_d_spread(spread, avg_spread, max_spread_mult)
-        if not gate_d:
-            logger.debug(
-                "OB Fragmentation: Gate D failed — spread too wide for %s",
-                direction,
+                "OB Fragmentation: signal_strength %.4f below threshold 0.28 for %s (%s)",
+                signal_strength, direction, signal_type,
             )
             return []
 
         # 6. Compute confidence (6-component model)
-        confidence = self._compute_confidence(
+        confidence, conf_breakdown = self._compute_confidence(
             signal_type, direction,
             current_frag_bid, current_frag_ask,
             current_decay_bid, current_decay_ask,
@@ -272,12 +255,12 @@ class OrderBookFragmentation(BaseStrategy):
                 "vol_ratio": round(vol_ratio, 4),
                 "spread": round(spread, 4),
                 "avg_spread": round(avg_spread, 4),
-                "gates": {
-                    "A_wall_significance": gate_a,
-                    "B_void_check": gate_b,
-                    "C_vol_depth": gate_c,
-                    "D_spread": gate_d,
-                },
+                "signal_strength": round(signal_strength, 4),
+                "wall_score": round(wall_score, 4),
+                "void_score": round(void_score, 4),
+                "vol_score": round(vol_score, 4),
+                "spread_score": round(spread_score, 4),
+                "confidence_breakdown": conf_breakdown,
             },
         )]
 
@@ -285,21 +268,20 @@ class OrderBookFragmentation(BaseStrategy):
     # Gate helpers
     # ------------------------------------------------------------------
 
-    def _gate_a_wall_significance(
+    def _gate_a_wall_score(
         self,
         direction: str,
-        wall_significance_mult: float,
         avg_wall_size: float,
         rolling_data: Dict[str, Any],
-    ) -> bool:
+    ) -> float:
         """
-        Gate A: Wall significance.
+        Gate A: Wall significance score (0.0–1.0).
 
-        The wall on the signal side must be >= wall_significance_mult ×
-        average level size. Ensures we're looking at a real wall, not noise.
+        Scales from 0→1 as the wall grows from 0→10× the average level size.
+        Returns 0.5 (neutral) when data is unavailable.
         """
         if avg_wall_size <= 0:
-            return True  # Can't compute — pass
+            return 0.5  # Can't compute — neutral
 
         top_wall_key = (
             KEY_TOP_WALL_BID_SIZE_5M if direction == "LONG" else KEY_TOP_WALL_ASK_SIZE_5M
@@ -307,81 +289,88 @@ class OrderBookFragmentation(BaseStrategy):
         top_wall_rw = rolling_data.get(top_wall_key)
 
         if not top_wall_rw or top_wall_rw.count < 1:
-            return True  # Can't evaluate — pass
+            return 0.5  # Can't evaluate — neutral
 
         current_wall = top_wall_rw.values[-1]
         if current_wall <= 0:
-            return False
+            return 0.0
 
-        return current_wall >= avg_wall_size * wall_significance_mult
+        wall_ratio = current_wall / avg_wall_size
+        return min(1.0, wall_ratio / 10.0)
 
-    def _gate_b_void_check(
+    def _gate_b_void_score(
         self,
         signal_type: str,
         direction: str,
         rolling_data: Dict[str, Any],
-    ) -> bool:
+    ) -> float:
         """
-        Gate B: The "Void" Check.
+        Gate B: VAMP void score (0.0–1.0).
 
         VAMP deviation confirms price is moving into the vacuum (spoof breach)
-        or approaching the wall (robust bounce).
+        or approaching the wall (robust bounce). Returns 0.5 (neutral) when
+        no VAMP data is available.
         """
         vamp_mid_dev_window = rolling_data.get(KEY_VAMP_MID_DEV_5M)
         if not vamp_mid_dev_window or vamp_mid_dev_window.count < 1:
-            return True  # No VAMP data — pass
+            return 0.5  # neutral when no data
 
         vamp_mid_dev = vamp_mid_dev_window.values[-1]
 
         if signal_type.startswith("SPOOF"):
-            # Spoof breach: VAMP should confirm price moving into the vacuum
-            # LONG spoof: price moving up into evaporated ask wall
-            # SHORT spoof: price moving down into evaporated bid wall
+            # Spoof: price moving into vacuum
             if direction == "LONG":
-                return vamp_mid_dev >= -0.001  # Allow small tolerance
+                # positive vamp_mid_dev = price moving up = good for LONG spoof
+                return max(0.0, min(1.0, 0.5 + vamp_mid_dev * 500))
             else:
-                return vamp_mid_dev <= 0.001
+                # negative vamp_mid_dev = price moving down = good for SHORT spoof
+                return max(0.0, min(1.0, 0.5 - vamp_mid_dev * 500))
         else:
-            # Robust bounce: VAMP should confirm price approaching the wall
+            # Robust: price approaching wall
             if direction == "LONG":
-                return vamp_mid_dev <= 0.001  # Price near bid wall
+                # negative vamp_mid_dev = price near bid wall = good for ROBUST LONG
+                return max(0.0, min(1.0, 0.5 - vamp_mid_dev * 500))
             else:
-                return vamp_mid_dev >= -0.001
+                # positive vamp_mid_dev = price near ask wall = good for ROBUST SHORT
+                return max(0.0, min(1.0, 0.5 + vamp_mid_dev * 500))
 
-    def _gate_c_vol_depth(
+    def _gate_c_vol_score(
         self,
         signal_type: str,
         vol_ratio: float,
-        params: Dict[str, Any],
-    ) -> bool:
+    ) -> float:
         """
-        Gate C: Volume/depth ratio.
+        Gate C: Volume/depth ratio score (0.0–1.0).
 
-        Low ratio (< 0.1) for spoof breach — liquidity evaporated, not consumed.
-        High ratio (> 0.5) for robust bounce — wall being consumed but holding.
+        Low vol is good for spoof (vol_ratio=0.0 → score=1.0).
+        High vol is good for robust (vol_ratio=1.5 → score=1.0).
         """
         if signal_type.startswith("SPOOF"):
-            threshold = params.get("vol_ratio_spoof", 0.1)
-            return vol_ratio < threshold
-        else:  # ROBUST
-            threshold = params.get("vol_ratio_robust", 0.5)
-            return vol_ratio > threshold
+            # Low vol is good for spoof → vol_score = max(0.0, 1.0 - vol_ratio / 0.5)
+            # vol_ratio=0.0 → 1.0, vol_ratio=0.5 → 0.0
+            return max(0.0, 1.0 - vol_ratio / 0.5)
+        else:
+            # High vol is good for robust → vol_score = min(1.0, vol_ratio / 1.5)
+            # vol_ratio=0.0 → 0.0, vol_ratio=1.5 → 1.0
+            return min(1.0, vol_ratio / 1.5)
 
-    def _gate_d_spread(
+    def _gate_d_spread_score(
         self,
         spread: float,
         avg_spread: float,
-        max_spread_mult: float,
-    ) -> bool:
+    ) -> float:
         """
-        Gate D: Spread tightness.
+        Gate D: Spread tightness score (0.0–1.0).
 
-        Current spread must be < max_spread_mult × average spread.
-        Scalp must be profitable after spread cost.
+        Tighter spread → higher score. Returns 0.5 (neutral) when
+        average spread can't be computed.
         """
         if avg_spread <= 0:
-            return True  # Can't evaluate — pass
-        return spread < avg_spread * max_spread_mult
+            return 0.5  # neutral
+        spread_ratio = spread / avg_spread
+        # spread_score = max(0.0, 1.0 - (spread_ratio - 1.0) / 2.0)
+        #   spread_ratio=1.0 → 1.0, spread_ratio=3.0 → 0.0
+        return max(0.0, 1.0 - (spread_ratio - 1.0) / 2.0)
 
     # ------------------------------------------------------------------
     # Metric helpers
@@ -441,9 +430,10 @@ class OrderBookFragmentation(BaseStrategy):
         vol_ratio, spread, avg_spread, rolling_data, params, avg_wall_size,
         depth_score=None,
     ):
-        """Combine all factors into a single confidence score — 5 components.
+        """Combine all factors into a single confidence score — 6 weighted components.
 
-        Returns 0.0–1.0.
+        Returns (confidence: float, breakdown: dict) with breakdown containing
+        c1_fragility, c2_decay, c3_wall, c4_vamp, c5_volume, c6_spread.
         """
         frag_threshold = params.get("frag_threshold", 0.5)
 
@@ -476,24 +466,41 @@ class OrderBookFragmentation(BaseStrategy):
         c3 = normalize(wall_ratio, 3.0, 10.0)
 
         # 4. VAMP validation: vamp_mid_dev from -0.001→0.001, alignment = 1 if matches
-        vamp_alignment = 0.5
         vamp_mid_dev_window = rolling_data.get(KEY_VAMP_MID_DEV_5M)
-        if vamp_mid_dev_window and vamp_mid_dev_window.count > 0:
+        if vamp_mid_dev_window and vamp_mid_dev_window.count >= 1:
             vamp_mid_dev = vamp_mid_dev_window.values[-1]
             if signal_type.startswith("SPOOF"):
-                if direction == "LONG" and vamp_mid_dev > 0:
-                    vamp_alignment = 1.0
-                elif direction == "SHORT" and vamp_mid_dev < 0:
-                    vamp_alignment = 1.0
+                if direction == "LONG":
+                    c4 = max(0.0, min(1.0, 0.5 + vamp_mid_dev * 500))
+                else:
+                    c4 = max(0.0, min(1.0, 0.5 - vamp_mid_dev * 500))
             else:
-                if direction == "LONG" and vamp_mid_dev <= 0:
-                    vamp_alignment = 1.0
-                elif direction == "SHORT" and vamp_mid_dev >= 0:
-                    vamp_alignment = 1.0
-        c4 = vamp_alignment
+                if direction == "LONG":
+                    c4 = max(0.0, min(1.0, 0.5 - vamp_mid_dev * 500))
+                else:
+                    c4 = max(0.0, min(1.0, 0.5 + vamp_mid_dev * 500))
+        else:
+            c4 = 0.5
 
         # 5. Volume confirmation: vol_ratio from 0→2.0, higher = higher
         c5 = normalize(vol_ratio, 0.0, 2.0)
 
-        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
-        return min(1.0, max(0.0, confidence))
+        # 6. Spread tightness: spread ratio to avg spread, tighter = higher
+        spread_window = rolling_data.get(KEY_DEPTH_SPREAD_5M)
+        if spread_window and spread_window.count > 0 and spread_window.mean > 0:
+            spread_ratio = spread / spread_window.mean
+            c6 = max(0.0, 1.0 - (spread_ratio - 1.0) / 2.0)
+        else:
+            c6 = 0.5
+
+        # Weighted average
+        confidence = (c1 * 0.30 + c2 * 0.20 + c3 * 0.10 + c4 * 0.10 + c5 * 0.10 + c6 * 0.20)
+        breakdown = {
+            "c1_fragility": round(c1, 3),
+            "c2_decay": round(c2, 3),
+            "c3_wall": round(c3, 3),
+            "c4_vamp": round(c4, 3),
+            "c5_volume": round(c5, 3),
+            "c6_spread": round(c6, 3),
+        }
+        return min(1.0, max(0.0, confidence)), breakdown
