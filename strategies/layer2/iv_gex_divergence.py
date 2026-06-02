@@ -62,7 +62,7 @@ logger = logging.getLogger("Syngex.Strategies.IVGEXDivergence")
 # ---------------------------------------------------------------------------
 
 # Price must be at or above this percentile of 30m window
-PRICE_PERCENTILE_THRESHOLD = 0.70     # p70 — price in top 30% of range
+PRICE_PERCENTILE_THRESHOLD = 0.60     # p60 — price in top 40% of range
 
 # Min data points for price window
 MIN_PRICE_POINTS = 10
@@ -77,22 +77,22 @@ MIN_POSITIVE_GAMMA = 200000           # $200k net gamma (cumulative, sign detect
 MIN_POSITIVE_NORMALIZED_GAMMA = 5.0   # normalized gamma threshold for signal trigger
 
 # IV decline threshold: IV at ATM must be below rolling avg by this ratio
-IV_DECLINE_RATIO = 0.90             # IV below 90% of rolling avg
+IV_DECLINE_RATIO = 0.85             # IV below 85% of rolling avg
 
 # Stop and target
 STOP_PCT = 0.006                      # 0.6% fallback stop
 TARGET_RISK_MULT = 1.5                # 1.5× risk toward mean
 
 # Min confidence threshold for signal emission
-MIN_CONFIDENCE = 0.20
+MIN_CONFIDENCE = 0.10
 
 # v2 Volatility-Snap parameters
 IV_SKEW_OTM_PCT = 0.05              # 5% OTM for skew calculation
 IV_SKEW_ROC_WINDOW = 5              # ticks for skew ROC
-IV_SKEW_ROC_THRESHOLD = 0.08        # skew must have risen ≥8%
+IV_SKEW_ROC_THRESHOLD = 0.05        # skew must have risen ≥5%
 
 GAMMA_DENSITY_WINDOW_PCT = 0.01     # ±1% window for gamma density
-GAMMA_DENSITY_DECLINE_THRESHOLD = 0.80  # density must decline ≥20%
+GAMMA_DENSITY_DECLINE_THRESHOLD = 0.85  # density must decline ≥15%
 
 IV_VOLUME_MIN = 100                   # min volume to consider IV meaningful
 
@@ -134,161 +134,207 @@ class IVGEXDivergence(BaseStrategy):
 
         signals: List[Signal] = []
 
-        # --- SHORT check: price at high, IV skew accelerating, positive gamma ---
+        # --- Evaluate SHORT and LONG independently ---
+        signals.extend(
+            self._evaluate_short(
+                gex_calc, rolling_data, net_gamma, regime, greeks_summary,
+                underlying_price,
+            ),
+        )
+        signals.extend(
+            self._evaluate_long(
+                gex_calc, rolling_data, net_gamma, regime, greeks_summary,
+                underlying_price,
+            ),
+        )
+
+        return signals
+
+    def _evaluate_short(
+        self,
+        gex_calc: Any,
+        rolling_data: Dict[str, Any],
+        net_gamma: float,
+        regime: str,
+        greeks_summary: Dict[str, Any],
+        underlying_price: float,
+    ) -> List[Signal]:
+        """Evaluate SHORT direction independently.
+        Returns list of signals (may be empty).
+        """
+        signals: List[Signal] = []
         price_high = self._check_price_high(rolling_data)
-        if price_high > 0:
-            iv_crashing, iv_atm, iv_decline = self._check_iv_crashing(
-                gex_calc, rolling_data, underlying_price,
+        if price_high <= 0:
+            return signals
+
+        iv_crashing, iv_atm, iv_crash_score = self._check_iv_crashing(
+            gex_calc, rolling_data, underlying_price,
+        )
+        normalized_gamma = gex_calc.get_normalized_net_gamma()
+        if not (iv_crashing and normalized_gamma > MIN_POSITIVE_NORMALIZED_GAMMA):
+            return signals
+
+        skew_accel = self._check_iv_skew_acceleration(
+            gex_calc, rolling_data, underlying_price, "SHORT",
+        )
+        if not skew_accel:
+            return signals
+
+        gamma_decline = self._check_gamma_density_gradient(
+            gex_calc, rolling_data, underlying_price,
+        )
+        if not gamma_decline:
+            return signals
+
+        walls = gex_calc.get_gamma_walls(threshold=500000)
+        wall_above = None
+        for wall in walls:
+            if wall["strike"] > underlying_price and wall["side"] == "call":
+                wall_above = wall
+                break
+
+        stop_price, stop_type = self._compute_wall_based_stop(
+            underlying_price, "SHORT", gex_calc,
+        )
+
+        iv_skew, iv_skew_roc = self._get_skew_data(
+            gex_calc, rolling_data, underlying_price, "SHORT",
+        )
+        confidence = self._compute_confidence_v2(
+            price_high, net_gamma, wall_above, regime,
+            underlying_price, greeks_summary,
+            iv_score=iv_crash_score,
+            skew_roc=iv_skew_roc,
+        )
+
+        if confidence >= MIN_CONFIDENCE:
+            gamma_density_current, gamma_density_mean, gamma_density_decline_pct = (
+                self._get_gamma_density_data(rolling_data)
             )
-            # Use normalized net gamma for magnitude threshold (cumulative grows with msg count)
-            normalized_gamma = gex_calc.get_normalized_net_gamma()
-            if iv_crashing and normalized_gamma > MIN_POSITIVE_NORMALIZED_GAMMA:
-                # v2: IV skew acceleration hard gate
-                skew_accel = self._check_iv_skew_acceleration(
-                    gex_calc, rolling_data, underlying_price, "SHORT",
-                )
-                if not skew_accel:
-                    return signals
+            conviction_iv, option_volume = self._get_conviction_data(
+                greeks_summary, underlying_price, "SHORT",
+            )
+            regime_intensity = self._regime_intensity(net_gamma)
 
-                # v2: Gamma density decline hard gate
-                gamma_decline = self._check_gamma_density_gradient(
-                    gex_calc, rolling_data, underlying_price,
-                )
-                if not gamma_decline:
-                    return signals
+            sig = self._build_signal_v2(
+                signal_type="SHORT",
+                price=underlying_price,
+                confidence=confidence,
+                net_gamma=net_gamma,
+                iv_atm=iv_atm,
+                iv_decline=iv_crash_score,
+                iv_crash_score=iv_crash_score,
+                wall=wall_above,
+                regime=regime,
+                rolling_data=rolling_data,
+                price_percentile=price_high,
+                stop_price=stop_price,
+                stop_type=stop_type,
+                iv_skew=iv_skew,
+                iv_skew_roc=iv_skew_roc,
+                gamma_density_current=gamma_density_current,
+                gamma_density_mean=gamma_density_mean,
+                gamma_density_decline_pct=gamma_density_decline_pct,
+                conviction_iv=conviction_iv,
+                option_volume=option_volume,
+                regime_intensity=regime_intensity,
+            )
+            if sig:
+                signals.append(sig)
 
-                walls = gex_calc.get_gamma_walls(threshold=500000)
-                wall_above = None
-                for wall in walls:
-                    if wall["strike"] > underlying_price and wall["side"] == "call":
-                        wall_above = wall
-                        break
+        return signals
 
-                # v2: Wall-based stop
-                stop_price, stop_type = self._compute_wall_based_stop(
-                    underlying_price, "SHORT", gex_calc,
-                )
-
-                # v2: Compute all confidence components
-                confidence = self._compute_confidence_v2(
-                    price_high, net_gamma, wall_above, regime,
-                    underlying_price, greeks_summary,
-                )
-
-                if confidence >= MIN_CONFIDENCE:
-                    # v2: Compute v2 metadata
-                    iv_skew, iv_skew_roc = self._get_skew_data(
-                        gex_calc, rolling_data, underlying_price, "SHORT",
-                    )
-                    gamma_density_current, gamma_density_mean, gamma_density_decline_pct = (
-                        self._get_gamma_density_data(rolling_data)
-                    )
-                    conviction_iv, option_volume = self._get_conviction_data(
-                        greeks_summary, underlying_price, "SHORT",
-                    )
-                    regime_intensity = self._regime_intensity(net_gamma)
-
-                    sig = self._build_signal_v2(
-                        signal_type="SHORT",
-                        price=underlying_price,
-                        confidence=confidence,
-                        net_gamma=net_gamma,
-                        iv_atm=iv_atm,
-                        iv_decline=iv_decline,
-                        wall=wall_above,
-                        regime=regime,
-                        rolling_data=rolling_data,
-                        price_percentile=price_high,
-                        stop_price=stop_price,
-                        stop_type=stop_type,
-                        iv_skew=iv_skew,
-                        iv_skew_roc=iv_skew_roc,
-                        gamma_density_current=gamma_density_current,
-                        gamma_density_mean=gamma_density_mean,
-                        gamma_density_decline_pct=gamma_density_decline_pct,
-                        conviction_iv=conviction_iv,
-                        option_volume=option_volume,
-                        regime_intensity=regime_intensity,
-                    )
-                    if sig:
-                        signals.append(sig)
-
-        # --- LONG check: price at low, IV skew accelerating, negative gamma ---
+    def _evaluate_long(
+        self,
+        gex_calc: Any,
+        rolling_data: Dict[str, Any],
+        net_gamma: float,
+        regime: str,
+        greeks_summary: Dict[str, Any],
+        underlying_price: float,
+    ) -> List[Signal]:
+        """Evaluate LONG direction independently.
+        Returns list of signals (may be empty).
+        """
+        signals: List[Signal] = []
         price_low = self._check_price_low(rolling_data)
-        if price_low > 0:
-            iv_expanding, iv_atm, iv_expand = self._check_iv_expanding(
-                gex_calc, rolling_data, underlying_price,
+        if price_low <= 0:
+            return signals
+
+        iv_expanding, iv_atm, iv_expand_score = self._check_iv_expanding(
+            gex_calc, rolling_data, underlying_price,
+        )
+        normalized_gamma = gex_calc.get_normalized_net_gamma()
+        if not (iv_expanding and normalized_gamma < -MIN_POSITIVE_NORMALIZED_GAMMA):
+            return signals
+
+        skew_accel = self._check_iv_skew_acceleration(
+            gex_calc, rolling_data, underlying_price, "LONG",
+        )
+        if not skew_accel:
+            return signals
+
+        gamma_decline = self._check_gamma_density_gradient(
+            gex_calc, rolling_data, underlying_price,
+        )
+        if not gamma_decline:
+            return signals
+
+        walls = gex_calc.get_gamma_walls(threshold=500000)
+        wall_below = None
+        for wall in walls:
+            if wall["strike"] < underlying_price and wall["side"] == "put":
+                wall_below = wall
+                break
+
+        stop_price, stop_type = self._compute_wall_based_stop(
+            underlying_price, "LONG", gex_calc,
+        )
+
+        iv_skew, iv_skew_roc = self._get_skew_data(
+            gex_calc, rolling_data, underlying_price, "LONG",
+        )
+        confidence = self._compute_confidence_v2(
+            price_low, net_gamma, wall_below, regime,
+            underlying_price, greeks_summary,
+            iv_score=iv_expand_score,
+            skew_roc=iv_skew_roc,
+        )
+
+        if confidence >= MIN_CONFIDENCE:
+            gamma_density_current, gamma_density_mean, gamma_density_decline_pct = (
+                self._get_gamma_density_data(rolling_data)
             )
-            if iv_expanding and normalized_gamma < -MIN_POSITIVE_NORMALIZED_GAMMA:
-                # v2: IV skew acceleration hard gate
-                skew_accel = self._check_iv_skew_acceleration(
-                    gex_calc, rolling_data, underlying_price, "LONG",
-                )
-                if not skew_accel:
-                    return signals
+            conviction_iv, option_volume = self._get_conviction_data(
+                greeks_summary, underlying_price, "LONG",
+            )
+            regime_intensity = self._regime_intensity(net_gamma)
 
-                # v2: Gamma density decline hard gate
-                gamma_decline = self._check_gamma_density_gradient(
-                    gex_calc, rolling_data, underlying_price,
-                )
-                if not gamma_decline:
-                    return signals
-
-                walls = gex_calc.get_gamma_walls(threshold=500000)
-                wall_below = None
-                for wall in walls:
-                    if wall["strike"] < underlying_price and wall["side"] == "put":
-                        wall_below = wall
-                        break
-
-                # v2: Wall-based stop
-                stop_price, stop_type = self._compute_wall_based_stop(
-                    underlying_price, "LONG", gex_calc,
-                )
-
-                # v2: Compute all confidence components
-                confidence = self._compute_confidence_v2(
-                    price_low, net_gamma, wall_below, regime,
-                    underlying_price, greeks_summary,
-                )
-
-                if confidence >= MIN_CONFIDENCE:
-                    # v2: Compute v2 metadata
-                    iv_skew, iv_skew_roc = self._get_skew_data(
-                        gex_calc, rolling_data, underlying_price, "LONG",
-                    )
-                    gamma_density_current, gamma_density_mean, gamma_density_decline_pct = (
-                        self._get_gamma_density_data(rolling_data)
-                    )
-                    conviction_iv, option_volume = self._get_conviction_data(
-                        greeks_summary, underlying_price, "LONG",
-                    )
-                    regime_intensity = self._regime_intensity(net_gamma)
-
-                    sig = self._build_signal_v2(
-                        signal_type="LONG",
-                        price=underlying_price,
-                        confidence=confidence,
-                        net_gamma=net_gamma,
-                        iv_atm=iv_atm,
-                        iv_decline=iv_expand,
-                        wall=wall_below,
-                        regime=regime,
-                        rolling_data=rolling_data,
-                        price_percentile=1.0 - price_low,
-                        stop_price=stop_price,
-                        stop_type=stop_type,
-                        iv_skew=iv_skew,
-                        iv_skew_roc=iv_skew_roc,
-                        gamma_density_current=gamma_density_current,
-                        gamma_density_mean=gamma_density_mean,
-                        gamma_density_decline_pct=gamma_density_decline_pct,
-                        conviction_iv=conviction_iv,
-                        option_volume=option_volume,
-                        regime_intensity=regime_intensity,
-                    )
-                    if sig:
-                        signals.append(sig)
+            sig = self._build_signal_v2(
+                signal_type="LONG",
+                price=underlying_price,
+                confidence=confidence,
+                net_gamma=net_gamma,
+                iv_atm=iv_atm,
+                iv_decline=iv_expand_score,
+                iv_crash_score=iv_expand_score,
+                wall=wall_below,
+                regime=regime,
+                rolling_data=rolling_data,
+                price_percentile=1.0 - price_low,
+                stop_price=stop_price,
+                stop_type=stop_type,
+                iv_skew=iv_skew,
+                iv_skew_roc=iv_skew_roc,
+                gamma_density_current=gamma_density_current,
+                gamma_density_mean=gamma_density_mean,
+                gamma_density_decline_pct=gamma_density_decline_pct,
+                conviction_iv=conviction_iv,
+                option_volume=option_volume,
+                regime_intensity=regime_intensity,
+            )
+            if sig:
+                signals.append(sig)
 
         return signals
 
@@ -331,48 +377,60 @@ class IVGEXDivergence(BaseStrategy):
         gex_calc: Any,
         rolling_data: Dict[str, Any],
         price: float,
-    ) -> tuple[bool, Optional[float], float]:
-        """Check if IV is crashing at the nearest ATM strike."""
+    ) -> tuple:
+        """Check if IV is crashing at the nearest ATM strike.
+        Returns (is_crashing: bool, iv_atm: float, decline_score: float).
+        decline_score is 0.0-1.0 based on how far below rolling avg.
+        """
         atm_strike = self._find_atm_strike(gex_calc, price)
         if atm_strike is None:
-            return False, None, 0.0
+            return False, 0.0, 0.0
         current_iv = gex_calc.get_iv_by_strike(atm_strike)
         if current_iv is None:
-            return False, None, 0.0
+            return False, 0.0, 0.0
         iv_window = rolling_data.get(f"iv_{atm_strike}_5m")
         if iv_window is None or iv_window.count < MIN_IV_POINTS:
-            return False, None, 0.0
+            return False, 0.0, 0.0
         latest = iv_window.latest
         avg = iv_window.mean
         if latest is None or avg is None or avg == 0:
-            return False, None, 0.0
+            return False, 0.0, 0.0
         decline = 1.0 - (latest / avg)
         is_crashing = latest < avg * IV_DECLINE_RATIO
-        return is_crashing, current_iv, decline
+        max_decline = 1.0 - IV_DECLINE_RATIO
+        decline_score = decline / max_decline if max_decline > 0 else 0.0
+        decline_score = max(0.0, min(1.0, decline_score))
+        return is_crashing, current_iv, decline_score
 
     def _check_iv_expanding(
         self,
         gex_calc: Any,
         rolling_data: Dict[str, Any],
         price: float,
-    ) -> tuple[bool, Optional[float], float]:
-        """Check if IV is expanding at the nearest ATM strike."""
+    ) -> tuple:
+        """Check if IV is expanding at the nearest ATM strike.
+        Returns (is_expanding: bool, iv_atm: float, expand_score: float).
+        expand_score is 0.0-1.0 based on how far above rolling avg.
+        """
         atm_strike = self._find_atm_strike(gex_calc, price)
         if atm_strike is None:
-            return False, None, 0.0
+            return False, 0.0, 0.0
         current_iv = gex_calc.get_iv_by_strike(atm_strike)
         if current_iv is None:
-            return False, None, 0.0
+            return False, 0.0, 0.0
         iv_window = rolling_data.get(f"iv_{atm_strike}_5m")
         if iv_window is None or iv_window.count < MIN_IV_POINTS:
-            return False, None, 0.0
+            return False, 0.0, 0.0
         latest = iv_window.latest
         avg = iv_window.mean
         if latest is None or avg is None or avg == 0:
-            return False, None, 0.0
+            return False, 0.0, 0.0
         expansion = (latest / avg) - 1.0
         is_expanding = latest > avg / IV_DECLINE_RATIO
-        return is_expanding, current_iv, expansion
+        threshold_expansion = (1.0 / IV_DECLINE_RATIO) - 1.0
+        expand_score = expansion / (threshold_expansion * 2) if threshold_expansion > 0 else 0.0
+        expand_score = max(0.0, min(1.0, expand_score))
+        return is_expanding, current_iv, expand_score
 
     def _find_atm_strike(self, gex_calc: Any, price: float) -> Optional[float]:
         """Find the nearest strike in the gamma ladder to the current price."""
@@ -654,25 +712,28 @@ class IVGEXDivergence(BaseStrategy):
         regime: str,
         price: float,
         greeks_summary: Dict[str, Any],
-        depth_score: Optional[float] = None,
+        iv_score: float = 0.0,
+        skew_roc: float = 0.0,
     ) -> float:
-        """Combine all factors into confidence score (Family A simple average)."""
+        """Combine all factors into confidence score (Family A simple average).
+        7 components, each normalized to 0.0-1.0.
+        """
         def normalize(val, vmin, vmax):
             return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
 
-        # 1. Price extremeness: price_percentile from 0.75→1.0, higher = higher
-        c1 = normalize(price_percentile, 0.75, 1.0)
+        # 1. Price extremeness: price_percentile from threshold→1.0
+        c1 = normalize(price_percentile, PRICE_PERCENTILE_THRESHOLD, 1.0)
 
-        # 2. Net gamma: abs(normalized_net_gamma) from 0→5, higher = higher
-        c2 = normalize(abs(net_gamma), 0.0, 5.0)
+        # 2. Net gamma magnitude: abs(net_gamma) from 0→5M
+        c2 = normalize(abs(net_gamma), 0.0, 5000000.0)
 
-        # 3. Wall proximity: wall GEX from 0→5M, higher = higher
+        # 3. Wall proximity: wall GEX from 0→5M
         wall_gex = 0.0
         if wall:
             wall_gex = abs(wall.get("gex", 0))
         c3 = normalize(wall_gex, 0.0, 5000000.0)
 
-        # 4. Volume conviction: total_volume from 0→100k, higher = higher
+        # 4. Volume conviction: total_volume from 0→100k
         total_volume = 0.0
         if greeks_summary:
             for strike_data in greeks_summary.values():
@@ -681,7 +742,7 @@ class IVGEXDivergence(BaseStrategy):
                 total_volume += call_vol + put_vol
         c4 = normalize(total_volume, 0.0, 100000.0)
 
-        # 5. Regime alignment: regime intensity from 0→1, higher = higher
+        # 5. Regime alignment: normalize regime intensity 0.05→0.15
         regime_intensity = 0.0
         if regime:
             if regime == "NEGATIVE":
@@ -692,7 +753,13 @@ class IVGEXDivergence(BaseStrategy):
                 regime_intensity = 0.05
         c5 = normalize(regime_intensity, 0.05, 0.15)
 
-        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+        # 6. IV crash/expand score (from _check_iv_crashing/_check_iv_expanding)
+        c6 = iv_score
+
+        # 7. IV skew ROC score (normalize from 0→0.20)
+        c7 = min(1.0, skew_roc / 0.20)
+
+        confidence = (c1 + c2 + c3 + c4 + c5 + c6 + c7) / 7.0
         return min(1.0, max(0.0, confidence))
 
     def _price_extremeness_confidence(self, price_percentile: float) -> float:
@@ -776,20 +843,21 @@ class IVGEXDivergence(BaseStrategy):
         net_gamma: float,
         iv_atm: Optional[float],
         iv_decline: float,
-        wall: Optional[Dict[str, Any]],
-        regime: str,
-        rolling_data: Dict[str, Any],
-        price_percentile: Optional[float],
-        stop_price: float,
-        stop_type: str,
-        iv_skew: float,
-        iv_skew_roc: float,
-        gamma_density_current: float,
-        gamma_density_mean: float,
-        gamma_density_decline_pct: float,
-        conviction_iv: float,
-        option_volume: int,
-        regime_intensity: float,
+        iv_crash_score: float = 0.0,
+        wall: Optional[Dict[str, Any]] = None,
+        regime: str = "",
+        rolling_data: Dict[str, Any] = None,
+        price_percentile: Optional[float] = None,
+        stop_price: float = 0.0,
+        stop_type: str = "",
+        iv_skew: float = 0.0,
+        iv_skew_roc: float = 0.0,
+        gamma_density_current: float = 0.0,
+        gamma_density_mean: float = 0.0,
+        gamma_density_decline_pct: float = 0.0,
+        conviction_iv: float = 0.0,
+        option_volume: int = 0,
+        regime_intensity: float = 0.0,
     ) -> Optional[Signal]:
         """Build a Signal object with v2 metadata."""
         entry = price
@@ -825,6 +893,7 @@ class IVGEXDivergence(BaseStrategy):
                     "price_percentile": round(price_percentile, 3) if price_percentile is not None else None,
                     "iv_atm": round(iv_atm, 4) if iv_atm else None,
                     "iv_decline_pct": round(iv_decline, 4),
+                    "iv_crash_score": round(iv_crash_score, 3),
                     "net_gamma": round(net_gamma, 2),
                     "wall_above_strike": wall["strike"] if wall else None,
                     "wall_above_gex": wall["gex"] if wall else None,
@@ -876,6 +945,7 @@ class IVGEXDivergence(BaseStrategy):
                     "price_percentile": round(price_percentile, 3) if price_percentile is not None else None,
                     "iv_atm": round(iv_atm, 4) if iv_atm else None,
                     "iv_decline_pct": round(iv_decline, 4),
+                    "iv_crash_score": round(iv_crash_score, 3),
                     "net_gamma": round(net_gamma, 2),
                     "wall_below_strike": wall["strike"] if wall else None,
                     "wall_below_gex": wall["gex"] if wall else None,
