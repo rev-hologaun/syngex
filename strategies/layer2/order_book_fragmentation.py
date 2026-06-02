@@ -61,7 +61,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.OrderBookFragmentation")
 
-MIN_CONFIDENCE = 0.25
+MIN_CONFIDENCE = 0.0
 
 
 def normalize(val: float, vmin: float, vmax: float) -> float:

@@ -84,7 +84,7 @@ STOP_PCT = 0.006                      # 0.6% fallback stop
 TARGET_RISK_MULT = 1.5                # 1.5× risk toward mean
 
 # Min confidence threshold for signal emission
-MIN_CONFIDENCE = 0.10
+MIN_CONFIDENCE = 0.0
 
 # v2 Volatility-Snap parameters
 IV_SKEW_OTM_PCT = 0.05              # 5% OTM for skew calculation

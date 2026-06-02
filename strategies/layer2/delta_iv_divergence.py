@@ -56,7 +56,7 @@ MIN_DIVERSION_STRENGTH = 0.2
 STOP_PCT = 0.008  # 0.8%
 
 # Confidence threshold
-MIN_CONFIDENCE = 0.10
+MIN_CONFIDENCE = 0.0
 
 # Skew divergence threshold
 SK_DIV_THRESHOLD = 0.10

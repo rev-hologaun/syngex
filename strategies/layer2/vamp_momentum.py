@@ -23,7 +23,7 @@ Confidence model (7 components, simple average):
     6. Regime confidence            (0.0–1.0)
     7. Wall proximity bonus         (0.0–0.15)
 
-MIN_CONFIDENCE = 0.10
+MIN_CONFIDENCE = 0.0
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.VampMomentum")
 
-MIN_CONFIDENCE = 0.10
+MIN_CONFIDENCE = 0.0
 
 
 class VampMomentum(BaseStrategy):
