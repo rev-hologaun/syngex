@@ -26,12 +26,12 @@ Confidence factors (6 components):
     5. ATR-normalized target quality (0.0–0.10, soft)
     6. Wall proximity (0.05–0.10, soft)
 
-Hard gates (all must pass):
-    - Gamma acceleration > 0.10
-    - Aggressor ratio > 0.60 (LONG) or < 0.40 (SHORT)
-    - Delta-gamma coupling >= 0.5
+This is a **filter-style convergence engine** — it produces graded signal strength
+based on gamma/delta acceleration, not binary pass/fail.
 
-Min confidence: 0.35 (raised from 0.25)
+Signal strength per direction:
+    strength = gamma*0.30 + vol*0.25 + coupling*0.20 + price*0.15 + delta*0.10
+    Emit when signal_strength >= 0.25 and gamma >= 0.05
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ VOLUME_SPIKE_RATIO = 1.20
 STOP_PCT = 0.005
 
 # Minimum confidence to emit a signal (raised from 0.25)
-MIN_CONFIDENCE = 0.0
+MIN_CONFIDENCE = 0.35
 
 # Maximum confidence — micro-signals shouldn't carry max conviction
 
@@ -119,6 +119,7 @@ class GammaVolumeConvergence(BaseStrategy):
 
         rolling_data = data.get("rolling_data", {})
         net_gamma = data.get("net_gamma", 0)
+        regime = data.get("regime", "neutral")
 
         signals: List[Signal] = []
 
@@ -170,23 +171,39 @@ class GammaVolumeConvergence(BaseStrategy):
         if delta_accel is None or delta_accel < DELTA_ACCEL_RATIO:
             return None
 
-        # Check gamma acceleration (2nd derivative, hard gate)
+        # Check gamma acceleration (2nd derivative, graded score)
         gamma_accel = self._check_gamma_acceleration(rolling_data)
-        if gamma_accel is None or gamma_accel < 0.10:
+        if gamma_accel is None or gamma_accel < 0.05:
             return None
+        gamma_score = min(1.0, gamma_accel / 0.30)
 
-        # Check aggressor volume (hard gate)
+        # Check aggressor volume (graded score)
         aggressor_ratio = self._check_aggressor_volume(rolling_data, "LONG")
-        if aggressor_ratio is None:
+        if aggressor_ratio is None or aggressor_ratio < 0.55:
             return None
+        vol_score = max(0.0, min(1.0, (aggressor_ratio - 0.55) / 0.45))
 
-        # Check delta-gamma coupling (hard gate)
-        coupling_passes = self._check_delta_gamma_coupling(delta_accel, gamma_accel)
+        # Check delta-gamma coupling (hard gate — direction-aware threshold)
+        coupling_passes = self._check_delta_gamma_coupling(delta_accel, gamma_accel, "LONG")
         if not coupling_passes:
             return None
+        coupling_score = self._coupling_score(delta_accel, gamma_accel, "LONG")
 
-        # Check price trend is UP
-        if self._check_price_trend(rolling_data) != "UP":
+        # Check price trend (graded score)
+        price_score = self._price_trend_score(rolling_data, "LONG")
+        if price_score < 0.1:
+            return None
+
+        # Compute signal_strength from graded components
+        delta_conf = self._delta_accel_confidence(delta_accel, "LONG")
+        signal_strength = (
+            gamma_score * 0.30
+            + vol_score * 0.25
+            + coupling_score * 0.20
+            + price_score * 0.15
+            + delta_conf * 0.10
+        )
+        if signal_strength < 0.25:
             return None
 
         # All conditions met — compute confidence and build signal
@@ -267,6 +284,13 @@ class GammaVolumeConvergence(BaseStrategy):
                 "atr_value": round(atr_5m, 4),
                 "target_mult": round(target_mult, 2),
                 "target_pct_actual": round(target_pct_actual, 4),
+
+                # === graded score components ===
+                "gamma_score": round(gamma_score, 3),
+                "vol_score": round(vol_score, 3),
+                "coupling_score": round(coupling_score, 3),
+                "price_score": round(price_score, 3),
+                "signal_strength": round(signal_strength, 3),
             },
         )
 
@@ -306,23 +330,39 @@ class GammaVolumeConvergence(BaseStrategy):
         if delta_accel >= 0.85 or delta_accel < DELTA_ACCEL_MIN_RATIO:
             return None
 
-        # Check gamma acceleration (2nd derivative, hard gate)
+        # Check gamma acceleration (2nd derivative, graded score)
         gamma_accel = self._check_gamma_acceleration(rolling_data)
-        if gamma_accel is None or gamma_accel < 0.10:
+        if gamma_accel is None or gamma_accel < 0.05:
             return None
+        gamma_score = min(1.0, gamma_accel / 0.30)
 
-        # Check aggressor volume (hard gate)
+        # Check aggressor volume (graded score)
         aggressor_ratio = self._check_aggressor_volume(rolling_data, "SHORT")
-        if aggressor_ratio is None:
+        if aggressor_ratio is None or aggressor_ratio > 0.45:
             return None
+        vol_score = max(0.0, min(1.0, (0.45 - aggressor_ratio) / 0.45))
 
-        # Check delta-gamma coupling (hard gate)
-        coupling_passes = self._check_delta_gamma_coupling(delta_accel, gamma_accel)
+        # Check delta-gamma coupling (hard gate — direction-aware threshold)
+        coupling_passes = self._check_delta_gamma_coupling(delta_accel, gamma_accel, "SHORT")
         if not coupling_passes:
             return None
+        coupling_score = self._coupling_score(delta_accel, gamma_accel, "SHORT")
 
-        # Check price trend is DOWN
-        if self._check_price_trend(rolling_data) != "DOWN":
+        # Check price trend (graded score)
+        price_score = self._price_trend_score(rolling_data, "SHORT")
+        if price_score < 0.1:
+            return None
+
+        # Compute signal_strength from graded components
+        delta_conf = self._delta_accel_confidence(delta_accel, "SHORT")
+        signal_strength = (
+            gamma_score * 0.30
+            + vol_score * 0.25
+            + coupling_score * 0.20
+            + price_score * 0.15
+            + delta_conf * 0.10
+        )
+        if signal_strength < 0.25:
             return None
 
         # All conditions met — compute confidence and build signal
@@ -403,6 +443,13 @@ class GammaVolumeConvergence(BaseStrategy):
                 "atr_value": round(atr_5m, 4),
                 "target_mult": round(target_mult, 2),
                 "target_pct_actual": round(target_pct_actual, 4),
+
+                # === graded score components ===
+                "gamma_score": round(gamma_score, 3),
+                "vol_score": round(vol_score, 3),
+                "coupling_score": round(coupling_score, 3),
+                "price_score": round(price_score, 3),
+                "signal_strength": round(signal_strength, 3),
             },
         )
 
@@ -514,14 +561,16 @@ class GammaVolumeConvergence(BaseStrategy):
     def _check_delta_gamma_coupling(
         delta_accel: float,
         gamma_accel: float,
+        direction: str = "LONG",
     ) -> bool:
         """
         Check delta-gamma coupling to filter phantom spikes.
 
         coupling = abs(delta_accel - 1.0) / gamma_accel
 
-        Hard gate: coupling >= 0.5
-            - Delta movement must be at least 50% of gamma movement
+        Hard gate: direction-aware threshold
+            - LONG: coupling >= 0.5 (strong delta movement relative to gamma)
+            - SHORT: coupling >= 0.3 (lower threshold — delta movement is smaller)
             - If delta barely moves while gamma spikes → phantom spike
 
         Returns:
@@ -531,6 +580,9 @@ class GammaVolumeConvergence(BaseStrategy):
             return False
 
         coupling = abs(delta_accel - 1.0) / gamma_accel
+
+        if direction == "SHORT":
+            return coupling >= 0.3
         return coupling >= 0.5
 
     @staticmethod
@@ -689,50 +741,95 @@ class GammaVolumeConvergence(BaseStrategy):
         """
         Combine all factors into a single confidence score (v2).
 
-        Components:
-            1. Delta acceleration: 0.0–0.15 (soft)
-            2. Gamma acceleration: 0.0 or 0.20 (hard gate)
-            3. Aggressor volume: 0.0 or 0.15 (hard gate)
-            4. Delta-gamma coupling: 0.0 or 0.10 (hard gate)
+        Components (all continuous, graded):
+            1. Delta acceleration: 0.0–0.20 (soft, direction-aware)
+            2. Gamma acceleration: 0.0–0.25 (continuous, graded)
+            3. Aggressor volume: 0.0–0.20 (continuous, direction-aware)
+            4. Delta-gamma coupling: 0.0–0.15 (continuous, graded)
             5. ATR target quality: 0.0–0.10 (soft)
             6. Wall proximity: 0.05–0.10 (soft)
 
-        Returns 0.0–MAX_CONFIDENCE.
+        Returns 0.0–1.0.
         """
-        # 1. Delta acceleration (0.0–0.15, soft)
-        delta_conf = self._delta_accel_confidence(delta_accel)
+        # 1. Delta acceleration (0.0–0.20, soft) — direction-aware
+        delta_conf = self._delta_accel_confidence(delta_accel, direction)
 
-        # 2. Gamma acceleration (hard gate — 0.0 or 0.20)
-        gamma_conf = 0.20 if gamma_accel else 0.0
+        # 2. Gamma acceleration (0.0–0.25, continuous)
+        # gamma_accel 0→0.30 maps to 0→1.0
+        gamma_conf = 0.25 * min(1.0, gamma_accel / 0.30)
 
-        # 3. Aggressor-weighted volume (hard gate — 0.0 or 0.15)
-        vol_conf = 0.15 if aggressor_ratio is not None else 0.0
+        # 3. Aggressor ratio (0.0–0.20, continuous, direction-aware)
+        # LONG: aggressor_ratio 0.60→1.0 maps to 0→1.0
+        # SHORT: aggressor_ratio 0.0→0.40 maps to 1.0→0
+        if direction == "LONG":
+            vol_score = max(0.0, min(1.0, (aggressor_ratio - 0.60) / 0.40))
+        else:
+            vol_score = max(0.0, min(1.0, (0.40 - aggressor_ratio) / 0.40))
+        vol_conf = 0.20 * vol_score
 
-        # 4. Delta-gamma coupling (hard gate — 0.0 or 0.10)
-        coupling_conf = 0.10 if self._check_delta_gamma_coupling(
-            delta_accel, gamma_accel
-        ) else 0.0
+        # 4. Delta-gamma coupling (0.0–0.15, continuous)
+        coupling_score = self._coupling_score(delta_accel, gamma_accel, direction)
+        coupling_conf = 0.15 * coupling_score
 
-        # 5. ATR-normalized target quality (soft — 0.0–0.10)
+        # 5. ATR target quality (0.0–0.10, soft)
         _, atr_5m, target_mult = self._compute_atr_target(price, rolling_data, direction)
         target_conf = self._atr_target_confidence(target_mult)
 
-        # 6. Wall proximity (soft — 0.05–0.10)
+        # 6. Wall proximity (0.05–0.10, soft)
         wall_conf = self._wall_proximity_confidence(price, direction, gex_calc)
 
         confidence = delta_conf + gamma_conf + vol_conf + coupling_conf + target_conf + wall_conf
-        return max(0.0, confidence)
+        return max(0.0, min(1.0, confidence))
 
     @staticmethod
-    def _delta_accel_confidence(delta_accel: float) -> float:
+    def _delta_accel_confidence(delta_accel: float, direction: str) -> float:
         """
-        Compute confidence contribution from delta acceleration magnitude.
+        Compute confidence from delta acceleration.
 
-        Scale: 0.0 (delta_accel=1.0) to 0.15 (delta_accel >= 2.0).
+        LONG: deviation from 1.0, scaled 0→0.20 as delta_accel grows from 1.0→2.5
+        SHORT: deviation from 1.0 (delta is declining), scaled 0→0.20 as
+               delta_accel drops from 0.85→0.30
         """
-        deviation = abs(delta_accel - 1.0)
-        conf = min(0.15, 0.15 * deviation)
-        return max(0.0, conf)
+        if direction == "LONG":
+            deviation = abs(delta_accel - 1.0)
+            # delta_accel=1.0 → 0.0, delta_accel=2.5 → 0.20
+            return min(0.20, 0.20 * deviation / 1.5)
+        else:  # SHORT
+            # delta_accel=0.85 → low conf, delta_accel=0.30 → high conf
+            # Map 0.30→0.85 to 1.0→0.0
+            deviation = abs(delta_accel - 1.0)
+            # delta_accel=0.30 → deviation=0.70 → conf=0.20
+            # delta_accel=0.85 → deviation=0.15 → conf=0.04
+            return min(0.20, 0.20 * deviation / 0.70)
+
+    @staticmethod
+    def _coupling_score(delta_accel: float, gamma_accel: float, direction: str) -> float:
+        """
+        Compute continuous coupling score (0.0–1.0).
+
+        coupling = abs(delta_accel - 1.0) / gamma_accel
+
+        For LONG (delta_accel > 1.0): coupling measures how much delta moved
+            relative to gamma spike
+        For SHORT (delta_accel < 1.0): coupling measures how much delta declined
+            relative to gamma spike
+
+        The key fix: for SHORT, delta_accel is 0.30-0.85, so coupling = 0.15-0.70 /
+            gamma_accel. If gamma_accel = 0.10 (barely passing), coupling = 1.5-7.0
+            (always passes easily). We normalize: score = min(1.0, coupling / 3.0)
+            so it's graded.
+
+        Returns:
+            Continuous coupling score 0.0–1.0.
+        """
+        if gamma_accel <= 0:
+            return 0.0
+
+        coupling = abs(delta_accel - 1.0) / gamma_accel
+
+        # Normalize: coupling 0→3.0 maps to 0→1.0
+        # coupling >= 3.0 = very strong coupling (delta moved a lot relative to gamma)
+        return min(1.0, coupling / 3.0)
 
     @staticmethod
     def _atr_target_confidence(atr_mult: float) -> float:
@@ -784,6 +881,37 @@ class GammaVolumeConvergence(BaseStrategy):
             return 0.05
         else:
             return 0.10 - 0.05 * (distance_pct / 0.02)
+
+    # ------------------------------------------------------------------
+    # Price trend scoring
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _price_trend_score(rolling_data, direction):
+        """
+        Price trend score: 0.0–1.0 based on how strongly price is trending
+        in the signal direction.
+        """
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        if not price_window or price_window.count < 5:
+            return 0.5  # neutral
+
+        trend = price_window.trend if hasattr(price_window, 'trend') else "UNKNOWN"
+
+        if direction == "LONG":
+            if trend == "UP":
+                return 1.0
+            elif trend == "FLAT":
+                return 0.3
+            else:  # DOWN
+                return 0.0
+        else:  # SHORT
+            if trend == "DOWN":
+                return 1.0
+            elif trend == "FLAT":
+                return 0.3
+            else:  # UP
+                return 0.0
 
     # ------------------------------------------------------------------
     # Wall helpers
