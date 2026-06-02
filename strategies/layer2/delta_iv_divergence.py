@@ -35,6 +35,7 @@ from strategies.rolling_keys import (
     KEY_ATM_DELTA_5M,
     KEY_ATM_IV_5M,
     KEY_DELTA_IV_CORR_5M,
+    KEY_GAMMA_DENSITY_5M,
     KEY_OTM_DELTA_5M,
     KEY_OTM_IV_5M,
 )

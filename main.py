@@ -1996,10 +1996,10 @@ class SyngexOrchestrator:
                     max_exchanges_norm = 4.0
                     bid_participant_score = min(1.0, avg_bid_participants / max_participants_norm)
                     bid_exchange_score = min(1.0, top_bid_exchanges / max_exchanges_norm)
-                    bid_conviction_score = bid_participant_score * bid_exchange_score
+                    bid_conviction_score = 0.6 * bid_participant_score + 0.4 * bid_exchange_score
                     ask_participant_score = min(1.0, avg_ask_participants / max_participants_norm)
                     ask_exchange_score = min(1.0, top_ask_exchanges / max_exchanges_norm)
-                    ask_conviction_score = ask_participant_score * ask_exchange_score
+                    ask_conviction_score = 0.6 * ask_participant_score + 0.4 * ask_exchange_score
                     avg_conviction_score = (bid_conviction_score + ask_conviction_score) / 2.0
 
                     if KEY_CONVICT_SCORE_5M in self._rolling_data:

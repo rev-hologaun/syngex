@@ -8,11 +8,13 @@ Measures institutional conviction by analyzing:
 A wall with 4 participants across 3 exchanges = high conviction (institutional).
 A wall with 1 participant = likely spoofed.
 
-LONG:  avg_bid_participants >= 3.0 AND bid_exchanges >= 2 AND conviction_score > 0.7
-       AND price breakout above recent high
+This is a **filter-style conviction engine** — it produces graded signal strength
+rather than binary pass/fail. Other strategies handle price confirmation; this
+strategy answers "how much conviction is there?" and emits a signal when
+signal_strength >= 0.35.
 
-SHORT: avg_ask_participants >= 3.0 AND ask_exchanges >= 2 AND conviction_score > 0.7
-       AND price breakdown below recent low
+LONG:  signal_strength >= 0.35 based on participant/exchange diversity
+SHORT: signal_strength >= 0.35 based on participant/exchange diversity
 
 Exit: conviction_score drops < 0.4 OR stop-loss hit
 """
@@ -36,7 +38,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.ParticipantDiversityConviction")
 
-MIN_CONFIDENCE = 0.0
+MIN_CONFIDENCE = 0.30
 
 
 def normalize(val: float, vmin: float, vmax: float) -> float:
@@ -48,19 +50,25 @@ def normalize(val: float, vmin: float, vmax: float) -> float:
 
 class ParticipantDiversityConviction(BaseStrategy):
     """
-    Participant Diversity Conviction strategy — institutional conviction engine.
+    Participant Diversity Conviction strategy — institutional conviction filter.
 
-    Measures whether order book walls are supported by genuine institutional
-    participants (multiple participants, multiple exchanges) vs single-player
-    spoofed walls.
+    Produces a graded signal strength based on order book wall quality:
+    multiple participants and multiple exchanges indicate genuine institutional
+    interest vs single-player spoofed walls.
 
-    LONG:  avg_bid_participants >= 3.0 AND bid_exchanges >= 2 AND conviction_score > 0.7
-           AND price breakout above recent high
+    This is a **filter-style** strategy: it measures conviction, not breakout.
+    Price confirmation is handled by other strategies.
 
-    SHORT: avg_ask_participants >= 3.0 AND ask_exchanges >= 2 AND conviction_score > 0.7
-           AND price breakdown below recent low
+    Signal strength per direction:
+        base_strength = min(participant_score, exchange_score) * 0.5
+        strength += conviction_score * 0.5
+        strength += size_score * 0.1
+        Signal emitted when strength >= 0.35
 
-    Exit: conviction_score drops < 0.4 OR stop-loss hit
+    participant_score = min(1.0, participants / 5.0)
+    exchange_score    = min(1.0, exchanges / 4.0)
+    conviction_score  = 0.6 * participant_score + 0.4 * exchange_score
+    size_score        = min(1.0, current_size / (avg_size * 1.5))
     """
 
     strategy_id = "participant_diversity_conviction"
@@ -70,8 +78,9 @@ class ParticipantDiversityConviction(BaseStrategy):
         """
         Evaluate current state for participant diversity conviction signal.
 
-        Returns a single LONG or SHORT signal when conditions are met,
-        or empty list when gates fail or no clear signal.
+        Produces a graded signal strength based on participant/exchange diversity.
+        Emits a LONG or SHORT signal when the stronger direction reaches
+        signal_strength >= 0.35, or empty list when no direction qualifies.
         """
         underlying_price = data.get("underlying_price", 0)
         if underlying_price <= 0:
@@ -106,97 +115,67 @@ class ParticipantDiversityConviction(BaseStrategy):
         current_ask_exchanges = ask_exchanges_window.values[-1]
         current_conviction = conviction_window.values[-1] if conviction_window else 0.0
 
-        # 2. Compute conviction scores per side
-        max_participants_norm = params.get("max_participants_norm", 5.0)
-        max_exchanges_norm = params.get("max_exchanges_norm", 4.0)
+        # 2. Compute soft scores per side
+        # Participant score: graded 0→1 as participants grow to 5.0
+        bid_participant_score = min(1.0, current_bid_participants / 5.0)
+        ask_participant_score = min(1.0, current_ask_participants / 5.0)
 
-        bid_participant_score = min(1.0, current_bid_participants / max_participants_norm)
-        bid_exchange_score = min(1.0, current_bid_exchanges / max_exchanges_norm)
-        bid_conviction = bid_participant_score * bid_exchange_score
+        # Exchange score: graded 0→1 as exchanges grow to 4.0
+        bid_exchange_score = min(1.0, current_bid_exchanges / 4.0)
+        ask_exchange_score = min(1.0, current_ask_exchanges / 4.0)
 
-        ask_participant_score = min(1.0, current_ask_participants / max_participants_norm)
-        ask_exchange_score = min(1.0, current_ask_exchanges / max_exchanges_norm)
-        ask_conviction = ask_participant_score * ask_exchange_score
+        # Conviction score: weighted harmonic mean (0.6 participant + 0.4 exchange)
+        # Prevents one weak dimension from completely killing the signal
+        bid_conviction = 0.6 * bid_participant_score + 0.4 * bid_exchange_score
+        ask_conviction = 0.6 * ask_participant_score + 0.4 * ask_exchange_score
 
-        # 3. Determine signal direction
-        min_participants = params.get("min_participants", 3.0)
-        min_exchanges = params.get("min_exchanges", 2)
-        conviction_threshold = params.get("conviction_threshold", 0.7)
+        # 3. Compute soft Gate C size scores for both directions
+        long_size_score = self._gate_c_size_score_for_direction(rolling_data, "LONG")
+        short_size_score = self._gate_c_size_score_for_direction(rolling_data, "SHORT")
 
-        long_signal = (
-            current_bid_participants >= min_participants
-            and current_bid_exchanges >= min_exchanges
-            and bid_conviction > conviction_threshold
+        # 4. Compute graded signal strength per direction
+        long_strength = (
+            min(bid_participant_score, bid_exchange_score) * 0.5
+            + bid_conviction * 0.5
+            + long_size_score * 0.1
         )
-        short_signal = (
-            current_ask_participants >= min_participants
-            and current_ask_exchanges >= min_exchanges
-            and ask_conviction > conviction_threshold
+        short_strength = (
+            min(ask_participant_score, ask_exchange_score) * 0.5
+            + ask_conviction * 0.5
+            + short_size_score * 0.1
         )
 
-        if not long_signal and not short_signal:
+        # VAMP score (float 0–1) — used as soft bonus, not hard gate
+        vamp_score = self._vamp_validation(rolling_data, "LONG") if long_strength >= short_strength else self._vamp_validation(rolling_data, "SHORT")
+
+        # Threshold for emitting a signal (down from effective ~0.7 of old binary system)
+        signal_threshold = params.get("signal_threshold", 0.35)
+
+        if long_strength < signal_threshold and short_strength < signal_threshold:
             return []
 
-        # Only emit one signal per evaluation
-        if long_signal and short_signal:
-            long_strength = bid_conviction - conviction_threshold
-            short_strength = ask_conviction - conviction_threshold
-            direction = "LONG" if long_strength >= short_strength else "SHORT"
-        elif long_signal:
+        # Only emit one signal per evaluation — pick the stronger direction
+        if long_strength >= short_strength:
             direction = "LONG"
+            size_score = long_size_score
         else:
             direction = "SHORT"
+            size_score = short_size_score
 
-        # 4. Price action confirmation (breakout/breakdown)
-        price = data.get("current_price", underlying_price)
-        if price <= 0:
-            price = underlying_price
-
-        recent_high = data.get("recent_high", 0)
-        recent_low = data.get("recent_low", 0)
-
-        if direction == "LONG" and recent_high <= 0:
-            # No recent high data — skip price confirmation
-            logger.debug("Participant Conviction: No recent high data, skipping price confirmation for LONG")
-            return []
-        if direction == "SHORT" and recent_low <= 0:
-            logger.debug("Participant Conviction: No recent low data, skipping price confirmation for SHORT")
-            return []
-
-        if direction == "LONG" and price <= recent_high:
-            return []
-        if direction == "SHORT" and price >= recent_low:
-            return []
-
-        # 5. Apply 3 HARD GATES
-        # Gate A: avg_participants >= min_participants (already checked above)
-        # Gate B: num_exchanges >= min_exchanges (already checked above)
-        # Gate C: current_size >= min_size_ratio × MA(size)
-
-        min_size_ratio = params.get("min_size_ratio", 0.5)
-        gate_c = self._gate_c_size_ratio(rolling_data, direction, min_size_ratio)
-
-        if not gate_c:
-            logger.debug(
-                "Participant Conviction: Gate C failed — size below MA for %s",
-                direction,
+        # 5. VAMP validation — soft bonus, not hard gate
+        vamp_validated = vamp_score
+        if vamp_score < 0.2:
+            logger.warning(
+                "Participant Conviction: VAMP score low (%.3f) for %s — allowing signal",
+                vamp_score, direction,
             )
-            return []
+        if direction == "LONG":
+            long_strength += vamp_score * 0.05
+        else:
+            short_strength += vamp_score * 0.05
 
-        # 6. VAMP validation (optional)
-        use_vamp_validation = params.get("use_vamp_validation", False)
-        vamp_validated = True
-        if use_vamp_validation:
-            vamp_validated = self._vamp_validation(rolling_data, direction)
-
-        if not vamp_validated:
-            logger.debug(
-                "Participant Conviction: VAMP validation failed for %s", direction,
-            )
-            return []
-
-        # 7. Compute confidence (7-component model)
-        confidence = self._compute_confidence(
+        # 6. Compute confidence (7-component model)
+        confidence, conf_breakdown = self._compute_confidence(
             bid_participants=current_bid_participants,
             ask_participants=current_ask_participants,
             bid_exchanges=current_bid_exchanges,
@@ -216,7 +195,11 @@ class ParticipantDiversityConviction(BaseStrategy):
         if confidence < min_confidence:
             return []
 
-        # 8. Build signal with entry/stop/target
+        # 7. Build signal with entry/stop/target
+        price = data.get("current_price", underlying_price)
+        if price <= 0:
+            price = underlying_price
+
         stop_pct = params.get("stop_pct", 0.008)
         target_risk_mult = params.get("target_risk_mult", 2.0)
 
@@ -245,7 +228,8 @@ class ParticipantDiversityConviction(BaseStrategy):
                 f"Participant conviction {direction}: "
                 f"participants={current_bid_participants if direction == 'LONG' else current_ask_participants:.1f}, "
                 f"exchanges={current_bid_exchanges if direction == 'LONG' else current_ask_exchanges:.0f}, "
-                f"conviction={conviction_pct:.3f}"
+                f"conviction={conviction_pct:.3f}, "
+                f"strength={long_strength if direction == 'LONG' else short_strength:.3f}"
             ),
             metadata={
                 "direction": direction,
@@ -253,30 +237,39 @@ class ParticipantDiversityConviction(BaseStrategy):
                 "ask_participants": round(current_ask_participants, 2),
                 "bid_exchanges": round(current_bid_exchanges, 2),
                 "ask_exchanges": round(current_ask_exchanges, 2),
+                "bid_participant_score": round(bid_participant_score, 4),
+                "ask_participant_score": round(ask_participant_score, 4),
+                "bid_exchange_score": round(bid_exchange_score, 4),
+                "ask_exchange_score": round(ask_exchange_score, 4),
                 "bid_conviction": round(bid_conviction, 4),
                 "ask_conviction": round(ask_conviction, 4),
+                "long_strength": round(long_strength, 4),
+                "short_strength": round(short_strength, 4),
+                "size_score": round(size_score, 4),
                 "gates": {
-                    "A_participants": True,
-                    "B_exchanges": True,
-                    "C_size_ratio": gate_c,
-                    "D_vamp": vamp_validated,
+                    "A_participant_score": round(
+                        bid_participant_score if direction == "LONG" else ask_participant_score, 4
+                    ),
+                    "B_exchange_score": round(
+                        bid_exchange_score if direction == "LONG" else ask_exchange_score, 4
+                    ),
+                    "C_size_ratio": round(size_score, 4),
+                    "D_vamp": round(vamp_validated, 3),
                 },
                 "regime": regime,
+                "confidence_breakdown": conf_breakdown,
             },
         )]
 
-    def _gate_c_size_ratio(
+    def _gate_c_size_score_for_direction(
         self,
         rolling_data: Dict[str, Any],
         direction: str,
-        min_ratio: float,
-    ) -> bool:
+    ) -> float:
         """
-        Gate C: Size ratio check.
+        Gate C: Soft size ratio score for a specific direction.
 
-        Current depth size on the signal side should be at least min_ratio × MA(size).
-        This filters out flash walls that appear strong momentarily but are
-        below historical average depth.
+        Returns min(1.0, current_size / (avg_size * 1.5)).
         """
         depth_bid_window = rolling_data.get("depth_bid_size_5m")
         depth_ask_window = rolling_data.get("depth_ask_size_5m")
@@ -290,45 +283,48 @@ class ParticipantDiversityConviction(BaseStrategy):
             current = window.latest
             avg = window.mean
             if current is not None and avg is not None and avg > 0:
-                return current >= avg * min_ratio
+                return min(1.0, current / (avg * 1.5))
 
-        # No depth data — pass gate (can't evaluate)
-        return True
+        # No depth data — return 0 (no size bonus)
+        return 0.0
 
     def _vamp_validation(
         self,
         rolling_data: Dict[str, Any],
         direction: str,
-    ) -> bool:
+    ) -> float:
         """
-        VAMP validation: VAMP direction should align with signal direction.
+        VAMP validation score: returns a float 0.0–1.0.
 
-        If VAMP is bid-weighted, LONG signals are more credible.
-        If VAMP is ask-weighted, SHORT signals are more credible.
+        Positive vamp_mid_dev = bid-weighted = good for LONG.
+        Negative vamp_mid_dev = ask-weighted = good for SHORT.
+
+        Returns a soft score used as a signal strength bonus (not a hard gate).
         """
         vamp_levels = rolling_data.get(KEY_VAMP_LEVELS)
         if not vamp_levels:
-            return True  # No VAMP data — pass
+            return 0.5  # neutral when no data
 
         vamp_mid_dev = vamp_levels.get("vamp_mid_dev", 0)
 
         if direction == "LONG":
-            return vamp_mid_dev >= -0.001  # Allow small tolerance
+            # positive vamp_mid_dev = bid-weighted = good for LONG
+            return max(0.0, min(1.0, 0.5 + vamp_mid_dev * 200))
         else:
-            return vamp_mid_dev <= 0.001  # Allow small tolerance
+            # negative vamp_mid_dev = ask-weighted = good for SHORT
+            return max(0.0, min(1.0, 0.5 - vamp_mid_dev * 200))
 
     def _compute_confidence(
         self, bid_participants, ask_participants, bid_exchanges, ask_exchanges,
         bid_conviction, ask_conviction, conviction, direction, rolling_data,
         data, params, regime, gex_calc, depth_score=None,
     ):
-        """Combine all factors into a single confidence score — 5 components.
+        """Combine all factors into a single confidence score — 7 components, weighted average.
 
-        Returns 0.0–1.0.
+        Returns (confidence: float, breakdown: dict) — confidence is 0.0–1.0.
         """
         max_participants_norm = params.get("max_participants_norm", 5.0)
         max_exchanges_norm = params.get("max_exchanges_norm", 4.0)
-        conviction_threshold = params.get("conviction_threshold", 0.7)
 
         # Direction-specific values
         if direction == "LONG":
@@ -340,28 +336,79 @@ class ParticipantDiversityConviction(BaseStrategy):
             exchanges = ask_exchanges
             conviction_score = ask_conviction
 
-        # 1. Participant diversity: participants from 0→max_participants_norm, higher = higher
+        # c1: Participant diversity (weight 0.15)
         c1 = normalize(participants, 0.0, max_participants_norm)
 
-        # 2. Exchange diversity: exchanges from 0→max_exchanges_norm, higher = higher
+        # c2: Exchange diversity (weight 0.10)
         c2 = normalize(exchanges, 0.0, max_exchanges_norm)
 
-        # 3. Conviction magnitude: conviction_score from conviction_threshold→1.0, higher = higher
-        c3 = normalize(conviction_score, conviction_threshold, 1.0)
+        # c3: Conviction magnitude — lower baseline 0.3 (weight 0.25)
+        c3 = normalize(conviction_score, 0.3, 1.0)
 
-        # 4. Conviction ROC: roc from -0.3→0.3, use abs, higher = higher
+        # c4: Conviction ROC — abs(roc) from 0→0.3, higher = higher (weight 0.10)
         roc = 0.0
         conviction_window = rolling_data.get(KEY_CONVICT_SCORE_5M)
         if conviction_window and conviction_window.count >= 5 and conviction_window.values[-5] > 0:
             roc = (conviction_score - conviction_window.values[-5]) / conviction_window.values[-5]
         c4 = normalize(abs(roc), 0.0, 0.3)
 
-        # 5. Volume confirmation: vol_ratio from 0→2.0, higher = higher
+        # c5: Volume confirmation — vol_ratio from 0→2.0, higher = higher (weight 0.10)
         volume_window = rolling_data.get(KEY_VOLUME_5M)
         vol_ratio = 1.0
         if volume_window and volume_window.count > 0 and volume_window.mean > 0:
             vol_ratio = volume_window.latest / volume_window.mean
         c5 = normalize(vol_ratio, 0.0, 2.0)
 
-        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
-        return min(1.0, max(0.0, confidence))
+        # c6: Regime alignment (weight 0.15)
+        regime = str(regime).lower() if regime else ""
+        if "trend" in regime:
+            c6 = 0.7
+        elif "rang" in regime:
+            c6 = 0.4
+        else:
+            c6 = 0.4
+
+        # c7: GEX alignment (weight 0.15)
+        try:
+            net_gamma = 0.0
+            if gex_calc and isinstance(gex_calc, dict):
+                net_gamma = gex_calc.get("net_gamma", 0.0)
+            if direction == "LONG":
+                if net_gamma > 0.01:
+                    c7 = 1.0
+                elif net_gamma < -0.01:
+                    c7 = 0.2
+                else:
+                    c7 = 0.5
+            else:  # SHORT
+                if net_gamma < -0.01:
+                    c7 = 1.0
+                elif net_gamma > 0.01:
+                    c7 = 0.2
+                else:
+                    c7 = 0.5
+        except Exception:
+            c7 = 0.5
+
+        # Weighted average
+        confidence = (
+            c1 * 0.15 +
+            c2 * 0.10 +
+            c3 * 0.25 +
+            c4 * 0.10 +
+            c5 * 0.10 +
+            c6 * 0.15 +
+            c7 * 0.15
+        )
+        confidence = min(1.0, max(0.0, confidence))
+
+        breakdown = {
+            "c1_participant": round(c1, 3),
+            "c2_exchange": round(c2, 3),
+            "c3_conviction": round(c3, 3),
+            "c4_roc": round(c4, 3),
+            "c5_volume": round(c5, 3),
+            "c6_regime": round(c6, 3),
+            "c7_gex": round(c7, 3),
+        }
+        return confidence, breakdown
