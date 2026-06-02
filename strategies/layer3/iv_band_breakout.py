@@ -15,13 +15,20 @@ v2 Architecture:
     4. IV-Expansion Scaled Targets — target scales with current IV / mean IV,
        capped at 4.0× risk.
 
-Confidence (6 components, min 0.35):
-    1. Skew compression (hard gate — 0.0 or 0.20)
-    2. Gamma regime gate (hard gate — 0.0 or 0.15)
-    3. Delta acceleration (hard gate — 0.0 or 0.15)
-    4. Price compression (soft — 0.0–0.10)
-    5. IV expansion (soft — 0.0–0.10)
-    6. Volume confirmation (soft — 0.05–0.10)
+This is a **filter-style volatility spring engine** — it produces graded signal strength
+    based on skew compression and delta acceleration, not binary pass/fail.
+
+    Signal strength per direction:
+        strength = skew*0.30 + regime*0.10 + price*0.10 + breakout*0.15 + delta*0.20 + vol*0.15
+        Emit when signal_strength >= 0.30 and skew is compressed
+
+    Confidence (6 components, weighted):
+        1. Skew compression (continuous 0–0.30)
+        2. Gamma regime (graded 0–0.10)
+        3. Delta acceleration (continuous 0–0.30)
+        4. Price compression (soft 0–0.10)
+        5. IV expansion (soft 0–0.10)
+        6. Volume confirmation (graded 0–0.10)
 """
 
 from __future__ import annotations
@@ -61,7 +68,7 @@ STOP_PCT = 0.005  # 0.5% stop
 TARGET_PCT = 0.010  # 1.0% target
 
 # Min/max confidence
-MIN_CONFIDENCE = 0.0  # Raised from 0.25, lowered to 0.15 for global confluence hunting
+MIN_CONFIDENCE = 0.30  # Minimum confidence threshold for signal emission
 
 # Min data points
 MIN_DATA_POINTS = 5
@@ -157,37 +164,56 @@ class IVBandBreakout(BaseStrategy):
         if atm_strike is None:
             return None
 
-        # 1. Gamma regime gate (hard gate)
-        if not self._check_gamma_regime(regime):
+        # 1. Gamma regime gate (graded score)
+        regime_score = self._regime_gate_score(regime)
+        if regime_score < 0.5:
             return None
 
-        # 2. Skew compression check (hard gate)
+        # 2. Skew compression check (hard gate + graded score)
         skew_compressed, skew_depth = self._check_skew_compression(
             rolling_data, atm_strike,
         )
         if not skew_compressed:
             return None
+        skew_score = min(1.0, skew_depth / 0.05)  # 0.05 depth = full score
 
-        # 3. Price compression check
-        if not self._check_price_compression(rolling_data):
+        # 3. Price compression check (graded score)
+        price_compression_ratio = self._get_price_compression_ratio(rolling_data)
+        if price_compression_ratio is None or price_compression_ratio > 1.0:
+            return None
+        price_score = max(0.0, 1.0 - price_compression_ratio)  # tighter = higher
+
+        # 4. Price breakout above recent high (graded score)
+        breakout_score = self._breakout_score(rolling_data, direction="LONG")
+        if breakout_score < 0.2:
             return None
 
-        # 4. Price breakout above recent high
-        if not self._check_breakout_high(rolling_data):
-            return None
-
-        # 5. Delta acceleration at breakout (hard gate)
+        # 5. Delta acceleration at breakout (graded score)
         delta_accel = self._check_delta_acceleration(rolling_data, direction="LONG")
         if delta_accel is None:
+            return None
+        delta_gate_score = self._delta_gate_score(delta_accel, direction="LONG")
+        if delta_gate_score < 0.2:
             return None
 
         # 6. Volume trending UP (call volume)
         vol_window = rolling_data.get(KEY_VOLUME_UP_5M)
-        if vol_window is None or vol_window.count < 3:
+        vol_trend = vol_window.trend if vol_window else "UNKNOWN"
+        if vol_trend not in ("UP", "DOWN"):
             return None
-        if vol_window.trend != "UP":
+        vol_gate_score = 1.0
+
+        # Compute signal_strength from continuous scores
+        signal_strength = (
+            skew_score * 0.30
+            + regime_score * 0.10
+            + price_score * 0.10
+            + breakout_score * 0.15
+            + delta_gate_score * 0.20
+            + vol_gate_score * 0.15
+        )
+        if signal_strength < 0.30:
             return None
-        vol_trend = "UP"
 
         # All conditions met — compute confidence and build signal
         # Get IV expansion factor
@@ -258,6 +284,14 @@ class IVBandBreakout(BaseStrategy):
                 "target_mult": round(target_mult, 2),
                 "regime_type": regime,
                 "target_type": "scaled",
+                # Continuous gate scores
+                "skew_score": round(skew_score, 4),
+                "regime_score": round(regime_score, 4),
+                "price_score": round(price_score, 4),
+                "breakout_score": round(breakout_score, 4),
+                "delta_gate_score": round(delta_gate_score, 4),
+                "vol_gate_score": round(vol_gate_score, 4),
+                "signal_strength": round(signal_strength, 4),
             },
         )
 
@@ -290,37 +324,56 @@ class IVBandBreakout(BaseStrategy):
         if atm_strike is None:
             return None
 
-        # 1. Gamma regime gate (hard gate)
-        if not self._check_gamma_regime(regime):
+        # 1. Gamma regime gate (graded score)
+        regime_score = self._regime_gate_score(regime)
+        if regime_score < 0.5:
             return None
 
-        # 2. Skew compression check (hard gate)
+        # 2. Skew compression check (hard gate + graded score)
         skew_compressed, skew_depth = self._check_skew_compression(
             rolling_data, atm_strike,
         )
         if not skew_compressed:
             return None
+        skew_score = min(1.0, skew_depth / 0.05)  # 0.05 depth = full score
 
-        # 3. Price compression check
-        if not self._check_price_compression(rolling_data):
+        # 3. Price compression check (graded score)
+        price_compression_ratio = self._get_price_compression_ratio(rolling_data)
+        if price_compression_ratio is None or price_compression_ratio > 1.0:
+            return None
+        price_score = max(0.0, 1.0 - price_compression_ratio)  # tighter = higher
+
+        # 4. Price breakout below recent low (graded score)
+        breakout_score = self._breakout_score(rolling_data, direction="SHORT")
+        if breakout_score < 0.2:
             return None
 
-        # 4. Price breakout below recent low
-        if not self._check_breakout_low(rolling_data):
-            return None
-
-        # 5. Delta acceleration at breakout (hard gate)
+        # 5. Delta acceleration at breakout (graded score)
         delta_accel = self._check_delta_acceleration(rolling_data, direction="SHORT")
         if delta_accel is None:
+            return None
+        delta_gate_score = self._delta_gate_score(delta_accel, direction="SHORT")
+        if delta_gate_score < 0.2:
             return None
 
         # 6. Volume trending DOWN (put volume)
         vol_window = rolling_data.get(KEY_VOLUME_DOWN_5M)
-        if vol_window is None or vol_window.count < 3:
+        vol_trend = vol_window.trend if vol_window else "UNKNOWN"
+        if vol_trend not in ("UP", "DOWN"):
             return None
-        if vol_window.trend != "DOWN":
+        vol_gate_score = 1.0
+
+        # Compute signal_strength from continuous scores
+        signal_strength = (
+            skew_score * 0.30
+            + regime_score * 0.10
+            + price_score * 0.10
+            + breakout_score * 0.15
+            + delta_gate_score * 0.20
+            + vol_gate_score * 0.15
+        )
+        if signal_strength < 0.30:
             return None
-        vol_trend = "DOWN"
 
         # All conditions met — compute confidence and build signal
         iv_expansion = self._get_iv_expansion(rolling_data)
@@ -389,6 +442,14 @@ class IVBandBreakout(BaseStrategy):
                 "target_mult": round(target_mult, 2),
                 "regime_type": regime,
                 "target_type": "scaled",
+                # Continuous gate scores
+                "skew_score": round(skew_score, 4),
+                "regime_score": round(regime_score, 4),
+                "price_score": round(price_score, 4),
+                "breakout_score": round(breakout_score, 4),
+                "delta_gate_score": round(delta_gate_score, 4),
+                "vol_gate_score": round(vol_gate_score, 4),
+                "signal_strength": round(signal_strength, 4),
             },
         )
 
@@ -581,45 +642,74 @@ class IVBandBreakout(BaseStrategy):
         """
         Compute unified confidence for LONG and SHORT breakout signals.
 
-        6 components:
-            1. Skew compression (hard gate — 0.0 or 0.20)
-            2. Gamma regime gate (hard gate — 0.0 or 0.15)
-            3. Delta acceleration (hard gate — 0.0 or 0.15)
-            4. Price compression (soft — 0.0–0.10)
-            5. IV expansion (soft — 0.0–0.10)
-            6. Volume confirmation (soft — 0.05–0.10)
+        6 continuous components (weighted sum):
+            1. Skew compression (0.0–0.30, continuous)
+            2. Gamma regime (0.0–0.10, graded)
+            3. Delta acceleration (0.0–0.30, continuous)
+            4. Price compression (0.0–0.10, soft)
+            5. IV expansion (0.0–0.10, soft)
+            6. Volume confirmation (0.0–0.10, graded)
         """
-        # 1. Skew compression (hard gate — 0.0 or 0.20)
-        skew_conf = 0.20 if skew_depth > 0 else 0.0
+        # 1. Skew compression (0.0–0.30, continuous — NOT binary!)
+        # skew_depth > 0 means compressed, deeper = better
+        skew_conf = 0.30 * min(1.0, skew_depth / 0.05)
 
-        # 2. Gamma regime gate (hard gate — 0.0 or 0.15)
-        regime_conf = 0.15 if self._check_gamma_regime(regime) else 0.0
+        # 2. Gamma regime (0.0–0.10, graded)
+        regime_conf = self._regime_score(regime)
 
-        # 3. Delta acceleration (hard gate — 0.0 or 0.15)
-        delta_conf = 0.15 if delta_accel is not None else 0.0
+        # 3. Delta acceleration (0.0–0.30, continuous — NOT binary!)
+        delta_conf = self._delta_confidence(delta_accel, direction)
 
-        # 4. Price compression (soft — 0.0–0.10)
+        # 4. Price compression (0.0–0.10, soft)
         price_conf = self._price_compression_confidence(price_compression)
 
-        # 5. IV expansion target quality (soft — 0.0–0.10)
+        # 5. IV expansion (0.0–0.10, soft)
         iv_conf = self._iv_expansion_confidence(iv_expansion)
 
-        # 6. Volume confirmation (soft — 0.05–0.10)
+        # 6. Volume confirmation (0.0–0.10, graded)
         vol_conf = self._volume_confidence(vol_trend)
 
         confidence = skew_conf + regime_conf + delta_conf + price_conf + iv_conf + vol_conf
-        return max(0.0, confidence)
+        return max(0.0, min(1.0, confidence))
 
     # ------------------------------------------------------------------
-    # Soft confidence helpers
+    # Confidence helpers (continuous scores)
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _price_compression_confidence(ratio: float) -> float:
-        """Price compression confidence: 0.0–0.10. Tighter = higher."""
-        # ratio < 0.40 is good, lower is better
-        if ratio <= 0:
+    def _regime_score(regime: str) -> float:
+        """
+        Compute regime score (0.0–0.10).
+        POSITIVE = 0.10 (strong trend, wider targets)
+        NEGATIVE = 0.08 (explosive, tighter targets)
+        NEUTRAL = 0.0 (should be gated upstream, but be safe)
+        """
+        if regime == "POSITIVE":
             return 0.10
+        elif regime == "NEGATIVE":
+            return 0.08
+        return 0.0
+
+    @staticmethod
+    def _delta_confidence(delta_accel: float, direction: str) -> float:
+        """
+        Compute delta confidence (0.0–0.30).
+        LONG: delta_accel > 1.0 means acceleration.
+              Score = min(1.0, (delta_accel - 1.0) / 0.5) * 0.30
+        SHORT: delta_accel < 1.0 means deceleration.
+               Score = min(1.0, (1.0 - delta_accel) / 0.5) * 0.30
+        """
+        if direction == "LONG":
+            deviation = max(0.0, delta_accel - 1.0)
+        else:
+            deviation = max(0.0, 1.0 - delta_accel)
+        return 0.30 * min(1.0, deviation / 0.5)
+
+    @staticmethod
+    def _price_compression_confidence(ratio: float) -> float:
+        """Price compression confidence: 0.0–0.10. Tighter = higher. Data-not-available = neutral."""
+        if ratio <= 0:
+            return 0.05  # neutral when no data
         if ratio >= 1.0:
             return 0.0
         return 0.10 * (1 - ratio)
@@ -627,7 +717,6 @@ class IVBandBreakout(BaseStrategy):
     @staticmethod
     def _iv_expansion_confidence(iv_expansion: float) -> float:
         """IV expansion confidence: 0.0–0.10. Higher expansion = higher."""
-        # iv_expansion > 1.0 means IV is expanding
         if iv_expansion <= 0:
             return 0.0
         if iv_expansion >= 2.0:
@@ -636,8 +725,55 @@ class IVBandBreakout(BaseStrategy):
 
     @staticmethod
     def _volume_confidence(vol_trend: str) -> float:
-        """Volume confirmation: 0.05–0.10."""
-        return 0.10 if vol_trend in ("UP", "DOWN") else 0.05
+        """Volume confirmation: 0.0–0.10. Trend strength matters."""
+        if vol_trend in ("UP", "DOWN"):
+            return 0.10
+        elif vol_trend == "FLAT":
+            return 0.05
+        else:
+            return 0.0  # unknown
+
+    # ------------------------------------------------------------------
+    # v2 Gate Score Methods (continuous 0.0–1.0)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _regime_gate_score(regime: str) -> float:
+        """Regime gate score: 0.0–1.0. POSITIVE=1.0, NEGATIVE=0.8, NEUTRAL=0.0"""
+        if regime == "POSITIVE":
+            return 1.0
+        elif regime == "NEGATIVE":
+            return 0.8
+        return 0.0
+
+    @staticmethod
+    def _breakout_score(rolling_data: Dict[str, Any], direction: str) -> float:
+        """Breakout score: 0.0–1.0 based on how far price moved beyond the breakout level."""
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        if not price_window or price_window.count < 5:
+            return 0.5  # neutral
+
+        current = price_window.values[-1] if price_window.values else 0
+        recent_high = price_window.high if hasattr(price_window, 'high') else 0
+        recent_low = price_window.low if hasattr(price_window, 'low') else 0
+
+        if direction == "LONG" and recent_high > 0:
+            # How far above recent high
+            move_pct = (current - recent_high) / recent_high
+            return min(1.0, max(0.0, move_pct / 0.01))  # 1% move = full score
+        elif direction == "SHORT" and recent_low > 0:
+            move_pct = (recent_low - current) / recent_low
+            return min(1.0, max(0.0, move_pct / 0.01))
+        return 0.3  # small default
+
+    @staticmethod
+    def _delta_gate_score(delta_accel: float, direction: str) -> float:
+        """Delta gate score: 0.0–1.0. LONG: acceleration > 1.0 = good. SHORT: deceleration < 1.0 = good."""
+        if direction == "LONG":
+            deviation = max(0.0, delta_accel - 1.0)
+        else:
+            deviation = max(0.0, 1.0 - delta_accel)
+        return min(1.0, deviation / 0.5)  # 0.5 deviation = full score
 
     # ------------------------------------------------------------------
     # Shared helpers (v1 logic kept)
