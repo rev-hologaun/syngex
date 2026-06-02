@@ -17,10 +17,13 @@ Signal types:
     ROBUST BOUNCE (LONG):  Robust Bid Wall holds → scalp the bounce
     ROBUST BOUNCE (SHORT): Robust Ask Wall holds → scalp the bounce
 
-Hard gates (all must pass):
-    Gate A: Wall size >= 5× average level size (significant wall)
-    Gate B: vol_ratio matches signal type (< 0.1 for spoof, > 0.5 for robust)
-    Gate C: Spread < 2× average spread (scalp must be profitable)
+This is a **filter-style microstructure engine** — it produces graded signal strength
+based on wall fragility/decay, not binary pass/fail.
+
+Signal strength per type:
+    strength = fragility_component + decay_component (continuous 0–1)
+    signal_strength = strength*0.6 + wall*0.15 + vol*0.15 + spread*0.10 + vamp*0.05
+    Emit when signal_strength >= 0.30 and fragility_strength >= 0.2
 
 Confidence model (7 components, sum to 1.0):
     1. Fragility strength        (0.0–0.30)
@@ -35,7 +38,7 @@ Confidence model (7 components, sum to 1.0):
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
@@ -57,7 +60,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.ParticipantDivergenceScalper")
 
-MIN_CONFIDENCE = 0.0
+MIN_CONFIDENCE = 0.25
 
 
 class ParticipantDivergenceScalper(BaseStrategy):
@@ -116,106 +119,98 @@ class ParticipantDivergenceScalper(BaseStrategy):
         current_decay_bid = decay_bid_window.values[-1]
         current_decay_ask = decay_ask_window.values[-1]
 
-        # 2. Determine signal direction and type
+        # 2. Determine signal direction and type (continuous filter-style)
         fragility_threshold = params.get("fragility_threshold", 0.5)
         robust_threshold = params.get("robust_threshold", 0.3)
         decay_threshold = params.get("decay_velocity_threshold", 0.0)
-        vol_ratio_spoof = params.get("vol_ratio_spoof", 0.1)
-        vol_ratio_robust = params.get("vol_ratio_robust", 0.5)
         max_spread_mult = params.get("max_spread_mult", 2.0)
         wall_size_mult = params.get("wall_size_mult", 5.0)
 
-        # Spoof Breach (SHORT) — fragile ask wall evaporating
-        spoof_short = (
-            current_frag_ask > fragility_threshold
-            and current_decay_ask > decay_threshold
-        )
-        # Spoof Breach (LONG) — fragile bid wall evaporating
-        spoof_long = (
-            current_frag_bid > fragility_threshold
-            and current_decay_bid > decay_threshold
-        )
-        # Robust Bounce (LONG) — robust bid wall holding
-        robust_long = (
-            current_frag_bid < robust_threshold
-            and current_decay_bid <= 0
-        )
-        # Robust Bounce (SHORT) — robust ask wall holding
-        robust_short = (
-            current_frag_ask < robust_threshold
-            and current_decay_ask <= 0
-        )
+        # Compute continuous strength for each of the 4 signal types
+        # Spoof SHORT: fragile ask wall (high frag_ask, positive decay)
+        spoof_short_strength = 0.0
+        if current_frag_ask > robust_threshold and current_decay_ask > decay_threshold:
+            # Strength grows as frag_ask increases above robust_threshold
+            spoof_short_strength = (current_frag_ask - robust_threshold) / (fragility_threshold - robust_threshold)
+            # Decay penalty: lower decay = weaker signal
+            spoof_short_strength *= min(1.0, current_decay_ask / max(0.01, abs(current_decay_ask)))
 
-        if not spoof_short and not spoof_long and not robust_long and not robust_short:
+        # Spoof LONG: fragile bid wall
+        spoof_long_strength = 0.0
+        if current_frag_bid > robust_threshold and current_decay_bid > decay_threshold:
+            spoof_long_strength = (current_frag_bid - robust_threshold) / (fragility_threshold - robust_threshold)
+            spoof_long_strength *= min(1.0, current_decay_bid / max(0.01, abs(current_decay_bid)))
+
+        # Robust LONG: robust bid wall (low frag_bid, negative/neutral decay)
+        robust_long_strength = 0.0
+        if current_frag_bid < fragility_threshold and current_decay_bid <= 0:
+            robust_long_strength = (fragility_threshold - current_frag_bid) / (fragility_threshold - robust_threshold)
+            robust_long_strength *= min(1.0, abs(current_decay_bid) / 0.01)  # normalize decay magnitude
+
+        # Robust SHORT: robust ask wall
+        robust_short_strength = 0.0
+        if current_frag_ask < fragility_threshold and current_decay_ask <= 0:
+            robust_short_strength = (fragility_threshold - current_frag_ask) / (fragility_threshold - robust_threshold)
+            robust_short_strength *= min(1.0, abs(current_decay_ask) / 0.01)
+
+        # Find the strongest signal
+        candidates = [
+            ("SPOOF_SHORT", "SHORT", spoof_short_strength, current_decay_ask),
+            ("SPOOF_LONG", "LONG", spoof_long_strength, current_decay_bid),
+            ("ROBUST_LONG", "LONG", robust_long_strength, -current_decay_bid),
+            ("ROBUST_SHORT", "SHORT", robust_short_strength, -current_decay_ask),
+        ]
+        candidates.sort(key=lambda x: x[2], reverse=True)
+        signal_type, direction, strength, decay_strength = candidates[0]
+
+        # Emit only if strongest signal exceeds minimum strength
+        if strength < 0.2:
             return []
 
-        # Pick the strongest signal
-        signals_found = []
-        if spoof_short:
-            signals_found.append(("SPOOF_SHORT", "SHORT", current_frag_ask, current_decay_ask))
-        if spoof_long:
-            signals_found.append(("SPOOF_LONG", "LONG", current_frag_bid, current_decay_bid))
-        if robust_long:
-            signals_found.append(("ROBUST_LONG", "LONG", 1.0 - current_frag_bid, -current_decay_bid))
-        if robust_short:
-            signals_found.append(("ROBUST_SHORT", "SHORT", 1.0 - current_frag_ask, -current_decay_ask))
-
-        # Pick the strongest signal by signal strength
-        signals_found.sort(key=lambda x: x[2] + abs(x[3]), reverse=True)
-        signal_type, direction, strength, decay_strength = signals_found[0]
-
-        # 3. Compute vol_ratio and spread for hard gates
+        # 3. Compute vol_ratio and spread for soft scores
         vol_ratio = self._compute_vol_ratio(rolling_data)
         spread = self._compute_spread(rolling_data)
         avg_spread = self._compute_avg_spread(rolling_data)
 
-        # 4. Apply 3 HARD GATES
-        # Gate A: Wall size >= wall_size_mult × average level size
-        gate_a = self._gate_a_wall_size(
-            data, wall_size_mult, direction, rolling_data
+        # 4. Compute soft gate scores (continuous 0.0–1.0)
+        wall_score = self._gate_a_wall_score(
+            data, direction, rolling_data
+        )
+        vol_score = self._gate_b_vol_score(signal_type, vol_ratio)
+        spread_score = self._gate_c_spread_score(spread, avg_spread)
+
+        # 5. Compute weighted signal_strength from all components
+        signal_strength = (
+            strength * 0.6
+            + wall_score * 0.15
+            + vol_score * 0.15
+            + spread_score * 0.10
         )
 
-        if not gate_a:
+        if signal_strength < 0.30:
             logger.debug(
-                "Divergence Scalper: Gate A failed — wall size not significant enough for %s",
-                direction,
+                "Divergence Scalper: signal_strength %.3f below threshold 0.30 for %s (%s) — "
+                "wall=%.2f vol=%.2f spread=%.2f",
+                signal_strength, direction, signal_type,
+                wall_score, vol_score, spread_score,
             )
             return []
 
-        # Gate B: vol_ratio matches signal type
-        gate_b = self._gate_b_vol_ratio(signal_type, vol_ratio, params)
-
-        if not gate_b:
-            logger.debug(
-                "Divergence Scalper: Gate B failed — vol_ratio mismatch for %s (%s)",
-                direction, signal_type,
-            )
-            return []
-
-        # Gate C: Spread < 2× average spread
-        gate_c = self._gate_c_spread(spread, avg_spread, max_spread_mult)
-
-        if not gate_c:
-            logger.debug(
-                "Divergence Scalper: Gate C failed — spread too wide for %s",
-                direction,
-            )
-            return []
-
-        # 5. VAMP validation (optional)
+        # 6. VAMP validation (soft bonus, not a hard gate)
         use_vamp_validation = params.get("use_vamp_validation", False)
-        vamp_validated = True
+        vamp_score = 0.5  # neutral default
         if use_vamp_validation:
-            vamp_validated = self._vamp_validation(rolling_data, direction)
+            vamp_score = self._vamp_validation(rolling_data, direction)
+            if vamp_score < 0.2:
+                logger.warning(
+                    "Divergence Scalper: VAMP score %.3f below 0.2 for %s (%s) — "
+                    "allowing signal with warning",
+                    vamp_score, direction, signal_type,
+                )
+        signal_strength += vamp_score * 0.05
 
-        if not vamp_validated:
-            logger.debug(
-                "Divergence Scalper: VAMP validation failed for %s", direction,
-            )
-            return []
-
-        # 6. Compute confidence (7-component model)
-        confidence = self._compute_confidence(
+        # 7. Compute confidence (7-component model)
+        confidence, conf_breakdown = self._compute_confidence(
             signal_type, direction,
             current_frag_bid, current_frag_ask,
             current_decay_bid, current_decay_ask,
@@ -231,7 +226,7 @@ class ParticipantDivergenceScalper(BaseStrategy):
         if confidence < min_confidence:
             return []
 
-        # 7. Build signal with entry/stop/target
+        # 8. Build signal with entry/stop/target
         stop_pct = params.get("stop_pct", 0.003)
         target_risk_mult = params.get("target_risk_mult", 1.5)
 
@@ -269,11 +264,13 @@ class ParticipantDivergenceScalper(BaseStrategy):
                 "spread": round(spread, 4),
                 "avg_spread": round(avg_spread, 4),
                 "gates": {
-                    "A_wall_size": gate_a,
-                    "B_vol_ratio": gate_b,
-                    "C_spread": gate_c,
-                    "D_vamp": vamp_validated,
+                    "A_wall_size": round(wall_score, 4),
+                    "B_vol_ratio": round(vol_score, 4),
+                    "C_spread": round(spread_score, 4),
+                    "D_vamp": round(vamp_score, 3),
                 },
+                "confidence_breakdown": conf_breakdown,
+                "signal_strength": round(signal_strength, 4),
                 "regime": regime,
             },
         )]
@@ -306,32 +303,33 @@ class ParticipantDivergenceScalper(BaseStrategy):
             return sum(spread_window.values) / len(spread_window.values)
         return 0.0
 
-    def _gate_a_wall_size(
+    def _gate_a_wall_score(
         self,
         data: Dict[str, Any],
-        wall_size_mult: float,
         direction: str,
         rolling_data: Dict[str, Any],
-    ) -> bool:
+    ) -> float:
         """
-        Gate A: Wall size significance.
+        Gate A: Wall size score (0.0–1.0).
 
-        The wall on the signal side must be >= wall_size_mult × average level size.
+        Computes wall_ratio = current_wall / avg_level_size.
+        Returns min(1.0, wall_ratio / 10.0) — scales 0→1 as wall grows from 0→10× average.
+        Returns 0.5 (neutral) if data unavailable.
         """
         top_wall_key = KEY_TOP_WALL_BID_SIZE_5M if direction == "LONG" else KEY_TOP_WALL_ASK_SIZE_5M
-        depth_bid_key = KEY_DEPTH_BID_SIZE_5M if direction == "LONG" else KEY_DEPTH_ASK_SIZE_5M
+        depth_size_key = KEY_DEPTH_BID_SIZE_5M if direction == "LONG" else KEY_DEPTH_ASK_SIZE_5M
         depth_levels_key = KEY_DEPTH_BID_LEVELS_5M if direction == "LONG" else KEY_DEPTH_ASK_LEVELS_5M
 
         top_wall_rw = rolling_data.get(top_wall_key)
-        depth_size_rw = rolling_data.get(depth_bid_key) if direction == "LONG" else rolling_data.get(KEY_DEPTH_ASK_SIZE_5M)
+        depth_size_rw = rolling_data.get(depth_size_key)
         depth_levels_rw = rolling_data.get(depth_levels_key)
 
         if not top_wall_rw or top_wall_rw.count < 1:
-            return True  # Can't evaluate — pass
+            return 0.5  # Can't evaluate — neutral
 
         current_wall = top_wall_rw.values[-1]
         if current_wall <= 0:
-            return False
+            return 0.0
 
         # Average level size = total depth / number of levels
         if depth_size_rw and depth_levels_rw and depth_size_rw.count > 0 and depth_levels_rw.count > 0:
@@ -339,63 +337,71 @@ class ParticipantDivergenceScalper(BaseStrategy):
             num_levels = depth_levels_rw.values[-1]
             if num_levels > 0 and avg_depth > 0:
                 avg_level_size = avg_depth / num_levels
-                return current_wall >= avg_level_size * wall_size_mult
+                wall_ratio = current_wall / avg_level_size if avg_level_size > 0 else 1.0
+                return min(1.0, wall_ratio / 10.0)
 
-        return True  # Can't compute — pass
+        return 0.5  # Can't compute — neutral
 
-    def _gate_b_vol_ratio(
+    def _gate_b_vol_score(
         self,
         signal_type: str,
         vol_ratio: float,
-        params: Dict[str, Any],
-    ) -> bool:
+    ) -> float:
         """
-        Gate B: Volume ratio matches signal type.
+        Gate B: Volume ratio score (0.0–1.0).
 
-        Spoof signals need low vol_ratio (< 0.1) — no real trades backing the wall.
-        Robust signals need high vol_ratio (> 0.5) — wall absorbing real trades.
+        For SPOOF signals: low vol is good → vol_score = max(0.0, 1.0 - vol_ratio / 0.5)
+          vol_ratio=0.0 → 1.0, vol_ratio=0.5 → 0.0
+        For ROBUST signals: high vol is good → vol_score = min(1.0, vol_ratio / 1.5)
+          vol_ratio=0.0 → 0.0, vol_ratio=1.5 → 1.0
+        Clamped to [0.0, 1.0].
         """
         if signal_type.startswith("SPOOF"):
-            threshold = params.get("vol_ratio_spoof", 0.1)
-            return vol_ratio < threshold
+            vol_score = max(0.0, 1.0 - vol_ratio / 0.5)
         else:  # ROBUST
-            threshold = params.get("vol_ratio_robust", 0.5)
-            return vol_ratio > threshold
+            vol_score = min(1.0, vol_ratio / 1.5)
+        return vol_score
 
-    def _gate_c_spread(
+    def _gate_c_spread_score(
         self,
         spread: float,
         avg_spread: float,
-        max_spread_mult: float,
-    ) -> bool:
+    ) -> float:
         """
-        Gate C: Spread tightness.
+        Gate C: Spread tightness score (0.0–1.0).
 
-        Current spread must be < max_spread_mult × average spread.
-        Scalp must be profitable after spread cost.
+        spread_ratio = spread / avg_spread
+        spread_score = max(0.0, 1.0 - (spread_ratio - 1.0) / 2.0)
+          spread_ratio=1.0 → 1.0, spread_ratio=3.0 → 0.0
+        Returns 0.5 (neutral) if avg_spread <= 0.
         """
         if avg_spread <= 0:
-            return True  # Can't evaluate — pass
-        return spread < avg_spread * max_spread_mult
+            return 0.5  # Can't evaluate — neutral
+        spread_ratio = spread / avg_spread
+        spread_score = max(0.0, 1.0 - (spread_ratio - 1.0) / 2.0)
+        return spread_score
 
     def _vamp_validation(
         self,
         rolling_data: Dict[str, Any],
         direction: str,
-    ) -> bool:
+    ) -> float:
         """
-        VAMP validation: VAMP direction should align with signal direction.
+        VAMP validation score (0.0–1.0).
+
+        Returns a continuous score based on VAMP mid-deviation alignment
+        with signal direction. 0.5 = neutral, 1.0 = perfect alignment.
         """
         vamp_levels = rolling_data.get(KEY_VAMP_LEVELS)
         if not vamp_levels:
-            return True  # No VAMP data — pass
+            return 0.5  # neutral — no VAMP data
 
         vamp_mid_dev = vamp_levels.get("vamp_mid_dev", 0)
 
         if direction == "LONG":
-            return vamp_mid_dev >= -0.001  # Allow small tolerance
+            return max(0.0, min(1.0, 0.5 + vamp_mid_dev * 200))
         else:
-            return vamp_mid_dev <= 0.001  # Allow small tolerance
+            return max(0.0, min(1.0, 0.5 - vamp_mid_dev * 200))
 
     def _compute_confidence(
         self,
@@ -414,13 +420,20 @@ class ParticipantDivergenceScalper(BaseStrategy):
         regime: str,
         gex_calc: Any,
         depth_score: Optional[float] = None,
-    ) -> float:
+    ) -> tuple:
         """
-        Compute 5-component simple average confidence score (Family A).
+        Compute 7-component weighted confidence score.
 
-        Each component normalizes to [0,1], then average equally (÷5).
+        Components:
+            c1: Fragility strength        (weight 0.25)
+            c2: Decay velocity            (weight 0.15)
+            c3: Wall size significance    (weight 0.10)
+            c4: Volume confirmation       (weight 0.10)
+            c5: Spread tightness          (weight 0.10)
+            c6: VAMP alignment            (weight 0.10)
+            c7: GEX regime alignment      (weight 0.15)
 
-        Returns 0.0–1.0.
+        Returns (confidence: float, breakdown: dict).
         """
         def normalize(val: float, vmin: float, vmax: float) -> float:
             return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
@@ -469,5 +482,50 @@ class ParticipantDivergenceScalper(BaseStrategy):
         spread_ratio = spread / avg_spread if avg_spread > 0 else 1.0
         c5 = 1.0 - normalize(spread_ratio, 0.0, 1.5)
 
-        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
-        return min(1.0, max(0.0, confidence))
+        # 6. VAMP alignment (weight 0.10)
+        vamp_levels = rolling_data.get(KEY_VAMP_LEVELS)
+        if vamp_levels:
+            vamp_mid_dev = vamp_levels.get("vamp_mid_dev", 0)
+            if direction == "LONG":
+                c6 = max(0.0, min(1.0, 0.5 + vamp_mid_dev * 200))
+            else:
+                c6 = max(0.0, min(1.0, 0.5 - vamp_mid_dev * 200))
+        else:
+            c6 = 0.5
+
+        # 7. GEX regime alignment (weight 0.15)
+        try:
+            net_gamma = 0.0
+            if gex_calc and isinstance(gex_calc, dict):
+                net_gamma = gex_calc.get("net_gamma", 0.0)
+            if direction == "LONG":
+                if net_gamma > 0.01:
+                    c7 = 1.0
+                elif net_gamma < -0.01:
+                    c7 = 0.2
+                else:
+                    c7 = 0.5
+            else:
+                if net_gamma < -0.01:
+                    c7 = 1.0
+                elif net_gamma > 0.01:
+                    c7 = 0.2
+                else:
+                    c7 = 0.5
+        except Exception:
+            c7 = 0.5
+
+        confidence = (
+            c1 * 0.25 + c2 * 0.15 + c3 * 0.10 + c4 * 0.10
+            + c5 * 0.10 + c6 * 0.10 + c7 * 0.15
+        )
+        breakdown = {
+            "c1_fragility": round(c1, 3),
+            "c2_decay": round(c2, 3),
+            "c3_wall": round(c3, 3),
+            "c4_volume": round(c4, 3),
+            "c5_spread": round(c5, 3),
+            "c6_vamp": round(c6, 3),
+            "c7_gex": round(c7, 3),
+        }
+        return min(1.0, max(0.0, confidence)), breakdown

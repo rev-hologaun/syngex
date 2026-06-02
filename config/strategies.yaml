@@ -373,11 +373,11 @@ layer2:
       robust_threshold: 0.3
       decay_velocity_threshold: 0.0
       wall_size_mult: 5.0
-      vol_ratio_spoof: 0.1
-      vol_ratio_robust: 0.5
       max_spread_mult: 2.0
+      min_fragility_strength: 0.2
       stop_pct: 0.003
       target_risk_mult: 1.5
+      use_vamp_validation: false
 
   exchange_flow_imbalance:
     enabled: true
