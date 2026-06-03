@@ -537,22 +537,19 @@ class ProbWeightedMagnet(BaseStrategy):
         # === v2 Soft Scores ===
 
         # 1. Delta acceleration score
-        delta_roc = self._check_delta_acceleration(gex_calc, target_strike, "LONG", rolling_data)
         delta_score = self._score_delta_acceleration(gex_calc, target_strike, "LONG", rolling_data)
 
         # 2. Liquidity vacuum score
-        liquidity_vacuum = self._check_liquidity_vacuum(data, price, "LONG")
         liquidity_score = self._score_liquidity_vacuum(data, price, "LONG")
 
         # 3. Skew convergence score
-        skew_converging = self._check_skew_convergence(rolling_data, "LONG")
         skew_score = self._score_skew_convergence(rolling_data, "LONG")
 
         # === v2 Confidence scoring (10 components) ===
         confidence = self._compute_confidence_v2(
             target, qualifying, price,
             consolidation_ratio, vol_trend,
-            delta_roc, liquidity_vacuum, skew_converging,
+            delta_score, liquidity_score, skew_score,
             consolidation_score=consol_score, vol_score=vol_score,
             gamma_score=gamma_score, delta_score=delta_score,
             liquidity_score=liquidity_score, skew_score=skew_score,
@@ -596,8 +593,8 @@ class ProbWeightedMagnet(BaseStrategy):
             strategy_id=self.strategy_id,
             reason=(
                 f"Velocity-Magnet LONG: delta accelerating at {target_strike} "
-                f"(delta_roc={delta_roc:+.1%}, OI={target['total_oi']:.0f}), "
-                f"liquidity_vacuum={liquidity_vacuum}, skew_converging={skew_converging}, "
+                f"(delta_roc={delta_score:+.1%}, OI={target['total_oi']:.0f}), "
+                f"liquidity_vacuum={liquidity_score}, skew_converging={skew_score}, "
                 f"delta_score={delta_score:.2f}, liq_score={liquidity_score:.2f}, skew_score={skew_score:.2f}, "
                 f"consolidation={consolidation_ratio:.2%}, vol={vol_trend}"
             ),
@@ -623,14 +620,14 @@ class ProbWeightedMagnet(BaseStrategy):
                 "trend": price_30m.trend if price_30m else "UNKNOWN",
 
                 # === v2 new fields ===
-                "delta_roc": round(delta_roc, 4),
+                "delta_roc": round(delta_score, 4),
                 "liquidity_vacuum_ratio": round(vacuum_ratio, 3),
                 "skew_roc": round(skew_roc, 4),
                 "gamma_at_magnet": round(gamma_scale - 1.0, 4),  # raw gamma approx
                 "gamma_scale": round(gamma_scale, 2),
                 "target_mult": round(target_mult, 2),
-                "skew_converging": skew_converging,
-                "liquidity_vacuum": liquidity_vacuum,
+                "skew_converging": skew_score,
+                "liquidity_vacuum": liquidity_score,
 
                 # === v2 soft scores ===
                 "delta_score": round(delta_score, 3),
@@ -719,22 +716,19 @@ class ProbWeightedMagnet(BaseStrategy):
         # === v2 Soft Scores ===
 
         # 1. Delta acceleration score
-        delta_roc = self._check_delta_acceleration(gex_calc, target_strike, "SHORT", rolling_data)
         delta_score = self._score_delta_acceleration(gex_calc, target_strike, "SHORT", rolling_data)
 
         # 2. Liquidity vacuum score
-        liquidity_vacuum = self._check_liquidity_vacuum(data, price, "SHORT")
         liquidity_score = self._score_liquidity_vacuum(data, price, "SHORT")
 
         # 3. Skew convergence score
-        skew_converging = self._check_skew_convergence(rolling_data, "SHORT")
         skew_score = self._score_skew_convergence(rolling_data, "SHORT")
 
         # === v2 Confidence scoring (10 components) ===
         confidence = self._compute_confidence_v2(
             target, qualifying, price,
             consolidation_ratio, vol_trend,
-            delta_roc, liquidity_vacuum, skew_converging,
+            delta_score, liquidity_score, skew_score,
             consolidation_score=consol_score, vol_score=vol_score,
             gamma_score=gamma_score, delta_score=delta_score,
             liquidity_score=liquidity_score, skew_score=skew_score,
@@ -778,8 +772,8 @@ class ProbWeightedMagnet(BaseStrategy):
             strategy_id=self.strategy_id,
             reason=(
                 f"Velocity-Magnet SHORT: delta accelerating at {target_strike} "
-                f"(delta_roc={delta_roc:+.1%}, OI={target['total_oi']:.0f}), "
-                f"liquidity_vacuum={liquidity_vacuum}, skew_converging={skew_converging}, "
+                f"(delta_roc={delta_score:+.1%}, OI={target['total_oi']:.0f}), "
+                f"liquidity_vacuum={liquidity_score}, skew_converging={skew_score}, "
                 f"delta_score={delta_score:.2f}, liq_score={liquidity_score:.2f}, skew_score={skew_score:.2f}, "
                 f"consolidation={consolidation_ratio:.2%}, vol={vol_trend}"
             ),
@@ -805,14 +799,14 @@ class ProbWeightedMagnet(BaseStrategy):
                 "trend": price_30m.trend if price_30m else "UNKNOWN",
 
                 # === v2 new fields ===
-                "delta_roc": round(delta_roc, 4),
+                "delta_roc": round(delta_score, 4),
                 "liquidity_vacuum_ratio": round(vacuum_ratio, 3),
                 "skew_roc": round(skew_roc, 4),
                 "gamma_at_magnet": round(gamma_scale - 1.0, 4),  # raw gamma approx
                 "gamma_scale": round(gamma_scale, 2),
                 "target_mult": round(target_mult, 2),
-                "skew_converging": skew_converging,
-                "liquidity_vacuum": liquidity_vacuum,
+                "skew_converging": skew_score,
+                "liquidity_vacuum": liquidity_score,
 
                 # === v2 soft scores ===
                 "delta_score": round(delta_score, 3),
