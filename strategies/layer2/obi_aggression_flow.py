@@ -13,18 +13,18 @@ Logic:
     1. Compute OBI = (bid_size - ask_size) / total_depth from depth_agg
     2. Compute AF = (buy_vol - sell_vol) / total_aggressive from quotes
     3. Master trigger: OBI and AF agree on direction with sufficient magnitude
-    4. Apply 3 hard gates (volume spike, participant diversity, spread stability)
+    4. Apply 3 graded gates (volume spike, participant diversity, spread stability)
     5. Compute 7-component confidence score
     6. Emit LONG or SHORT signal with entry/stop/target
 
-Confidence factors (7 components):
-    1. OBI magnitude              (0.0–0.25)
-    2. AF magnitude               (0.0–0.25)
-    3. OBI × AF confluence        (0.0–0.15)
-    4. Volume spike strength      (0.0–0.10)
-    5. Participant diversity      (0.0–0.10)
-    6. Spread stability           (0.0–0.05)
-    7. GEX regime alignment       (0.0–0.10)
+Confidence factors (7 components, simple average):
+    1. OBI magnitude              (abs(OBI) normalized 0→1)
+    2. AF magnitude               (abs(AF) normalized 0→1)
+    3. OBI × AF confluence        (abs(OBI×AF) normalized 0→1)
+    4. Gate A: Volume spike       (graded gate score 0→1)
+    5. Gate B: Participant diversity (graded gate score 0→1)
+    6. Gate C: Spread stability   (graded gate score 0→1)
+    7. GEX regime alignment       (1.0 if aligned, 0.5 neutral, 0.0 opposed)
 """
 
 from __future__ import annotations
@@ -42,8 +42,6 @@ from strategies.rolling_keys import (
 )
 
 logger = logging.getLogger("Syngex.Strategies.ObiAggressionFlow")
-
-MIN_CONFIDENCE = 0.0
 
 # Throttle info-level logging to once per N evaluation cycles
 _eval_counter = 0
@@ -76,6 +74,7 @@ class ObiAggressionFlow(BaseStrategy):
         self._apply_params(data)
         rolling_data = data.get("rolling_data", {})
         params = self._params
+        min_confidence = params.get("min_confidence", 0.0)
         gex_calc = data.get("gex_calculator")
         regime = data.get("regime", "")
 
@@ -112,15 +111,20 @@ class ObiAggressionFlow(BaseStrategy):
         direction = None
         if combined > combined_threshold:
             direction = "LONG" if current_obi > 0 else "SHORT"
-        elif abs(current_obi) > obi_threshold and current_obi * current_af > 0:
-            direction = "LONG" if current_obi > 0 else "SHORT"
-        elif abs(current_af) > af_threshold and current_obi * current_af > 0:
-            direction = "LONG" if current_af > 0 else "SHORT"
+        elif combined > combined_threshold * 0.85:
+            # Near-miss zone: both components must be contributing,
+            # just short of full combined threshold
+            min_obi_fallback = obi_threshold * 0.60
+            min_af_fallback = af_threshold * 0.60
+            if (abs(current_obi) > min_obi_fallback
+                    and abs(current_af) > min_af_fallback
+                    and current_obi * current_af > 0):
+                direction = "LONG" if current_obi > 0 else "SHORT"
 
         if direction is None:
             logger.debug(
-                "OBI_AF master: OBI=%.3f AF=%.3f | no direction",
-                current_obi, current_af,
+                "OBI_AF master: OBI=%.3f AF=%.3f combined=%.3f | no direction",
+                current_obi, current_af, combined,
             )
             return []
 
@@ -129,16 +133,12 @@ class ObiAggressionFlow(BaseStrategy):
             data, rolling_data, params, direction,
         )
 
-        # --- 5. Compute confidence (7-component model) ---
+        # --- 5. Compute confidence (8-component model) ---
         confidence = self._compute_confidence(
             current_obi, current_af, data, rolling_data, params,
             direction, regime, gex_calc,
             gate_a_score, gate_b_score, gate_c_score,
         )
-
-        min_confidence = MIN_CONFIDENCE
-        max_confidence = 1.0
-        confidence = max(min_confidence, confidence)
 
         if confidence < min_confidence:
             logger.warning(
@@ -239,7 +239,7 @@ class ObiAggressionFlow(BaseStrategy):
             else:
                 gate_b_score = avg_participants / min_avg_participants
 
-        # --- Gate C: Spread score ---
+        # --- Gate C: Spread score (0.0 on extreme widening) ---
         max_spread_mult = params.get("max_spread_multiplier", 1.5)
         gate_c_score = 1.0
         spread_window = rolling_data.get(KEY_DEPTH_SPREAD_5M)
@@ -253,9 +253,37 @@ class ObiAggressionFlow(BaseStrategy):
                 elif spread_ratio <= max_spread_mult:
                     gate_c_score = 1.0 - (spread_ratio - 1.0) / max_spread_mult * 0.5
                 else:
-                    gate_c_score = 0.5
+                    gate_c_score = 0.0
 
         return gate_a_score, gate_b_score, gate_c_score
+
+    def _gex_regime_alignment(
+        self, regime: str, gex_calc: Any, direction: str,
+    ) -> float:
+        """Determine if GEX regime supports the signal direction.
+
+        Returns:
+            1.0 — regime aligns with signal (bullish regime for LONG, bearish for SHORT)
+            0.5 — neutral/mixed/insufficient data
+            0.0 — regime opposes signal
+        """
+        if gex_calc is None:
+            return 0.5  # No GEX data → neutral
+
+        # Use get_net_gamma() to determine the actual GEX bias direction.
+        # Positive net gamma → positive GEX regime (bullish bias: dealers buy dips)
+        # Negative net gamma → negative GEX regime (bearish bias: dealers sell dips)
+        net_gamma = gex_calc.get_net_gamma()
+
+        if net_gamma > 0:
+            # Positive GEX regime: supports LONG (buy dips), opposes SHORT
+            return 1.0 if direction == "LONG" else 0.0
+        elif net_gamma < 0:
+            # Negative GEX regime: supports SHORT (sell dips), opposes LONG
+            return 1.0 if direction == "SHORT" else 0.0
+        else:
+            # Neutral/mixed GEX — no clear bias
+            return 0.5
 
     def _compute_confidence(
         self,
@@ -272,18 +300,25 @@ class ObiAggressionFlow(BaseStrategy):
         gate_c_score: float = 1.0,
     ) -> float:
         """
-        Compute 5-component simple average confidence score (Family A).
+        Compute 7-component simple average confidence score.
 
-        Each component normalizes to [0,1], then average equally (÷5).
+        Each component normalizes to [0,1], then average equally (÷7).
+        Gates are graded scores — no double-counting of volume/participant
+        data that gates already cover, spread is now included.
+
+        Components:
+            c1: OBI magnitude (abs(OBI) normalized 0→1)
+            c2: AF magnitude (abs(AF) normalized 0→1)
+            c3: OBI×AF confluence (abs(product) normalized 0→1)
+            c4: Gate A (volume spike graded score 0→1)
+            c5: Gate B (participant diversity graded score 0→1)
+            c6: Gate C (spread stability graded score 0→1)
+            c7: GEX regime alignment (1.0=aligned, 0.5=neutral, 0.0=opposed)
 
         Returns 0.0–1.0.
         """
         def normalize(val: float, vmin: float, vmax: float) -> float:
             return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
-
-        obi_threshold = params.get("obi_threshold", 0.60)
-        af_threshold = params.get("af_threshold", 0.40)
-        trade_size_mult = params.get("volume_spike_mult", 1.5)
 
         # 1. OBI magnitude: abs(current_obi) from 0→1.0, higher = higher
         c1 = normalize(abs(current_obi), 0.0, 1.0)
@@ -296,44 +331,29 @@ class ObiAggressionFlow(BaseStrategy):
         obi_af_mag = abs(obi_af_product)
         c3 = normalize(obi_af_mag, 0.0, 1.0)
 
-        # 4. Volume spike: trade_size_ratio from 0→trade_size_mult, higher = higher
-        trade_size_window = rolling_data.get(KEY_TRADE_SIZE_5M)
-        trade_size_ratio = 1.0
-        latest_trade_size = 0
-        if trade_size_window and trade_size_window.count > 0:
-            avg_trade_size = sum(trade_size_window.values) / len(trade_size_window.values)
-            depth_snapshot = data.get("depth_snapshot", {})
-            latest_trade_size = depth_snapshot.get("last_size", 0)
-            if avg_trade_size > 0:
-                trade_size_ratio = latest_trade_size / avg_trade_size
-        # No trade data yet → neutral score instead of 0.0
-        if latest_trade_size == 0:
-            c4 = 0.5
-        else:
-            c4 = normalize(trade_size_ratio, 0.0, trade_size_mult)
+        # 4. Gate A: Volume spike graded score (reuses gate_a_score)
+        c4 = gate_a_score
 
-        # 5. Participant diversity: avg_participants from 0→min_avg_participants*2, higher = higher
-        min_avg_participants = params.get("min_avg_participants", 1.0)
-        depth_snapshot = data.get("depth_snapshot", {})
-        bid_avg = depth_snapshot.get("bid_avg_participants", 0)
-        ask_avg = depth_snapshot.get("ask_avg_participants", 0)
-        avg_participants = (bid_avg + ask_avg) / 2 if (bid_avg > 0 or ask_avg > 0) else 0
-        # No participant data yet → neutral score instead of 0.0
-        if bid_avg == 0 and ask_avg == 0:
-            c5 = 0.5
-        else:
-            c5 = normalize(avg_participants, 0.0, min_avg_participants * 2.0)
+        # 5. Gate B: Participant diversity graded score (reuses gate_b_score)
+        c5 = gate_b_score
 
-        c6 = gate_a_score  # Volume spike score
-        c7 = gate_b_score  # Participant diversity score
+        # 6. Gate C: Spread stability graded score (reuses gate_c_score)
+        c6 = gate_c_score
+
+        # 7. GEX regime alignment — does the GEX bias support this signal?
+        #    POSITIVE regime (dealers buy dips, sell rallies): LONG aligns, SHORT opposes
+        #    NEGATIVE regime (dealers sell dips, buy rallies): SHORT aligns, LONG opposes
+        #    Use gex_calc.get_net_gamma() as ground truth for regime direction
+        c7 = self._gex_regime_alignment(regime, gex_calc, direction)
+
         confidence = (c1 + c2 + c3 + c4 + c5 + c6 + c7) / 7.0
         confidence = min(1.0, max(0.0, confidence))
 
         global _eval_counter
         if _eval_counter % _EVAL_THROTTLE == 0:
             logger.info(
-                "OBI_AF confidence: c1(obi)=%.2f c2(af)=%.2f c3(confluence)=%.2f c4(volume)=%.2f c5(participants)=%.2f | final=%.2f",
-                c1, c2, c3, c4, c5, confidence,
+                "OBI_AF confidence: c1(obi)=%.2f c2(af)=%.2f c3(confluence)=%.2f c4(gate_a_vol)=%.2f c5(gate_b_part)=%.2f c6(gate_c_spread)=%.2f c7(gex)=%.2f | final=%.2f",
+                c1, c2, c3, c4, c5, c6, c7, confidence,
             )
 
         return confidence

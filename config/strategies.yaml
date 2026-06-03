@@ -294,6 +294,7 @@ layer2:
       max_spread_multiplier: 1.5
       stop_pct: 0.005
       target_risk_mult: 1.5
+      min_confidence: 0.0
 
   depth_decay_momentum:
     enabled: true

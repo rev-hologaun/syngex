@@ -2474,16 +2474,19 @@ class SyngexOrchestrator:
                 # Compute AF from rolling aggressive volumes
                 buy_vol_window = self._rolling_data.get(KEY_AGGRESSIVE_BUY_VOL_5M)
                 sell_vol_window = self._rolling_data.get(KEY_AGGRESSIVE_SELL_VOL_5M)
-                if buy_vol_window and sell_vol_window and buy_vol_window.count > 0 and sell_vol_window.count > 0:
-                    total_buy = sum(buy_vol_window.values)
-                    total_sell = sum(sell_vol_window.values)
-                    total_aggressive = total_buy + total_sell
-                    if total_aggressive > 0:
-                        af = (total_buy - total_sell) / total_aggressive
-                    else:
-                        af = 0.0
+
+                total_buy = sum(buy_vol_window.values) if buy_vol_window and buy_vol_window.count > 0 else 0
+                total_sell = sum(sell_vol_window.values) if sell_vol_window and sell_vol_window.count > 0 else 0
+                total_aggressive = total_buy + total_sell
+
+                if total_aggressive > 0:
+                    af = (total_buy - total_sell) / total_aggressive
+                elif buy_vol_window and buy_vol_window.count > 0:
+                    af = 1.0  # Pure buy aggression (no sell volume yet)
+                elif sell_vol_window and sell_vol_window.count > 0:
+                    af = -1.0  # Pure sell aggression (no buy volume yet)
                 else:
-                    af = 0.0
+                    af = 0.0  # No data yet
 
                 if KEY_AF_5M in self._rolling_data:
                     self._rolling_data[KEY_AF_5M].push(af, ts)
