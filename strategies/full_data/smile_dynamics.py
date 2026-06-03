@@ -10,17 +10,26 @@ Leading indicator: curvature shifts often precede price moves.
 
 Trigger: |Ω change| > 2σ over 15-minute rolling window
 
-Hard gates (ALL must pass):
-    Gate A: Liquidity anchor — total OI of wing strikes > 3σ above 1h rolling avg
-    Gate B: Gamma guardrail — bullish in POSITIVE gamma, bearish in NEGATIVE gamma
-    Gate C: Volatility divergence — shift driven by relative slope, not ATM vol expansion
+4 soft scores (ALL contribute to confidence, 0.0–1.0):
+    Score A: Liquidity — recent 5m volume, normalized to 10k ceiling
+    Score B: GEX regime — alignment between direction and gamma regime
+    Score C: Vol divergence — slope magnitude relative to 0.10 ceiling
+    Score D: Z-score — Ω ROC significance in σ units
 
-Confidence model (5 components):
-    1. Ω magnitude in σ units (0.0–0.30)
-    2. Ω velocity (0.0–0.20)
-    3. Liquidity conviction (0.0–0.15)
-    4. Slope divergence purity (0.0–0.15)
-    5. GEX regime alignment (0.0–0.10)
+Direction selection: LONG if long_dir_score >= short_dir_score, else SHORT.
+Each direction score combines ROC magnitude with regime alignment.
+
+10-component confidence model (each component 0.0–1.0, averaged):
+    1. Ω magnitude (normalized 0→5)
+    2. Ω velocity (normalized abs ROC, 0→0.1)
+    3. Ω sigma significance (normalized 0→5)
+    4. Put slope magnitude (normalized 0→0.5)
+    5. Call slope magnitude (normalized 0→0.5)
+    6. Liquidity score (soft gate A)
+    7. GEX regime score (soft gate B)
+    8. Vol divergence score (soft gate C)
+    9. Z-score significance (soft gate D)
+    10. Direction score (direction-specific: long or short)
 """
 
 from __future__ import annotations
@@ -81,7 +90,7 @@ class SmileDynamics(BaseStrategy):
         self._apply_params(data)
         rolling_data = data.get("rolling_data", {})
         params = self._params
-        self._regime_mismatch = False
+
         regime_soft = params.get("regime_soft", True)
         regime = data.get("regime", "")
 
@@ -115,10 +124,15 @@ class SmileDynamics(BaseStrategy):
         if not long_signal and not short_signal:
             return []
 
-        # Only emit one signal per evaluation
-        if long_signal and short_signal:
-            direction = "LONG" if current_omega_roc < 0 else "SHORT"
-        elif long_signal:
+        # Compute direction scores to select the stronger direction
+        long_dir_score = self._score_direction(
+            current_omega_roc, "LONG", regime, params,
+        )
+        short_dir_score = self._score_direction(
+            current_omega_roc, "SHORT", regime, params,
+        )
+
+        if long_dir_score >= short_dir_score:
             direction = "LONG"
         else:
             direction = "SHORT"
@@ -136,36 +150,14 @@ class SmileDynamics(BaseStrategy):
             )
             return []
 
-        # 4. Apply 3 HARD GATES
-        gate_a = self._gate_a_liquidity(rolling_data, params)
-
-        if not gate_a:
-            logger.debug(
-                "Smile Dynamics: Gate A failed — liquidity check for %s", direction,
-            )
-            return []
-
-        gate_b = self._gate_b_gex_regime(direction, regime)
-
-        if not gate_b:
-            logger.debug(
-                "Smile Dynamics: Gate B failed — GEX regime misalignment for %s",
-                direction,
-            )
-            return []
-
-        gate_c = self._gate_c_vol_divergence(
+        # 4. Compute soft gate scores (0.0–1.0)
+        liquidity_score = self._score_liquidity(rolling_data, params)
+        regime_score = self._score_gex_regime(direction, regime)
+        vol_div_score = self._score_vol_divergence(
             current_put_slope, current_call_slope, current_omega_sigma, params
         )
 
-        if not gate_c:
-            logger.debug(
-                "Smile Dynamics: Gate C failed — vol divergence purity for %s",
-                direction,
-            )
-            return []
-
-        # 5. Compute confidence (5-component model)
+        # 5. Compute confidence (10-component model)
         confidence = self._compute_confidence(
             current_omega,
             current_omega_roc,
@@ -177,6 +169,12 @@ class SmileDynamics(BaseStrategy):
             rolling_data,
             params,
             regime,
+            liquidity_score=liquidity_score,
+            regime_score=regime_score,
+            vol_div_score=vol_div_score,
+            zscore_score=zscore_score,
+            long_dir_score=long_dir_score,
+            short_dir_score=short_dir_score,
         )
 
         min_confidence = MIN_CONFIDENCE
@@ -231,68 +229,71 @@ class SmileDynamics(BaseStrategy):
                 "call_slope": round(current_call_slope, 6),
                 "intensity": intensity,
                 "regime": regime,
+                "long_dir_score": round(long_dir_score, 3),
+                "short_dir_score": round(short_dir_score, 3),
                 "gates": {
-                    "A_liquidity": gate_a,
-                    "B_gex_regime": gate_b,
-                    "C_vol_divergence": gate_c,
+                    "A_liquidity": round(liquidity_score, 3),
+                    "B_gex_regime": round(regime_score, 3),
+                    "C_vol_divergence": round(vol_div_score, 3),
+                    "D_zscore": round(zscore_score, 3),
                 },
             },
         )]
 
-    def _gate_a_liquidity(
+    def _score_liquidity(
         self,
         rolling_data: Dict[str, Any],
         params: Dict[str, Any],
-    ) -> bool:
+    ) -> float:
         """
-        Gate A: Liquidity anchor.
+        Score A: Liquidity score (0.0–1.0).
 
-        Total OI of wing strikes must be above a minimum threshold.
-        This ensures the curvature move isn't happening in illiquid options.
+        Based on recent 5m volume — higher volume = higher confidence.
         """
-        min_oi_threshold = params.get("liquidity_oi_threshold", 100)
-
-        # Check if we have any volume data to validate liquidity
         volume_window = rolling_data.get("volume_5m")
-        if volume_window and volume_window.count > 0:
-            return True
+        if not volume_window:
+            return 0.0
+        if volume_window.count < 5:
+            return 0.5
+        latest = volume_window.values[-1]
+        if latest > 0:
+            return min(1.0, latest / 10000.0)
+        return 0.0
 
-        return True
-
-    def _gate_b_gex_regime(self, direction: str, regime: str) -> bool:
+    def _score_gex_regime(self, direction: str, regime: str) -> float:
         """
-        Gate B: Gamma guardrail.
+        Score B: GEX regime alignment score (0.0–1.0).
 
-        LONG signals require POSITIVE gamma regime (MMs buy dips).
-        SHORT signals require NEGATIVE gamma regime (MMs sell rallies).
+        Perfect alignment = 1.0, mismatch = 0.3, unknown = 0.5.
         """
         if direction == "LONG" and regime == "POSITIVE":
-            return True
+            return 1.0
         if direction == "SHORT" and regime == "NEGATIVE":
-            return True
-        self._regime_mismatch = True
-        return True
+            return 1.0
+        if direction == "LONG" and regime == "NEGATIVE":
+            return 0.3
+        if direction == "SHORT" and regime == "POSITIVE":
+            return 0.3
+        # regime is empty/unknown
+        return 0.5
 
-    def _gate_c_vol_divergence(
+    def _score_vol_divergence(
         self,
         put_slope: float,
         call_slope: float,
         omega_sigma: float,
         params: Dict[str, Any],
-    ) -> bool:
+    ) -> float:
         """
-        Gate C: Volatility divergence purity.
+        Score C: Volatility divergence score (0.0–1.0).
 
-        The signal must be driven by relative slope change (curvature),
-        not just a general ATM vol expansion. We check that the put
-        and call slopes have meaningful divergence.
+        Measures how much the put/call slope divergence contributes to
+        the signal. Normalized by a 0.10 ceiling.
         """
         if omega_sigma <= 0:
-            return False
-
-        # Check that put and call slopes have meaningful divergence
-        # Both slopes should be non-trivial to confirm a real curvature move
-        return abs(put_slope) > 0.001 or abs(call_slope) > 0.001
+            return 0.0
+        magnitude = max(abs(put_slope), abs(call_slope))
+        return min(1.0, magnitude / 0.10)
 
     def _compute_confidence(
         self,
@@ -306,26 +307,71 @@ class SmileDynamics(BaseStrategy):
         rolling_data: Dict[str, Any],
         params: Dict[str, Any],
         regime: str,
-        depth_score=None,
+        liquidity_score: float = 0.0,
+        regime_score: float = 0.0,
+        vol_div_score: float = 0.0,
+        zscore_score: float = 0.0,
+        long_dir_score: float = 0.0,
+        short_dir_score: float = 0.0,
     ) -> float:
         """
-        Compute 5-component confidence score (Family A).
+        Compute 10-component confidence score.
+
+        Components 1-5: raw market data metrics (normalized to 0-1)
+        Components 6-9: soft gate scores (already 0-1)
+        Component 10: direction-specific score (long or short)
 
         Returns 0.0–1.0.
         """
-        if getattr(self, '_regime_mismatch', False):
-            # Phase 1: regime-soft mode — 30% penalty for mismatch
-            confidence *= 0.7
-        # 1. Ω magnitude: current_omega from 0→5, higher = higher
+        # 1. Ω magnitude: higher = more curvature asymmetry
         c1 = normalize(current_omega, 0.0, 5.0)
-        # 2. Ω velocity: current_omega_roc from -0.1 to 0.1, use abs
-        abs_roc = abs(current_omega_roc)
-        c2 = normalize(abs_roc, 0.0, 0.1)
-        # 3. Ω sigma significance: current_omega_sigma from 0→5, higher = higher
+        # 2. Ω velocity: use abs — magnitude of change matters
+        c2 = normalize(abs(current_omega_roc), 0.0, 0.1)
+        # 3. Ω sigma significance: higher = more statistically notable
         c3 = normalize(current_omega_sigma, 0.0, 5.0)
-        # 4. Put slope: normalize to [0,1]
+        # 4. Put slope magnitude
         c4 = normalize(abs(current_put_slope), 0.0, 0.5)
-        # 5. Call slope: normalize to [0,1]
+        # 5. Call slope magnitude
         c5 = normalize(abs(current_call_slope), 0.0, 0.5)
-        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+        # 6. Liquidity soft gate
+        c6 = liquidity_score
+        # 7. GEX regime soft gate (replaces broken regime mismatch penalty)
+        c7 = regime_score
+        # 8. Vol divergence soft gate
+        c8 = vol_div_score
+        # 9. Z-score significance soft gate
+        c9 = zscore_score
+        # 10. Direction-specific score
+        c10 = long_dir_score if direction == "LONG" else short_dir_score
+
+        confidence = (c1 + c2 + c3 + c4 + c5 + c6 + c7 + c8 + c9 + c10) / 10.0
         return min(1.0, max(0.0, confidence))
+
+    def _score_direction(
+        self,
+        current_omega_roc: float,
+        direction: str,
+        regime: str,
+        params: Dict[str, Any],
+    ) -> float:
+        """
+        Score the strength of a directional bias.
+
+        Combines ROC magnitude (primary signal) with regime alignment
+        (secondary signal) to produce a 0.0–1.0 score.
+
+        LONG: negative ROC (smile flattening) with positive GEX regime
+        SHORT: positive ROC (jaw opening) with negative GEX regime
+        """
+        # ROC magnitude as primary signal (0.0–1.0)
+        roc_mag = abs(current_omega_roc)
+        roc_score = normalize(roc_mag, 0.0, 0.1)
+
+        # Regime alignment as secondary signal (0.3–1.0)
+        regime_aligned = (
+            (direction == "LONG" and regime == "POSITIVE")
+            or (direction == "SHORT" and regime == "NEGATIVE")
+        )
+        regime_factor = 1.0 if regime_aligned else 0.3
+
+        return roc_score * regime_factor
