@@ -16,29 +16,36 @@ SHORT: Price at high, IV crashing, positive gamma → mean-reversion short
 
 Logic:
     SHORT (price at high):
-        1. Price at high: latest price >= p75 of 30m rolling window
-        2. IV skew accelerating: OTM put IV rising faster than ATM IV
-        3. Gamma density declining: price moving into unstable zone
-        4. Net Gamma strongly positive: net_gamma > threshold
-        5. Combined: short the underlying
+        1. Price at high: latest price >= p60 of 30m rolling window
+        2. IV crashing: ATM IV below rolling average threshold
+        3. IV skew accelerating: OTM put IV rising faster than ATM IV
+        4. Gamma density declining: price moving into unstable zone
+        5. Gamma direction: positive gamma contributes to confidence
+        6. Combined: short the underlying (confidence ≥ MIN_CONFIDENCE)
 
     LONG (price at low):
-        1. Price at low: latest price <= p25 of 30m rolling window
-        2. IV skew accelerating: OTM call IV rising faster than ATM IV
-        3. Gamma density declining: price moving into unstable zone
-        4. Net Gamma strongly negative: net_gamma < -threshold
-        5. Combined: long the underlying
+        1. Price at low: latest price <= p40 of 30m rolling window
+        2. IV expanding: ATM IV above rolling average threshold
+        3. IV skew accelerating: OTM call IV rising faster than ATM IV
+        4. Gamma density declining: price moving into unstable zone
+        5. Gamma direction: negative gamma contributes to confidence
+        6. Combined: long the underlying (confidence ≥ MIN_CONFIDENCE)
 
 Exit: At major Gamma Wall or when IV stabilizes
 
-Confidence factors (5 components, simple average):
-    1. Price extremeness          (0.0–1.0 normalized) — from price_percentile 0.75→1.0
-    2. Net gamma magnitude        (0.0–1.0 normalized) — from abs(normalized_net_gamma) 0→5
+Confidence factors (10 components, simple average):
+    1. Price extremeness          (0.0–1.0 normalized) — from price_percentile threshold→1.0
+    2. Net gamma magnitude        (0.0–1.0 normalized) — from abs(net_gamma) 0→5M
     3. Wall proximity             (0.0–1.0 normalized) — from wall GEX 0→5M
     4. Volume conviction          (0.0–1.0 normalized) — from total_volume 0→100k
     5. Regime alignment           (0.0–1.0 normalized) — from regime intensity 0.05→0.15
+    6. IV crash/expand score      (0.0–1.0) — from _check_iv_crashing/_check_iv_expanding
+    7. IV skew ROC score          (0.0–1.0 normalized) — from skew_roc 0→0.20
+    8. IV skew acceleration       (0.0–1.0) — from _score_iv_skew_acceleration
+    9. Gamma density decline      (0.0–1.0) — from _score_gamma_density_decline
+    10. Gamma direction           (0.0–1.0) — from normalized net gamma direction
 
-    MIN_CONFIDENCE = 0.20 (signals below this are suppressed)
+    MIN_CONFIDENCE = 0.0 (signals below this are suppressed)
 """
 
 from __future__ import annotations
@@ -171,20 +178,19 @@ class IVGEXDivergence(BaseStrategy):
             gex_calc, rolling_data, underlying_price,
         )
         normalized_gamma = gex_calc.get_normalized_net_gamma()
-        if not (iv_crashing and normalized_gamma > MIN_POSITIVE_NORMALIZED_GAMMA):
+        if not iv_crashing:
             return signals
 
-        skew_accel = self._check_iv_skew_acceleration(
+        # Soft gamma direction score: positive gamma contributes, negative = 0
+        gamma_dir_score = max(0.0, min(1.0, normalized_gamma / 10.0))
+
+        skew_score = self._score_iv_skew_acceleration(
             gex_calc, rolling_data, underlying_price, "SHORT",
         )
-        if not skew_accel:
-            return signals
 
-        gamma_decline = self._check_gamma_density_gradient(
+        density_score = self._score_gamma_density_decline(
             gex_calc, rolling_data, underlying_price,
         )
-        if not gamma_decline:
-            return signals
 
         walls = gex_calc.get_gamma_walls(threshold=500000)
         wall_above = None
@@ -205,6 +211,9 @@ class IVGEXDivergence(BaseStrategy):
             underlying_price, greeks_summary,
             iv_score=iv_crash_score,
             skew_roc=iv_skew_roc,
+            skew_score=skew_score,
+            density_score=density_score,
+            gamma_dir_score=gamma_dir_score,
         )
 
         if confidence >= MIN_CONFIDENCE:
@@ -265,20 +274,19 @@ class IVGEXDivergence(BaseStrategy):
             gex_calc, rolling_data, underlying_price,
         )
         normalized_gamma = gex_calc.get_normalized_net_gamma()
-        if not (iv_expanding and normalized_gamma < -MIN_POSITIVE_NORMALIZED_GAMMA):
+        if not iv_expanding:
             return signals
 
-        skew_accel = self._check_iv_skew_acceleration(
+        # Soft gamma direction score: negative gamma contributes, positive = 0
+        gamma_dir_score = max(0.0, min(1.0, -normalized_gamma / 10.0))
+
+        skew_score = self._score_iv_skew_acceleration(
             gex_calc, rolling_data, underlying_price, "LONG",
         )
-        if not skew_accel:
-            return signals
 
-        gamma_decline = self._check_gamma_density_gradient(
+        density_score = self._score_gamma_density_decline(
             gex_calc, rolling_data, underlying_price,
         )
-        if not gamma_decline:
-            return signals
 
         walls = gex_calc.get_gamma_walls(threshold=500000)
         wall_below = None
@@ -299,6 +307,9 @@ class IVGEXDivergence(BaseStrategy):
             underlying_price, greeks_summary,
             iv_score=iv_expand_score,
             skew_roc=iv_skew_roc,
+            skew_score=skew_score,
+            density_score=density_score,
+            gamma_dir_score=gamma_dir_score,
         )
 
         if confidence >= MIN_CONFIDENCE:
@@ -440,34 +451,34 @@ class IVGEXDivergence(BaseStrategy):
     # v2: IV Skew Acceleration
     # ------------------------------------------------------------------
 
-    def _check_iv_skew_acceleration(
+    def _score_iv_skew_acceleration(
         self,
         gex_calc: Any,
         rolling_data: Dict[str, Any],
         price: float,
         signal_type: str,
-    ) -> bool:
+    ) -> float:
         """
-        Check if IV skew is accelerating (hard gate).
+        Score IV skew acceleration on a 0.0–1.0 scale.
 
         Always uses OTM Put skew (strike below ATM) regardless of signal direction.
-        Returns True if skew ROC > threshold.
+        Returns 0.0 if skew ROC <= 0, otherwise min(1.0, skew_roc / 0.20).
         """
         atm_strike = gex_calc.get_atm_strike(price)
         if atm_strike is None:
-            return False
+            return 0.0
 
         # Get current ATM IV
         atm_iv = gex_calc.get_iv_by_strike(atm_strike)
         if atm_iv is None or atm_iv <= 0:
-            return False
+            return 0.0
 
         # OTM Put skew: strike below ATM (always use put skew regardless of signal direction)
         otm_strike = atm_strike * (1.0 - IV_SKEW_OTM_PCT)
 
         otm_iv = gex_calc.get_iv_by_strike(otm_strike)
         if otm_iv is None or otm_iv <= 0:
-            return False
+            return 0.0
 
         # Current skew
         current_skew = otm_iv - atm_iv
@@ -475,22 +486,24 @@ class IVGEXDivergence(BaseStrategy):
         # Read skew from rolling window
         skew_window = rolling_data.get(KEY_IV_SKEW_GRADIENT_5M)
         if skew_window is None or skew_window.count < IV_SKEW_ROC_WINDOW:
-            return False
+            return 0.0
 
         # Get skew value from ~5 ticks ago
         skew_history = skew_window.values
         if len(skew_history) < IV_SKEW_ROC_WINDOW + 1:
-            return False
+            return 0.0
 
         skew_old = skew_history[-(IV_SKEW_ROC_WINDOW + 1)]
         if skew_old is None or skew_old == 0:
-            return False
+            return 0.0
 
         # Compute ROC
         skew_roc = (current_skew - skew_old) / abs(skew_old)
 
-        # Hard gate: skew must have increased ≥15%
-        return skew_roc > IV_SKEW_ROC_THRESHOLD
+        # Soft score: 0.0 if skew moving wrong direction, otherwise normalize
+        if skew_roc <= 0:
+            return 0.0
+        return min(1.0, skew_roc / 0.20)
 
     def _get_skew_data(
         self,
@@ -532,23 +545,25 @@ class IVGEXDivergence(BaseStrategy):
     # v2: Gamma Density Gradient
     # ------------------------------------------------------------------
 
-    def _check_gamma_density_gradient(
+    def _score_gamma_density_decline(
         self,
         gex_calc: Any,
         rolling_data: Dict[str, Any],
         price: float,
-    ) -> bool:
+    ) -> float:
         """
-        Check if gamma density is declining (hard gate).
+        Score gamma density decline on a 0.0–1.0 scale.
 
-        Current gamma density < rolling mean × 0.70 means density
-        has declined ≥30%.
+        Normalizes the decline relative to rolling mean:
+        - 50% decline → 1.0
+        - 25% decline → 0.5
+        - 0% decline → 0.0
 
-        Returns True if density has declined.
+        Returns 0.0 if rolling_mean is None or zero.
         """
         greeks_summary = gex_calc.get_greeks_summary()
         if not greeks_summary:
-            return False
+            return 0.0
 
         # Compute current gamma density
         current_density = self._compute_gamma_density(greeks_summary, price)
@@ -556,14 +571,17 @@ class IVGEXDivergence(BaseStrategy):
         # Read gamma density from rolling window
         density_window = rolling_data.get(KEY_GAMMA_DENSITY_5M)
         if density_window is None or density_window.count < 5:
-            return False
+            return 0.0
 
         rolling_mean = density_window.mean
         if rolling_mean is None or rolling_mean == 0:
-            return False
+            return 0.0
 
-        # Hard gate: current density < rolling mean × 0.70
-        return current_density < rolling_mean * GAMMA_DENSITY_DECLINE_THRESHOLD
+        # Normalize the decline percentage
+        decline_pct = 1.0 - (current_density / rolling_mean)
+        decline_pct = max(0.0, decline_pct)  # cap at 0.0 if negative
+        score = min(1.0, decline_pct / 0.50)  # 50% decline → 1.0
+        return score
 
     def _compute_gamma_density(
         self,
@@ -701,7 +719,7 @@ class IVGEXDivergence(BaseStrategy):
                 return price * (1.0 - FALLBACK_STOP_PCT), "fixed"
 
     # ------------------------------------------------------------------
-    # v2: Confidence Computation (7 components)
+    # v2: Confidence Computation (10 components)
     # ------------------------------------------------------------------
 
     def _compute_confidence_v2(
@@ -714,9 +732,12 @@ class IVGEXDivergence(BaseStrategy):
         greeks_summary: Dict[str, Any],
         iv_score: float = 0.0,
         skew_roc: float = 0.0,
+        skew_score: float = 0.0,
+        density_score: float = 0.0,
+        gamma_dir_score: float = 0.0,
     ) -> float:
         """Combine all factors into confidence score (Family A simple average).
-        7 components, each normalized to 0.0-1.0.
+        10 components, each normalized to 0.0-1.0.
         """
         def normalize(val, vmin, vmax):
             return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
@@ -759,7 +780,16 @@ class IVGEXDivergence(BaseStrategy):
         # 7. IV skew ROC score (normalize from 0→0.20)
         c7 = min(1.0, skew_roc / 0.20)
 
-        confidence = (c1 + c2 + c3 + c4 + c5 + c6 + c7) / 7.0
+        # 8. IV skew acceleration score (from _score_iv_skew_acceleration)
+        c8 = skew_score
+
+        # 9. Gamma density decline score (from _score_gamma_density_decline)
+        c9 = density_score
+
+        # 10. Gamma direction score (from normalized net gamma)
+        c10 = gamma_dir_score
+
+        confidence = (c1 + c2 + c3 + c4 + c5 + c6 + c7 + c8 + c9 + c10) / 10.0
         return min(1.0, max(0.0, confidence))
 
     def _price_extremeness_confidence(self, price_percentile: float) -> float:
