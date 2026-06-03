@@ -6,21 +6,26 @@ Tracks how the volatility smile changes over time via the Skewness Coefficient �
 
 Steepening skew (Ψ rising) = rising fear → SHORT
 Flattening skew (Ψ falling) = complacency → LONG
-Best when aligned with GEX regime.
 
-Trigger: |Ψ change| > 2σ over 15-minute rolling window
+4 soft scores (no hard gates):
+    A: Liquidity — combined OI + volume of wing strikes above rolling 1h threshold
+    B: GEX regime alignment — directional alignment with gamma regime
+    C: IV divergence purity — signal driven by relative IV change, not ATM vol spike
+    D: Z-score significance — magnitude of Ψ move in σ units
 
-Hard gates (ALL must pass):
-    Gate A: Liquidity check — combined OI + volume of wing strikes above rolling 1h threshold
-    Gate B: GEX regime alignment — bullish in POSITIVE gamma, bearish in NEGATIVE gamma
-    Gate C: IV divergence — signal driven by relative IV change, not just ATM vol spike
+Confidence model (10 components):
+    1. Ψ magnitude (0.0–5.0 range)
+    2. Ψ velocity (ROC, 0.0–0.1 range)
+    3. Ψ sigma significance (0.0–5.0 range)
+    4. Put slope (0.0–0.5 range)
+    5. Call slope (0.0–0.5 range)
+    6. Liquidity score
+    7. GEX regime score
+    8. IV divergence purity score
+    9. Z-score significance score
+    10. Direction-specific score (long or short, whichever is higher)
 
-Confidence model (5 components):
-    1. Ψ magnitude in σ units (0.0–0.30)
-    2. Ψ velocity (0.0–0.20)
-    3. Liquidity conviction (0.0–0.15)
-    4. IV divergence purity (0.0–0.15)
-    5. GEX regime alignment (0.0–0.10)
+Direction selected by highest direction score (not binary ROC check).
 """
 
 from __future__ import annotations
@@ -81,8 +86,6 @@ class SkewDynamics(BaseStrategy):
         self._apply_params(data)
         rolling_data = data.get("rolling_data", {})
         params = self._params
-        self._regime_mismatch = False
-        regime_soft = params.get("regime_soft", True)
         regime = data.get("regime", "")
 
         # 1. Get Ψ data from rolling windows
@@ -102,67 +105,33 @@ class SkewDynamics(BaseStrategy):
         current_psi_sigma = psi_sigma_window.values[-1] if psi_sigma_window else 0.0
         current_psi_roc = psi_roc_window.values[-1] if psi_roc_window else 0.0
 
-        # 2. Determine signal direction based on Ψ change
-        # Ψ falling (negative ROC) = flattening skew = complacency → LONG
-        # Ψ rising (positive ROC) = steepening skew = fear → SHORT
-        long_signal = current_psi_roc < 0  # flattening skew
-        short_signal = current_psi_roc > 0  # steepening skew
-
-        if not long_signal and not short_signal:
-            return []
-
-        # Only emit one signal per evaluation
-        if long_signal and short_signal:
-            # Both can't be true simultaneously; pick based on magnitude
-            direction = "LONG" if current_psi_roc < 0 else "SHORT"
-        elif long_signal:
-            direction = "LONG"
-        else:
-            direction = "SHORT"
-
-        # 3. Check if Ψ change exceeds σ threshold
+        # 2. Validate sigma and compute soft scores
         if current_psi_sigma <= 0:
             return []
 
         psi_zscore = abs(current_psi_roc) / current_psi_sigma
+        zscore_score = min(1.0, psi_zscore / 4.0)  # 2σ=0.5, 4σ=1.0
 
-        if psi_zscore < min_psi_sigma:
-            logger.debug(
-                "Skew Dynamics: Ψ z-score %.2f below threshold %.1f for %s",
-                psi_zscore, min_psi_sigma, direction,
-            )
-            return []
+        # Soft direction scores from ROC (negative ROC → long, positive → short)
+        long_score = max(0.0, -current_psi_roc)
+        short_score = max(0.0, current_psi_roc)
+        long_dir_score = min(1.0, long_score / 0.10)
+        short_dir_score = min(1.0, short_score / 0.10)
 
-        # 4. Apply 3 HARD GATES
-        gate_a = self._gate_a_liquidity(rolling_data, params)
+        # Determine direction from soft scores
+        if long_dir_score >= short_dir_score:
+            direction = "LONG"
+        else:
+            direction = "SHORT"
 
-        if not gate_a:
-            logger.debug(
-                "Skew Dynamics: Gate A failed — liquidity check for %s", direction,
-            )
-            return []
-
-        gate_b = self._gate_b_gex_regime(direction, regime)
-
-        if not gate_b:
-            logger.debug(
-                "Skew Dynamics: Gate B failed — GEX regime misalignment for %s",
-                direction,
-            )
-            return []
-
-        gate_c = self._gate_c_iv_divergence(
+        # 3. Compute soft scores (replaces hard gates)
+        liquidity_score = self._score_liquidity(rolling_data, params)
+        regime_score = self._score_gex_regime(direction, regime)
+        iv_purity_score = self._score_iv_divergence(
             current_psi, current_psi_sigma, params
         )
 
-        if not gate_c:
-            logger.debug(
-                "Skew Dynamics: Gate C failed — IV divergence purity for %s",
-                direction,
-            )
-            return []
-
-        # 5. Compute confidence (5-component model)
+        # 5. Compute confidence (10-component model)
         confidence = self._compute_confidence(
             current_psi,
             current_psi_roc,
@@ -172,6 +141,12 @@ class SkewDynamics(BaseStrategy):
             rolling_data,
             params,
             regime,
+            liquidity_score=liquidity_score,
+            regime_score=regime_score,
+            iv_purity_score=iv_purity_score,
+            zscore_score=zscore_score,
+            long_dir_score=long_dir_score,
+            short_dir_score=short_dir_score,
         )
 
         min_confidence = MIN_CONFIDENCE
@@ -225,72 +200,76 @@ class SkewDynamics(BaseStrategy):
                 "intensity": intensity,
                 "regime": regime,
                 "gates": {
-                    "A_liquidity": gate_a,
-                    "B_gex_regime": gate_b,
-                    "C_iv_divergence": gate_c,
+                    "A_liquidity": round(liquidity_score, 3),
+                    "B_gex_regime": round(regime_score, 3),
+                    "C_iv_divergence": round(iv_purity_score, 3),
+                    "D_zscore": round(zscore_score, 3),
                 },
+                "long_dir_score": round(long_dir_score, 3),
+                "short_dir_score": round(short_dir_score, 3),
             },
         )]
 
-    def _gate_a_liquidity(
+    def _score_liquidity(
         self,
         rolling_data: Dict[str, Any],
         params: Dict[str, Any],
-    ) -> bool:
+    ) -> float:
         """
-        Gate A: Liquidity check.
+        Soft score for liquidity (0.0–1.0).
 
-        Combined OI + volume of wing strikes must be above a minimum threshold.
-        This ensures the skew move isn't happening in illiquid options.
+        Scales by 5m volume: 10k+ volume → 1.0, below that scales linearly,
+        insufficient data → 0.5, no data → 0.0.
         """
-        min_oi_threshold = params.get("liquidity_oi_threshold", 100)
-
-        # Check if we have any volume data to validate liquidity
         volume_window = rolling_data.get("volume_5m")
-        if volume_window and volume_window.count > 0:
-            # Volume is present — liquidity check passes
-            return True
+        if not volume_window or volume_window.count == 0:
+            return 0.0
 
-        # If no volume data available, use OI threshold as fallback
-        # (in practice, volume_5m should always be populated)
-        return True
+        if volume_window.count < 5:
+            return 0.5
 
-    def _gate_b_gex_regime(self, direction: str, regime: str) -> bool:
+        latest = volume_window.values[-1]
+        if latest <= 0:
+            return 0.0
+
+        return min(1.0, latest / 10000.0)
+
+    def _score_gex_regime(self, direction: str, regime: str) -> float:
         """
-        Gate B: GEX regime alignment.
+        Soft score for GEX regime alignment (0.0–1.0).
 
-        LONG signals require POSITIVE gamma regime (market makers hedging
-        by buying dips, supporting the long thesis).
-        SHORT signals require NEGATIVE gamma regime (market makers hedging
-        by selling rallies, supporting the short thesis).
+        Full score (1.0) when direction aligns with regime.
+        Partial score (0.3) on mismatch.
+        Neutral (0.5) when regime is unknown.
         """
         if direction == "LONG" and regime == "POSITIVE":
-            return True
+            return 1.0
         if direction == "SHORT" and regime == "NEGATIVE":
-            return True
-        self._regime_mismatch = True
-        return True
+            return 1.0
+        if direction == "LONG" and regime == "NEGATIVE":
+            return 0.3
+        if direction == "SHORT" and regime == "POSITIVE":
+            return 0.3
+        # regime is empty or unknown
+        return 0.5
 
-    def _gate_c_iv_divergence(
+    def _score_iv_divergence(
         self,
         psi: float,
         psi_sigma: float,
         params: Dict[str, Any],
-    ) -> bool:
+    ) -> float:
         """
-        Gate C: IV divergence purity.
+        Soft score for IV divergence purity (0.0–1.0).
 
-        The signal must be driven by relative IV change (skew change),
-        not just a general ATM vol spike. We check that Ψ is meaningfully
-        different from zero relative to its σ, confirming it's a
-        skew-driven move rather than a vol-level move.
+        Scales linearly by |ψ| up to 0.10, confirming the signal is
+        skew-driven rather than just a vol-level move.
         """
         if psi_sigma <= 0:
-            return False
+            return 0.0
 
-        # Check that Ψ is meaningfully non-zero (not just noise)
-        # This ensures the skew change is real, not just ATM vol movement
-        return abs(psi) > 0.001  # 0.1% minimum skew magnitude
+        magnitude = abs(psi)
+        return min(1.0, magnitude / 0.10)
 
     def _compute_confidence(
         self,
@@ -302,21 +281,34 @@ class SkewDynamics(BaseStrategy):
         rolling_data: Dict[str, Any],
         params: Dict[str, Any],
         regime: str,
-        depth_score=None,
+        liquidity_score: float = 0.0,
+        regime_score: float = 0.0,
+        iv_purity_score: float = 0.0,
+        zscore_score: float = 0.0,
+        long_dir_score: float = 0.0,
+        short_dir_score: float = 0.0,
     ) -> float:
         """
-        Compute 5-component confidence score (Family A).
+        Compute 10-component confidence score.
+
+        Components:
+            c1: Ψ magnitude (0.0–5.0 range)
+            c2: Ψ velocity / ROC (0.0–0.1 range)
+            c3: Ψ sigma significance (0.0–5.0 range)
+            c4: Put slope (0.0–0.5 range)
+            c5: Call slope (0.0–0.5 range)
+            c6: Liquidity score
+            c7: GEX regime score
+            c8: IV divergence purity score
+            c9: Z-score significance score
+            c10: Direction-specific score (long or short)
 
         Returns 0.0–1.0.
         """
-        if getattr(self, '_regime_mismatch', False):
-            # Phase 1: regime-soft mode — 30% penalty for mismatch
-            confidence *= 0.7
         # 1. Ψ magnitude: current_psi from 0→5, higher = higher
         c1 = normalize(current_psi, 0.0, 5.0)
         # 2. Ψ velocity: current_psi_roc from -0.1 to 0.1, use abs
-        abs_roc = abs(current_psi_roc)
-        c2 = normalize(abs_roc, 0.0, 0.1)
+        c2 = normalize(abs(current_psi_roc), 0.0, 0.1)
         # 3. Ψ sigma significance: current_psi_sigma from 0→5, higher = higher
         c3 = normalize(current_psi_sigma, 0.0, 5.0)
         # 4. Put slope: direction-specific, normalize to [0,1]
@@ -325,5 +317,11 @@ class SkewDynamics(BaseStrategy):
         # 5. Call slope: direction-specific, normalize to [0,1]
         call_slope = rolling_data.get("call_slope", 0.0)
         c5 = normalize(abs(call_slope), 0.0, 0.5)
-        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+        # 6–10: soft scores (passed in)
+        c6 = liquidity_score
+        c7 = regime_score
+        c8 = iv_purity_score
+        c9 = zscore_score
+        c10 = long_dir_score if direction == "LONG" else short_dir_score
+        confidence = (c1 + c2 + c3 + c4 + c5 + c6 + c7 + c8 + c9 + c10) / 10.0
         return min(1.0, max(0.0, confidence))
