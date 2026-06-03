@@ -23,14 +23,24 @@ Entry (SHORT):
     - Price consolidating + volume flat/declining
     - Net gamma positive
 
-Confidence factors (7 components):
-    1. OI concentration (soft — 0.10–0.15)
-    2. Delta acceleration (hard gate — 0.0 or 0.20–0.30)
-    3. Liquidity vacuum (hard gate — 0.0 or 0.15–0.20)
-    4. Skew convergence (hard gate — 0.0 or 0.15–0.20)
-    5. Consolidation tightness (soft — 0.10–0.15)
-    6. Volume profile (soft — 0.05–0.10)
-    7. Distance to target (soft — 0.05–0.10)
+Confidence factors (10 components, simple average):
+    Pre-gate scores (computed in evaluate, always available):
+    1. OI concentration (0–1, total_oi/max_oi)
+    2. Consolidation score (0–1, tighter = higher)
+    3. Volume score (0–1, FLAT=1.0, DOWN=0.8, UP=0.2, SPIKE=0.0)
+    4. Gamma score (0–1, higher net_gamma = higher)
+
+    Post-gate scores (computed per-strike in _check_long/_check_short):
+    5. Delta score (0–1, smoothed delta ROC)
+    6. Liquidity score (0–1, liquidity vacuum ratio)
+    7. Skew score (0–1, skew convergence magnitude)
+
+    Structural scores (always computed):
+    8. Distance to target (0–1, closer = higher)
+    9. Consolidation ratio (0–1, tighter = higher)
+    10. Net delta magnitude (0–1, abs(delta_roc) normalized)
+
+    Formula: confidence = (c1 + c2 + ... + c10) / 10.0
 """
 
 from __future__ import annotations
@@ -155,22 +165,25 @@ class ProbWeightedMagnet(BaseStrategy):
         if range_5m is None or range_30m is None or range_30m == 0:
             return []
         consolidation_ratio = range_5m / range_30m
-        if consolidation_ratio >= CONSOLIDATION_RATIO:
-            # Price not consolidating — could be a breakout already
-            return []
+        # Soft score: tighter consolidation = higher score
+        # 0.0 ratio → 1.0 score (perfect consolidation), 1.0+ ratio → 0.0
+        consol_score = 1.0 - normalize(consolidation_ratio, 0.0, 1.0)
 
         # --- Volume check ---
         volume_5m = rolling_data.get(KEY_VOLUME_5M)
         if volume_5m is None or volume_5m.count < MIN_DATA_POINTS:
             return []
         vol_trend = volume_5m.trend
-        if vol_trend not in VALID_VOLUME_TRENDS:
-            # Volume spiking up = breakout in progress, not accumulation
-            return []
+        # Soft score: FLAT best, DOWN close, UP penalized, SPIKE worst
+        vol_trend_scores = {"FLAT": 1.0, "DOWN": 0.8, "UP": 0.2, "SPIKE": 0.0, "UNKNOWN": 0.5}
+        vol_score = vol_trend_scores.get(vol_trend, 0.5)
 
-        # --- Net gamma check ---
-        if net_gamma < MIN_NET_GAMMA:
-            return []
+        # --- Net gamma soft score ---
+        # Soft score: 0 at 0 gamma, 0.5 at MIN_NET_GAMMA, 1.0 at 2×MIN_NET_GAMMA
+        if net_gamma < 0:
+            gamma_score = 0.0
+        else:
+            gamma_score = min(1.0, net_gamma / (MIN_NET_GAMMA * 2))
 
         # --- Scan for magnet strikes ---
         signals: List[Signal] = []
@@ -178,10 +191,12 @@ class ProbWeightedMagnet(BaseStrategy):
         long_sig = self._check_long(
             greeks_summary, underlying_price, net_gamma,
             consolidation_ratio, vol_trend, price_30m, data, rolling_data, gex_calc,
+            consol_score, vol_score, gamma_score,
         )
         short_sig = self._check_short(
             greeks_summary, underlying_price, net_gamma,
             consolidation_ratio, vol_trend, price_30m, data, rolling_data, gex_calc,
+            consol_score, vol_score, gamma_score,
         )
 
         if long_sig:
@@ -192,64 +207,72 @@ class ProbWeightedMagnet(BaseStrategy):
         return signals
 
     # ------------------------------------------------------------------
-    # v2 helper: Delta acceleration check
+    # v2 helper: Delta acceleration score
     # ------------------------------------------------------------------
 
-    def _check_delta_acceleration(
+    def _score_delta_acceleration(
         self, gex_calc: Any, magnet_strike: float, direction: str,
         rolling_data: Dict[str, Any],
-    ) -> Optional[float]:
+    ) -> float:
         """
-        Check if delta at the magnet strike is accelerating.
+        Score delta acceleration at the magnet strike on [0.0, 1.0].
 
-        Returns delta_roc if acceleration confirmed, None otherwise.
-
-        For LONG: delta_roc > 0.05 (delta accelerating up ≥5%)
-        For SHORT: delta_roc < -0.05 (delta accelerating down ≥5%)
+        For LONG: higher delta_roc = higher score
+        For SHORT: lower (more negative) delta_roc = higher score
         """
         try:
             current_delta = gex_calc.get_delta_by_strike(magnet_strike)
             current_delta = current_delta.get("net_delta", 0.0) if isinstance(current_delta, dict) else 0.0
         except Exception:
-            return None
+            return 0.0
 
         mag_window = rolling_data.get(KEY_MAGNET_DELTA_5M)
         if mag_window is None or mag_window.count < 5:
-            return None  # Not enough data yet
+            return 0.0  # Not enough data yet
 
         delta_5_ago = mag_window.values[-5] if len(mag_window.values) >= 5 else None
         if delta_5_ago is None or abs(delta_5_ago) < 1e-10:
-            return None
+            return 0.0
 
         delta_roc = (current_delta - delta_5_ago) / abs(delta_5_ago)
 
         if direction == "LONG":
-            if delta_roc > DELTA_ROC_THRESHOLD:
-                return delta_roc
+            if delta_roc > 0.05:
+                return min(1.0, delta_roc / 0.30)
+            elif delta_roc > 0.0:
+                # Right direction but below threshold — partial score
+                return delta_roc / 0.30
+            else:
+                # Wrong direction
+                return 0.0
         else:  # SHORT
-            if delta_roc < -DELTA_ROC_THRESHOLD:
-                return delta_roc
-
-        return None
+            if delta_roc < -0.05:
+                return min(1.0, abs(delta_roc) / 0.30)
+            elif delta_roc < 0.0:
+                # Right direction but below threshold — partial score
+                return abs(delta_roc) / 0.30
+            else:
+                # Wrong direction
+                return 0.0
 
     # ------------------------------------------------------------------
-    # v2 helper: Liquidity vacuum check
+    # v2 helper: Liquidity vacuum score
     # ------------------------------------------------------------------
 
-    def _check_liquidity_vacuum(
+    def _score_liquidity_vacuum(
         self, data: Dict[str, Any], price: float, direction: str,
-    ) -> bool:
+    ) -> float:
         """
-        Check if order book has thin liquidity on the breakout side.
+        Score liquidity vacuum on the breakout side on [0.0, 1.0].
 
-        For LONG magnet: ask side should be thin (easy to break up)
-        For SHORT magnet: bid side should be thin (easy to break down)
+        For LONG magnet: thin ask side = higher score
+        For SHORT magnet: thin bid side = higher score
 
-        Returns True if vacuum confirmed (thin side), False otherwise.
+        0.0 = no vacuum (thick liquidity), 1.0 = free run (no liquidity)
         """
         depth = data.get(KEY_MARKET_DEPTH_AGG, {})
         if not depth:
-            return True  # No depth data = pass (backwards compat)
+            return 0.5  # No depth data = neutral (backwards compat)
 
         bids = depth.get("bids", [])
         asks = depth.get("asks", [])
@@ -261,50 +284,54 @@ class ProbWeightedMagnet(BaseStrategy):
         if direction == "LONG":
             # For bullish magnet: ask side should be thin (easy to break up)
             if ask_total == 0:
-                return True  # Free run — no asks
+                return 1.0  # Free run — no asks
             ratio = ask_total / bid_total if bid_total > 0 else 0
-            return ratio < LIQUIDITY_VACUUM_RATIO
         else:
             # For bearish magnet: bid side should be thin (easy to break down)
             if bid_total == 0:
-                return True  # Free run — no bids
+                return 1.0  # Free run — no bids
             ratio = bid_total / ask_total if ask_total > 0 else 0
-            return ratio < LIQUIDITY_VACUUM_RATIO
+
+        # ratio 0.0 → 1.0 (perfect vacuum), ratio 0.5 → 0.0 (no vacuum), >0.5 → 0.0
+        return max(0.0, 1.0 - normalize(ratio, 0.0, 0.5))
 
     # ------------------------------------------------------------------
-    # v2 helper: Skew convergence check
+    # v2 helper: Skew convergence score
     # ------------------------------------------------------------------
 
-    def _check_skew_convergence(
+    def _score_skew_convergence(
         self, rolling_data: Dict[str, Any], direction: str,
-    ) -> bool:
+    ) -> float:
         """
-        Check if IV skew is normalizing toward the magnet direction.
+        Score IV skew convergence on [0.0, 1.0].
 
         For LONG (bullish magnet): current_skew > avg_skew
             (skew normalizing from negative toward zero)
         For SHORT (bearish magnet): current_skew < avg_skew
             (skew normalizing from positive toward zero)
 
-        Returns True if converging, False otherwise.
+        0.0 = no convergence, 1.0 = strong convergence
         """
         skew_window = rolling_data.get(KEY_IV_SKEW_5M)
         if skew_window is None or skew_window.count < 5:
-            return True  # No skew data = pass (backwards compat)
+            return 0.5  # No skew data = neutral (backwards compat)
 
         current_skew = skew_window.latest
         avg_skew = skew_window.mean
         if current_skew is None or avg_skew is None or abs(avg_skew) < 1e-10:
-            return True
+            return 0.5
 
         if direction == "LONG":
             # Bullish magnet: skew should normalize from negative toward zero
             # current_skew should be > avg_skew (less negative)
-            return current_skew > avg_skew
+            diff = current_skew - avg_skew
         else:
             # Bearish magnet: skew should normalize from positive toward zero
             # current_skew should be < avg_skew (less positive)
-            return current_skew < avg_skew
+            diff = avg_skew - current_skew
+
+        # Scale: diff 0.0 → 0.0, diff 0.05 → 1.0
+        return min(1.0, max(0.0, diff / 0.05))
 
     # ------------------------------------------------------------------
     # v2 helper: Gamma-weighted target
@@ -348,7 +375,7 @@ class ProbWeightedMagnet(BaseStrategy):
         return target, target_mult, gamma_scale
 
     # ------------------------------------------------------------------
-    # v2 helper: Confidence scoring (7 components)
+    # v2 helper: Confidence scoring (10 components)
     # ------------------------------------------------------------------
 
     def _compute_confidence_v2(
@@ -358,37 +385,75 @@ class ProbWeightedMagnet(BaseStrategy):
         price: float,
         consolidation_ratio: float,
         vol_trend: str,
-        delta_roc: Optional[float],
-        liquidity_vacuum: bool,
-        skew_converging: bool,
+        delta_roc: Optional[float] = None,
+        liquidity_vacuum: bool = True,
+        skew_converging: bool = True,
         depth_score=None,
+        # New soft scores
+        consolidation_score: float = 0.5,
+        vol_score: float = 0.5,
+        gamma_score: float = 0.5,
+        delta_score: float = 0.0,
+        liquidity_score: float = 0.5,
+        skew_score: float = 0.5,
     ) -> float:
         """
-        Compute confidence for a magnet signal (Family A — 5 components).
+        Compute confidence for a magnet signal (10 components, simple average).
 
-        5 components, simple average:
+        Pre-gate scores (from evaluate):
             1. OI concentration (total_oi/max_oi, 0→1)
-            2. Delta acceleration (abs delta_roc, 0→0.3)
-            3. Liquidity vacuum (bool → 0 or 1)
-            4. Consolidation tightness (consolidation_ratio, 0→1)
-            5. Distance to target (inverted, 0→0.05)
+            2. Consolidation score (0→1, tighter = higher)
+            3. Volume score (0→1, FLAT=1.0, DOWN=0.8, UP=0.2, SPIKE=0.0)
+            4. Gamma score (0→1, higher net_gamma = higher)
+
+        Post-gate scores (from _check_long/_check_short):
+            5. Delta score (0→1, smoothed delta ROC)
+            6. Liquidity score (0→1, liquidity vacuum ratio)
+            7. Skew score (0→1, skew convergence magnitude)
+
+        Structural scores:
+            8. Distance to target (0→1, closer = higher)
+            9. Consolidation ratio (0→1, tighter = higher)
+            10. Net delta magnitude (0→1, abs(delta_roc) normalized)
+
+        Formula: confidence = (c1 + c2 + ... + c10) / 10.0
         """
         # 1. OI concentration: total_oi/max_oi, 0→1
         total_oi = target["total_oi"]
         max_oi = max(s["total_oi"] for s in qualifying) if qualifying else total_oi
         oi_ratio = total_oi / max_oi if max_oi > 0 else 1.0
         c1 = normalize(oi_ratio, 0.0, 1.0)
-        # 2. Delta acceleration: delta_roc from -0.3 to 0.3, use abs
-        abs_d = abs(delta_roc) if delta_roc is not None else 0.0
-        c2 = normalize(abs_d, 0.0, 0.3)
-        # 3. Liquidity vacuum: bool → 0 or 1
-        c3 = 1.0 if liquidity_vacuum else 0.0
-        # 4. Consolidation tightness: consolidation_ratio 0→1, higher = tighter = higher
-        c4 = normalize(consolidation_ratio, 0.0, 1.0)
-        # 5. Distance to target: distance_pct 0→0.05, closer = higher, invert
+
+        # 2. Consolidation score (pre-gate): tighter = higher
+        c2 = consolidation_score
+
+        # 3. Volume score (pre-gate): FLAT=1.0, DOWN=0.8, UP=0.2, SPIKE=0.0
+        c3 = vol_score
+
+        # 4. Gamma score (pre-gate): higher net_gamma = higher
+        c4 = gamma_score
+
+        # 5. Delta score (post-gate): smoothed delta ROC
+        c5 = delta_score
+
+        # 6. Liquidity score (post-gate): liquidity vacuum ratio
+        c6 = liquidity_score
+
+        # 7. Skew score (post-gate): skew convergence magnitude
+        c7 = skew_score
+
+        # 8. Distance to target: distance_pct 0→0.05, closer = higher, invert
         distance_pct = target["distance_pct"]
-        c5 = 1.0 - normalize(distance_pct, 0.0, 0.05)
-        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+        c8 = 1.0 - normalize(distance_pct, 0.0, 0.05)
+
+        # 9. Consolidation ratio: 0→1, tighter = higher
+        c9 = normalize(consolidation_ratio, 0.0, 1.0)
+
+        # 10. Net delta magnitude: abs(delta_roc) normalized to 0→0.3 range
+        abs_d = abs(delta_roc) if delta_roc is not None else 0.0
+        c10 = normalize(abs_d, 0.0, 0.3)
+
+        confidence = (c1 + c2 + c3 + c4 + c5 + c6 + c7 + c8 + c9 + c10) / 10.0
         return min(1.0, max(0.0, confidence))
 
     # ------------------------------------------------------------------
@@ -406,6 +471,9 @@ class ProbWeightedMagnet(BaseStrategy):
         data: Dict[str, Any],
         rolling_data: Dict[str, Any],
         gex_calc: Any,
+        consol_score: float = 0.0,
+        vol_score: float = 0.5,
+        gamma_score: float = 0.0,
     ) -> Optional[Signal]:
         """
         Detect stealth accumulation below price.
@@ -466,28 +534,28 @@ class ProbWeightedMagnet(BaseStrategy):
         target = max(qualifying, key=lambda s: s["total_oi"])
         target_strike = target["strike"]
 
-        # === v2 Hard Gates ===
+        # === v2 Soft Scores ===
 
-        # 1. Delta acceleration check
+        # 1. Delta acceleration score
         delta_roc = self._check_delta_acceleration(gex_calc, target_strike, "LONG", rolling_data)
-        if delta_roc is None:
-            return None  # Hard gate: delta not accelerating
+        delta_score = self._score_delta_acceleration(gex_calc, target_strike, "LONG", rolling_data)
 
-        # 2. Liquidity vacuum check
+        # 2. Liquidity vacuum score
         liquidity_vacuum = self._check_liquidity_vacuum(data, price, "LONG")
-        if not liquidity_vacuum:
-            return None  # Hard gate: no vacuum on ask side
+        liquidity_score = self._score_liquidity_vacuum(data, price, "LONG")
 
-        # 3. Skew convergence check
+        # 3. Skew convergence score
         skew_converging = self._check_skew_convergence(rolling_data, "LONG")
-        if not skew_converging:
-            return None  # Hard gate: skew not converging
+        skew_score = self._score_skew_convergence(rolling_data, "LONG")
 
-        # === v2 Confidence scoring ===
+        # === v2 Confidence scoring (10 components) ===
         confidence = self._compute_confidence_v2(
             target, qualifying, price,
             consolidation_ratio, vol_trend,
             delta_roc, liquidity_vacuum, skew_converging,
+            consolidation_score=consol_score, vol_score=vol_score,
+            gamma_score=gamma_score, delta_score=delta_score,
+            liquidity_score=liquidity_score, skew_score=skew_score,
         )
 
         if confidence < MIN_CONFIDENCE:
@@ -530,6 +598,7 @@ class ProbWeightedMagnet(BaseStrategy):
                 f"Velocity-Magnet LONG: delta accelerating at {target_strike} "
                 f"(delta_roc={delta_roc:+.1%}, OI={target['total_oi']:.0f}), "
                 f"liquidity_vacuum={liquidity_vacuum}, skew_converging={skew_converging}, "
+                f"delta_score={delta_score:.2f}, liq_score={liquidity_score:.2f}, skew_score={skew_score:.2f}, "
                 f"consolidation={consolidation_ratio:.2%}, vol={vol_trend}"
             ),
             metadata={
@@ -562,6 +631,11 @@ class ProbWeightedMagnet(BaseStrategy):
                 "target_mult": round(target_mult, 2),
                 "skew_converging": skew_converging,
                 "liquidity_vacuum": liquidity_vacuum,
+
+                # === v2 soft scores ===
+                "delta_score": round(delta_score, 3),
+                "liquidity_score": round(liquidity_score, 3),
+                "skew_score": round(skew_score, 3),
             },
         )
 
@@ -580,6 +654,9 @@ class ProbWeightedMagnet(BaseStrategy):
         data: Dict[str, Any],
         rolling_data: Dict[str, Any],
         gex_calc: Any,
+        consol_score: float = 0.0,
+        vol_score: float = 0.5,
+        gamma_score: float = 0.0,
     ) -> Optional[Signal]:
         """
         Detect stealth distribution above price.
@@ -639,28 +716,28 @@ class ProbWeightedMagnet(BaseStrategy):
         target = max(qualifying, key=lambda s: s["total_oi"])
         target_strike = target["strike"]
 
-        # === v2 Hard Gates ===
+        # === v2 Soft Scores ===
 
-        # 1. Delta acceleration check
+        # 1. Delta acceleration score
         delta_roc = self._check_delta_acceleration(gex_calc, target_strike, "SHORT", rolling_data)
-        if delta_roc is None:
-            return None  # Hard gate: delta not accelerating
+        delta_score = self._score_delta_acceleration(gex_calc, target_strike, "SHORT", rolling_data)
 
-        # 2. Liquidity vacuum check
+        # 2. Liquidity vacuum score
         liquidity_vacuum = self._check_liquidity_vacuum(data, price, "SHORT")
-        if not liquidity_vacuum:
-            return None  # Hard gate: no vacuum on bid side
+        liquidity_score = self._score_liquidity_vacuum(data, price, "SHORT")
 
-        # 3. Skew convergence check
+        # 3. Skew convergence score
         skew_converging = self._check_skew_convergence(rolling_data, "SHORT")
-        if not skew_converging:
-            return None  # Hard gate: skew not converging
+        skew_score = self._score_skew_convergence(rolling_data, "SHORT")
 
-        # === v2 Confidence scoring ===
+        # === v2 Confidence scoring (10 components) ===
         confidence = self._compute_confidence_v2(
             target, qualifying, price,
             consolidation_ratio, vol_trend,
             delta_roc, liquidity_vacuum, skew_converging,
+            consolidation_score=consol_score, vol_score=vol_score,
+            gamma_score=gamma_score, delta_score=delta_score,
+            liquidity_score=liquidity_score, skew_score=skew_score,
         )
 
         if confidence < MIN_CONFIDENCE:
@@ -703,6 +780,7 @@ class ProbWeightedMagnet(BaseStrategy):
                 f"Velocity-Magnet SHORT: delta accelerating at {target_strike} "
                 f"(delta_roc={delta_roc:+.1%}, OI={target['total_oi']:.0f}), "
                 f"liquidity_vacuum={liquidity_vacuum}, skew_converging={skew_converging}, "
+                f"delta_score={delta_score:.2f}, liq_score={liquidity_score:.2f}, skew_score={skew_score:.2f}, "
                 f"consolidation={consolidation_ratio:.2%}, vol={vol_trend}"
             ),
             metadata={
@@ -735,5 +813,10 @@ class ProbWeightedMagnet(BaseStrategy):
                 "target_mult": round(target_mult, 2),
                 "skew_converging": skew_converging,
                 "liquidity_vacuum": liquidity_vacuum,
+
+                # === v2 soft scores ===
+                "delta_score": round(delta_score, 3),
+                "liquidity_score": round(liquidity_score, 3),
+                "skew_score": round(skew_score, 3),
             },
         )
