@@ -31,14 +31,17 @@ Entry (SHORT):
     - Volume not rising (FLAT or DOWN)
     - Net gamma positive
 
-Confidence (7 components, unified for LONG and SHORT):
-    1. Z-score magnitude: 0.10–0.15 (soft)
-    2. Momentum acceleration: 0.0 or 0.20–0.30 (hard gate)
-    3. Capital-weighted breadth: 0.0 or 0.15–0.20 (hard gate, scaled by weight)
-    4. Delta-skew coupling: 0.0 or 0.15–0.20 (hard gate)
-    5. Duration: 0.05–0.10 (soft)
-    6. Volume confirmation: 0.05–0.10 (soft)
-    7. Net gamma: 0.05–0.10 (soft)
+Confidence (10 equal-weight components, unified for LONG and SHORT):
+    1. Z-score magnitude: normalize(abs_z_score, 0.0, 4.0)
+    2. Momentum score: from _score_momentum_acceleration (0–1)
+    3. Breadth score: from _score_capital_breadth (0–1)
+    4. Skew coupling score: from _score_delta_skew_coupling (0–1)
+    5. Consecutive score: min(1.0, (consec_long + consec_short) / 10.0)
+    6. Volume score: from vol_trend lookup (0–1)
+    7. Gamma score: normalize(net_gamma, 0, 10000000) (0–1)
+    8. Directional z-score: long_z_score or short_z_score (0–1)
+    9. Momentum acceleration: normalize(momentum_accel, 0.0, 0.30) (0–1)
+    10. Capital weight: normalize(capital_weight, 0.0, 0.30) (0–1)
 """
 
 from __future__ import annotations
@@ -114,7 +117,7 @@ class ProbDistributionShift(BaseStrategy):
     - Capital-weighted breadth (OI-weighted)
     - Delta-skew coupling check
     - IV-scaled targets
-    - 7-component confidence scoring
+    - 10-component equal-weight confidence scoring
 
     This is a leading indicator — signals are rare but high conviction when
     they fire. Typical holds: 30min – 2hr.
@@ -189,68 +192,88 @@ class ProbDistributionShift(BaseStrategy):
         price_window = rolling_data.get("price_5m")
         price_trend = price_window.trend if price_window else "UNKNOWN"
 
-        # --- v2: Momentum acceleration hard gate ---
-        momentum_accel = self._check_momentum_acceleration(rolling_data)
-        if momentum_accel is None:
-            return []
+        # --- v2: Momentum acceleration soft score ---
+        momentum_score = self._score_momentum_acceleration(rolling_data)
 
-        # --- v2: Capital-weighted breadth hard gate ---
-        capital_weight, contributing_oi = self._compute_capital_weighted_breadth(
+        # --- v2: Capital-weighted breadth soft score ---
+        breadth_score, contributing_oi = self._score_capital_breadth(
             greeks_summary, momentum, underlying_price
         )
-        if capital_weight < self._get_param("capital_breadth_threshold", 0.10):
-            return []
 
-        # --- v2: Delta-skew coupling hard gate ---
-        skew_coupled = self._check_delta_skew_coupling(rolling_data)
-        if not skew_coupled:
-            return []
+        # --- v2: Delta-skew coupling soft score ---
+        skew_coupling_score = self._score_delta_skew_coupling(rolling_data)
 
-        # --- Determine signal direction ---
-        signal_direction = None
+        # --- Soft directional scores (z-score + consecutive + volume) ---
+        long_z_score = min(1.0, max(0.0, z_score / 4.0))
+        short_z_score = min(1.0, max(0.0, -z_score / 4.0))
 
-        if z_score > Z_SCORE_THRESHOLD:
-            # Bullish probability shift
-            consec_long += 1
-            consec_short = 0
-            if consec_long >= MIN_CONSECUTIVE_SIGNALS:
-                if vol_trend in VOLUME_TREND_ALLOWED_LONG:
-                    signal_direction = Direction.LONG
-        elif z_score < -Z_SCORE_THRESHOLD:
-            # Bearish probability shift
-            consec_short += 1
-            consec_long = 0
-            if consec_short >= MIN_CONSECUTIVE_SIGNALS:
-                if vol_trend in VOLUME_TREND_ALLOWED_SHORT:
-                    signal_direction = Direction.SHORT
-        else:
-            # No significant shift — reset counters
-            consec_long = 0
-            consec_short = 0
+        # Consecutive signal score (soft, no hard gate)
+        consec_long = rolling_data.get(KEY_CONSEC_LONG, 0)
+        consec_short = rolling_data.get(KEY_CONSEC_SHORT, 0)
+        consec_score = min(1.0, (consec_long + consec_short) / 10.0)
 
+        # Volume trend score (soft, no hard gate)
+        vol_trend_scores = {"FLAT": 1.0, "UP": 0.8, "DOWN": 0.8, "SPIKE": 0.2, "UNKNOWN": 0.5}
+        vol_score = vol_trend_scores.get(vol_trend, 0.5)
+
+        # Store soft scores for downstream use
         rolling_data[KEY_CONSEC_LONG] = consec_long
         rolling_data[KEY_CONSEC_SHORT] = consec_short
+        rolling_data["long_z_score"] = long_z_score
+        rolling_data["short_z_score"] = short_z_score
+        rolling_data["consec_score"] = consec_score
+        rolling_data["vol_score"] = vol_score
 
-        if signal_direction is None:
+        # Direction selection: pick the stronger z-score direction
+        if long_z_score >= short_z_score:
+            direction = Direction.LONG
+        else:
+            direction = Direction.SHORT
+
+        # Minimum combined signal strength to fire
+        combined = long_z_score + short_z_score
+        if combined < 0.3:
             return []
+
+        signal_direction = direction
 
         # --- v2: IV-scaled target ---
         entry = underlying_price
         risk = STOP_PCT * entry  # distance to stop
         target = self._compute_iv_scaled_target(entry, risk, rolling_data, signal_direction)
 
-        # --- Compute confidence (7-component v2) ---
+        # --- Compute confidence (10-component v2) ---
+        dir_z_score = long_z_score if signal_direction == Direction.LONG else short_z_score
+
+        # Raw momentum acceleration for c9 normalization (range 0.0–0.30)
+        momentum_accel_raw = None
+        mom_roc_window = rolling_data.get(KEY_MOMENTUM_ROC_5M)
+        if mom_roc_window is not None and mom_roc_window.latest is not None:
+            momentum_accel_raw = mom_roc_window.latest
+
+        # Raw capital weight for c10 normalization (range 0.0–0.30)
+        # breadth_score = min(1.0, capital_weight / (threshold * 2))
+        # Reverse: capital_weight = breadth_score * threshold * 2 (clamped)
+        threshold = self._get_param("capital_breadth_threshold", 0.10)
+        capital_weight_raw = min(breadth_score, 1.0) * threshold * 2
+
         confidence = self._compute_confidence_v2(
-            z_score,
-            abs(z_score),
-            consec_long if signal_direction == Direction.LONG else consec_short,
-            vol_trend,
-            net_gamma,
-            momentum_accel,
-            capital_weight,
-            skew_coupled,
-            momentum,
-            greeks_summary,
+            z_score=z_score,
+            abs_z_score=abs(z_score),
+            consecutive_count=consec_long if signal_direction == Direction.LONG else consec_short,
+            vol_trend=vol_trend,
+            net_gamma=net_gamma,
+            momentum_accel=momentum_accel_raw,
+            capital_weight=capital_weight_raw,
+            skew_coupled=skew_coupling_score > 0.5,
+            momentum=momentum,
+            greeks_summary=greeks_summary,
+            dir_z_score=dir_z_score,
+            consec_score=consec_score,
+            vol_score=vol_score,
+            momentum_score=momentum_score,
+            breadth_score=breadth_score,
+            skew_coupling_score=skew_coupling_score,
         )
 
         if confidence < MIN_CONFIDENCE:
@@ -292,12 +315,17 @@ class ProbDistributionShift(BaseStrategy):
             reason=(
                 f"{direction_label.capitalize()} prob distribution shift: "
                 f"momentum={momentum:.2f}, z={sign}{z_score:.2f}, "
-                f"consec={consec_long if signal_direction == Direction.LONG else consec_short}, "
-                f"vol={vol_trend}, gamma={net_gamma:.0f}"
+                f"long_z={long_z_score:.2f}, short_z={short_z_score:.2f}, "
+                f"consec={consec_score:.2f}, vol={vol_score:.2f}, "
+                f"gamma={net_gamma:.0f}"
             ),
             metadata={
                 "momentum": round(momentum, 4),
                 "z_score": round(z_score, 3),
+                "long_z_score": round(long_z_score, 4),
+                "short_z_score": round(short_z_score, 4),
+                "consec_score": round(consec_score, 4),
+                "vol_score": round(vol_score, 4),
                 "consecutive_count": (
                     consec_long if signal_direction == Direction.LONG else consec_short
                 ),
@@ -317,11 +345,12 @@ class ProbDistributionShift(BaseStrategy):
                 ),
                 # v2 Momentum-Master fields
                 "momentum_roc": round(momentum_roc_val, 4) if momentum_roc_val is not None else None,
-                "momentum_accel": round(momentum_accel, 4),
-                "capital_breadth": round(capital_weight, 4),
+                "momentum_score": round(momentum_score, 4),
+                "breadth_score": round(breadth_score, 4),
                 "contributing_oi": round(contributing_oi, 2),
                 "skew_roc": round(skew_roc_val, 4) if skew_roc_val is not None else None,
-                "delta_skew_coupled": skew_coupled,
+                "delta_skew_coupled": round(skew_coupling_score, 4),
+                "dir_z_score": round(dir_z_score, 3),
                 "iv_factor": round(iv_factor, 4) if iv_factor is not None else None,
                 "target_mult": round(abs(target - entry) / risk, 3) if risk > 0 else None,
             },
@@ -420,51 +449,75 @@ class ProbDistributionShift(BaseStrategy):
     # v2 Momentum-Master checks
     # ------------------------------------------------------------------
 
-    def _check_momentum_acceleration(self, rolling_data: Dict[str, Any]) -> Optional[float]:
+    def _score_momentum_acceleration(self, rolling_data: Dict[str, Any]) -> float:
         """
-        Check momentum acceleration from KEY_MOMENTUM_ROC_5M rolling window.
+        Score momentum acceleration from KEY_MOMENTUM_ROC_5M rolling window.
 
-        Returns the acceleration value if it passes the threshold gate,
-        or None if it fails.
+        Returns a float in [0.0, 1.0] representing how strongly momentum
+        is accelerating in a favorable direction.
 
-        For LONG: momentum_accel > +threshold (accelerating upward)
-        For SHORT: momentum_accel < -threshold (accelerating downward)
-
-        The threshold is read from params (default 0.10 = 10%).
+        - No data / insufficient: 0.0
+        - momentum_roc passes threshold (>0.10 LONG, <-0.10 SHORT):
+          min(1.0, abs(momentum_roc) / 0.30)
+        - momentum_roc in right direction but below threshold:
+          0.0–0.5 scaled by proximity to threshold
+        - momentum_roc in wrong direction: 0.0
         """
         window = rolling_data.get(KEY_MOMENTUM_ROC_5M)
         if window is None or window.latest is None:
-            return None
+            return 0.0
 
-        accel = window.latest
+        roc = window.latest
         threshold = self._get_param("momentum_accel_threshold", 0.10)
 
-        if accel > threshold:
-            return accel
-        elif accel < -threshold:
-            return accel
-        else:
-            return None
+        # Wrong direction → 0.0
+        if (roc > 0 and roc < threshold) or (roc < 0 and roc > -threshold):
+            return 0.0
 
-    def _compute_capital_weighted_breadth(
+        # In the right direction
+        if abs(roc) >= threshold:
+            # Strong signal: scale by magnitude, cap at 1.0
+            return min(1.0, abs(roc) / 0.30)
+        else:
+            # Below threshold but in right direction: scale 0.0–0.5
+            # At threshold → 0.5, at 0 → 0.0
+            return 0.5 * (abs(roc) / threshold)
+
+    def _check_momentum_acceleration(self, rolling_data: Dict[str, Any]) -> Optional[float]:
+        """
+        Legacy hard-gate wrapper for backward compatibility.
+
+        Returns the acceleration value if it passes the threshold gate,
+        or None if it fails.
+        """
+        score = self._score_momentum_acceleration(rolling_data)
+        if score == 0.0:
+            return None
+        window = rolling_data.get(KEY_MOMENTUM_ROC_5M)
+        if window is None or window.latest is None:
+            return None
+        return window.latest
+
+    def _score_capital_breadth(
         self,
         greeks_summary: Dict[str, Any],
         momentum: float,
         price: float,
     ) -> Tuple[float, float]:
         """
-        Compute capital-weighted breadth of the momentum shift.
+        Score capital-weighted breadth of the momentum shift.
 
         Sums total_chain_oi across all strikes, then sums contributing_oi
         for strikes contributing > 5% of total momentum.
 
-        capital_weight = contributing_oi / total_chain_oi
-
-        Returns (capital_weight, contributing_oi).
+        Returns (breadth_score, contributing_oi) where:
+        - breadth_score: float in [0.0, 1.0] = min(1.0, capital_weight / (threshold * 2))
+        - contributing_oi: raw contributing OI value (for metadata)
         """
         total_chain_oi = 0.0
         contributing_oi = 0.0
         total_abs_momentum = abs(momentum) if momentum != 0 else 1.0
+        threshold = self._get_param("capital_breadth_threshold", 0.10)
 
         # Find ATM strike
         atm_strike = None
@@ -507,44 +560,69 @@ class ProbDistributionShift(BaseStrategy):
         if total_chain_oi == 0:
             return (0.0, 0.0)
 
-        return (contributing_oi / total_chain_oi, contributing_oi)
+        capital_weight = contributing_oi / total_chain_oi
+        # Soft score: threshold = 0.5 → 2×threshold = 1.0 → score = 1.0
+        breadth_score = min(1.0, capital_weight / (threshold * 2))
+        return (breadth_score, contributing_oi)
 
-    def _check_delta_skew_coupling(self, rolling_data: Dict[str, Any]) -> bool:
+    def _compute_capital_weighted_breadth(
+        self,
+        greeks_summary: Dict[str, Any],
+        momentum: float,
+        price: float,
+    ) -> Tuple[float, float]:
         """
-        Check if delta-skew coupling supports the signal direction.
+        Legacy hard-gate wrapper for backward compatibility.
 
-        Gets KEY_IV_SKEW_5M rolling window and computes skew ROC.
-        For LONG: skew_roc > 0 (skew normalizing from negative toward zero)
-        For SHORT: skew_roc < 0 (skew normalizing from positive toward zero)
+        Returns (capital_weight, contributing_oi).
+        """
+        score, contrib_oi = self._score_capital_breadth(
+            greeks_summary, momentum, price
+        )
+        # Reverse-derive capital_weight from score for legacy callers
+        threshold = self._get_param("capital_breadth_threshold", 0.10)
+        capital_weight = min(score, 1.0) * threshold * 2
+        return (capital_weight, contrib_oi)
 
-        If skew data unavailable → return True (backwards compat).
+    def _score_delta_skew_coupling(self, rolling_data: Dict[str, Any]) -> float:
+        """
+        Score delta-skew coupling support for signal direction.
+
+        Gets KEY_IV_SKEW_5M rolling window and returns a float in [0.0, 1.0].
+
+        - No skew data: 0.5 (neutral)
+        - Skew normalizing (current_skew moving toward 0 from avg):
+          min(1.0, max(0.0, diff / 0.05)) where diff = current_skew - avg_skew
+        - 5% skew movement = max score (1.0)
         """
         window = rolling_data.get(KEY_IV_SKEW_5M)
         if window is None or window.latest is None or window.mean is None:
-            return True  # backwards compat: allow if no skew data
+            return 0.5  # neutral when no skew data
 
         current_skew = window.latest
         avg_skew = window.mean
 
         if abs(avg_skew) == 0:
-            return True
+            return 0.5  # neutral if average skew is zero
 
-        skew_roc = (current_skew - avg_skew) / abs(avg_skew)
+        diff = current_skew - avg_skew
 
-        # For LONG: we want skew_roc > 0 (skew moving toward zero from negative)
-        # For SHORT: we want skew_roc < 0 (skew moving toward zero from positive)
-        # Since we don't know direction here, check if skew is normalizing
-        # (moving toward the mean/average, indicating stabilization)
-        # Actually, the direction is determined by z_score in evaluate(),
-        # so we check if skew_roc aligns with the likely direction.
-        # If skew is currently negative (put-heavy) and rising → bullish support
-        # If skew is currently positive (call-heavy) and falling → bearish support
-        if current_skew < 0 and skew_roc > 0:
-            return True  # negative skew normalizing up → bullish
-        elif current_skew > 0 and skew_roc < 0:
-            return True  # positive skew normalizing down → bearish
-        else:
-            return False
+        # For LONG: want skew normalizing from negative toward zero → diff > 0
+        # For SHORT: want skew normalizing from positive toward zero → diff < 0
+        # Score is direction-agnostic: positive diff = bullish support, negative = bearish
+        # We return a soft score based on magnitude of movement
+        # diff / 0.05 → 5% skew movement = score 1.0
+        score = min(1.0, max(0.0, diff / 0.05))
+        return score
+
+    def _check_delta_skew_coupling(self, rolling_data: Dict[str, Any]) -> bool:
+        """
+        Legacy hard-gate wrapper for backward compatibility.
+
+        Returns True if delta-skew coupling supports the signal direction.
+        """
+        score = self._score_delta_skew_coupling(rolling_data)
+        return score > 0.5
 
     def _compute_iv_scaled_target(
         self,
@@ -605,7 +683,7 @@ class ProbDistributionShift(BaseStrategy):
     def _compute_confidence_v2(
         self,
         z_score: float,
-        abs_z: float,
+        abs_z_score: float,
         consecutive_count: int,
         vol_trend: str,
         net_gamma: float,
@@ -614,29 +692,50 @@ class ProbDistributionShift(BaseStrategy):
         skew_coupled: bool,
         momentum: float,
         greeks_summary: Dict[str, Any],
-        depth_score=None,
+        dir_z_score: float = 0.0,
+        consec_score: float = 0.0,
+        vol_score: float = 0.5,
+        momentum_score: float = 0.0,
+        breadth_score: float = 0.0,
+        skew_coupling_score: float = 0.0,
     ) -> float:
         """
-        Compute confidence for a distribution-shift signal (Family A — 5 components).
+        Compute confidence for a distribution-shift signal (10 equal-weight components).
 
-        5 components, simple average:
-            1. Z-score magnitude (abs_z, 0→4)
-            2. Momentum acceleration (0→1)
-            3. Capital-weighted breadth (0→1)
-            4. Duration (consecutive_count, 0→10)
-            5. Net gamma (0→5M)
+        All components are normalized to [0, 1] and averaged equally.
+
+        1. Z-score magnitude: normalize(abs_z_score, 0.0, 4.0)
+        2. Momentum score: from _score_momentum_acceleration
+        3. Breadth score: from _score_capital_breadth
+        4. Skew coupling score: from _score_delta_skew_coupling
+        5. Consecutive score: min(1.0, (consec_long + consec_short) / 10.0)
+        6. Volume score: from vol_trend lookup
+        7. Gamma score: normalize(net_gamma, 0, 10000000)
+        8. Directional z-score: long_z_score or short_z_score
+        9. Momentum acceleration: normalize(momentum_accel, 0.0, 0.30)
+        10. Capital weight: normalize(capital_weight, 0.0, 0.30)
         """
-        # 1. Z-score magnitude: abs_z from 0→4, higher = more extreme = higher
-        c1 = normalize(abs_z, 0.0, 4.0)
-        # 2. Momentum acceleration: momentum_accel from 0→1, higher = higher
-        c2 = normalize(momentum_accel, 0.0, 1.0)
-        # 3. Capital-weighted breadth: capital_weight from 0→1, higher = higher
-        c3 = normalize(capital_weight, 0.0, 1.0)
-        # 4. Duration: consecutive_count from 0→10, higher = more persistent = higher
-        c4 = normalize(consecutive_count, 0.0, 10.0)
-        # 5. Net gamma: net_gamma from 0→5M, higher = higher
-        c5 = normalize(net_gamma, 0.0, 5000000.0)
-        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+        # 1. Z-score magnitude
+        c1 = normalize(abs_z_score, 0.0, 4.0)
+        # 2. Momentum score (from _score_momentum_acceleration)
+        c2 = momentum_score
+        # 3. Breadth score (from _score_capital_breadth)
+        c3 = breadth_score
+        # 4. Skew coupling score (from _score_delta_skew_coupling)
+        c4 = skew_coupling_score
+        # 5. Consecutive score
+        c5 = consec_score
+        # 6. Volume score
+        c6 = vol_score
+        # 7. Gamma score
+        c7 = normalize(net_gamma, 0.0, 10000000.0)
+        # 8. Directional z-score
+        c8 = dir_z_score
+        # 9. Momentum acceleration (scaled to 0–1)
+        c9 = normalize(momentum_accel, 0.0, 0.30) if momentum_accel else 0.0
+        # 10. Capital weight (scaled to 0–1)
+        c10 = normalize(capital_weight, 0.0, 0.30) if capital_weight else 0.0
+        confidence = (c1 + c2 + c3 + c4 + c5 + c6 + c7 + c8 + c9 + c10) / 10.0
         return min(1.0, max(0.0, confidence))
 
     # ------------------------------------------------------------------
