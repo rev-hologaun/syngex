@@ -74,7 +74,7 @@ class ObiAggressionFlow(BaseStrategy):
         self._apply_params(data)
         rolling_data = data.get("rolling_data", {})
         params = self._params
-        min_confidence = params.get("min_confidence", 0.0)
+        min_confidence = params.get("min_confidence", 0.20)
         gex_calc = data.get("gex_calculator")
         regime = data.get("regime", "")
 

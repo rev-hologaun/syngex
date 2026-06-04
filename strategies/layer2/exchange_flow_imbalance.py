@@ -57,7 +57,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.ExchangeFlowImbalance")
 
-MIN_CONFIDENCE = 0.0
+MIN_CONFIDENCE = 0.20
 
 
 class ExchangeFlowImbalance(BaseStrategy):

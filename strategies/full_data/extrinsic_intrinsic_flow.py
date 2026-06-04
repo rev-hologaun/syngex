@@ -84,7 +84,7 @@ def normalize(val: float, vmin: float, vmax: float) -> float:
 STOP_PCT = 0.005                        # 0.5% stop
 
 # Min confidence — raised from 0.25 to 0.35 (v2 Conviction-Master)
-MIN_CONFIDENCE = 0.0
+MIN_CONFIDENCE = 0.20
 
 # Min data points — need more data for extrinsic tracking
 MIN_DATA_POINTS = 5
@@ -488,6 +488,10 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         - Net gamma positive
         - v2: Extrinsic accelerating upward, aggressive buying, skew coupling
         """
+        # Defensive: bail on None params to prevent f-string crashes
+        if extrinsic_change_pct is None or vol_ratio is None:
+            return None
+
         rolling_data = data.get("rolling_data", {})
 
         # Direction selection: use soft scores instead of hard gates
@@ -639,6 +643,10 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         - Net gamma positive
         - v2: Extrinsic accelerating upward, aggressive selling, skew coupling
         """
+        # Defensive: bail on None params to prevent f-string crashes
+        if extrinsic_change_pct is None or vol_ratio is None:
+            return None
+
         rolling_data = data.get("rolling_data", {})
 
         # Direction selection: use soft scores instead of hard gates
@@ -794,6 +802,10 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         - If volume was FLAT → fade based on recent price momentum
         - v2: Extrinsic accelerating downward, skew coupling not required
         """
+        # Defensive: bail on None params to prevent f-string crashes
+        if extrinsic_change_pct is None or vol_ratio is None:
+            return None
+
         rolling_data = data.get("rolling_data", {})
 
         # Direction selection: use soft scores instead of hard gates
