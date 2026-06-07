@@ -876,7 +876,7 @@
 
         const W = rect.width;
         const H = rect.height;
-        const pad = { top: 10, right: 16, bottom: 32, left: 56 };
+        const pad = { top: 10, right: 16, bottom: 40, left: 112 };
         const chartW = W - pad.left - pad.right;
         const chartH = H - pad.top - pad.bottom;
 
@@ -885,7 +885,7 @@
         // If no data, draw placeholder
         if (!gammaData || gammaData.length === 0) {
             ctx.fillStyle = '#334155';
-            ctx.font = '12px system-ui';
+            ctx.font = '24px system-ui';
             ctx.textAlign = 'center';
             ctx.fillText('Gamma Profile — awaiting data', W / 2, H / 2);
             return;
@@ -916,7 +916,7 @@
 
         // Y-axis labels
         ctx.fillStyle = '#64748b';
-        ctx.font = '10px "JetBrains Mono", monospace';
+        ctx.font = '20px "JetBrains Mono", monospace';
         ctx.textAlign = 'right';
         const yTicks = 5;
         for (let i = 0; i <= yTicks; i++) {
@@ -926,6 +926,7 @@
         }
 
         // X-axis labels (strike)
+        ctx.font = '20px "JetBrains Mono", monospace';
         ctx.textAlign = 'center';
         const xTickCount = Math.min(6, strikes.length);
         const xStep = Math.max(1, Math.floor(strikes.length / xTickCount));
@@ -994,9 +995,9 @@
                 ctx.stroke();
                 ctx.setLineDash([]);
                 ctx.fillStyle = '#f59e0b';
-                ctx.font = 'bold 9px "JetBrains Mono", monospace';
+                ctx.font = 'bold 18px "JetBrains Mono", monospace';
                 ctx.textAlign = 'center';
-                ctx.fillText(`$${underlyingPrice.toFixed(0)}`, px, pad.top - 2);
+                ctx.fillText(`$${underlyingPrice.toFixed(0)}`, px, pad.top - 4);
             }
         }
     }
