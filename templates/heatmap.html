@@ -1252,6 +1252,8 @@
         const msgCount = data.strategies ? Object.keys(data.strategies).length : 0;
         document.getElementById('stat-messages').textContent = msgCount;
 
+        const gammaData = data.gamma_data || [];
+
         // ── SECTION 2: Gamma Profile Chart ──
         if (gammaData.length > 0) {
             prevGammaData = ng;
