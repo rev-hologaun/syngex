@@ -267,9 +267,21 @@
         .dashboard-grid {
             display: grid;
             grid-template-columns: repeat(6, 1fr);
-            grid-auto-rows: minmax(120px, auto);
+            grid-auto-rows: minmax(100px, auto);
             gap: var(--gap);
             margin-bottom: var(--gap);
+        }
+
+        .section-header {
+            grid-column: 1 / -1;
+            background: transparent;
+            border: none;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.6rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: #475569;
         }
 
         /* ── Card ────────────────────────────────────────────── */
@@ -700,56 +712,68 @@
 
     <script>
     // ── Strategy card definitions ──────────────────────────────────
-    // 41 strategies across 7 rows × 6 cols
+    // 47 strategy-slots across 10 rows (duplicates in rows 1-3 for time-of-day context)
     const STRATEGIES = [
-        // ── Row 1: Core GEX (Structural) ──
-        { id: 'gamma_wall_bounce',     label: 'GEX_WALL',          layer: 'L1', row: 1, col: 1 },
-        { id: 'magnet_accelerate',     label: 'MAGNET',            layer: 'L1', row: 1, col: 2 },
+        // ── Row 1: ORB (9:30–10:00) ──
+        { id: 'strike_concentration',  label: 'STRIKE_CONC',       layer: 'L3', row: 1, col: 1 },
+        { id: 'gex_imbalance',         label: 'GEX_IMBAL',         layer: 'L1', row: 1, col: 2 },
         { id: 'gamma_flip_breakout',   label: 'FLIP_BREAKOUT',     layer: 'L1', row: 1, col: 3 },
-        { id: 'gamma_squeeze',         label: 'GAMMA_SQ',          layer: 'L1', row: 1, col: 4 },
-        { id: 'gex_imbalance',         label: 'GEX_IMBAL',         layer: 'L1', row: 1, col: 5 },
-        { id: 'confluence_reversal',   label: 'CONFLUENCE',        layer: 'L1', row: 1, col: 6 },
-        // ── Row 2: GEX Alpha (Delta-Gamma) ──
-        { id: 'vol_compression_range', label: 'VOL_COMP',          layer: 'L1', row: 2, col: 1 },
-        { id: 'gex_divergence',        label: 'GEX_DIV',           layer: 'L1', row: 2, col: 2 },
-        { id: 'delta_gamma_squeeze',   label: 'DELTA_GAMMA',       layer: 'L2', row: 2, col: 3 },
-        { id: 'delta_volume_exhaustion', label: 'DELTA_VOL',        layer: 'L2', row: 2, col: 4 },
-        { id: 'obi_aggression_flow',   label: 'OBI_AF',            layer: 'L2', row: 2, col: 5 },
+        { id: 'magnet_accelerate',     label: 'MAGNET',            layer: 'L1', row: 1, col: 4 },
+        { id: 'depth_imbalance_momentum', label: 'DEPTH_IMBAL',    layer: 'L2', row: 1, col: 5 },
+        // ── Row 2: Morning (10:00–12:00) ──
+        { id: 'strike_concentration',  label: 'STRIKE_CONC',       layer: 'L3', row: 2, col: 1 },
+        { id: 'gex_imbalance',         label: 'GEX_IMBAL',         layer: 'L1', row: 2, col: 2 },
+        { id: 'gamma_flip_breakout',   label: 'FLIP_BREAKOUT',     layer: 'L1', row: 2, col: 3 },
+        { id: 'gex_divergence',        label: 'GEX_DIV',           layer: 'L1', row: 2, col: 4 },
+        { id: 'confluence_reversal',   label: 'CONFLUENCE',        layer: 'L1', row: 2, col: 5 },
         { id: 'call_put_flow_asymmetry', label: 'CALL_PUT_FLOW',    layer: 'L2', row: 2, col: 6 },
-        // ── Row 3: Flow & Microstructure ──
-        { id: 'iv_gex_divergence',     label: 'IV_GEX_DIV',        layer: 'L2', row: 3, col: 1 },
-        { id: 'delta_iv_divergence',   label: 'TAIL_RISK',         layer: 'L2', row: 3, col: 2 },
-        { id: 'depth_imbalance_momentum', label: 'DEPTH_IMBAL',    layer: 'L2', row: 3, col: 3 },
-        { id: 'depth_decay_momentum',  label: 'DEPTH_DECAY',       layer: 'L2', row: 3, col: 4 },
-        { id: 'exchange_flow_concentration', label: 'EXCHANGE',    layer: 'L2', row: 3, col: 5 },
-        { id: 'vamp_momentum',         label: 'VAMP',              layer: 'L2', row: 3, col: 6 },
-        // ── Row 4: Exchange & Order Book ──
-        { id: 'participant_diversity_conviction', label: 'PARTICIPANT_CONV', layer: 'L2', row: 4, col: 1 },
-        { id: 'participant_divergence_scalper', label: 'DIVERGENCE_SCALP', layer: 'L2', row: 4, col: 2 },
-        { id: 'exchange_flow_imbalance', label: 'FLOW_IMBALANCE',  layer: 'L2', row: 4, col: 3 },
-        { id: 'exchange_flow_asymmetry', label: 'FLOW_ASYMMETRY',  layer: 'L2', row: 4, col: 4 },
-        { id: 'order_book_fragmentation', label: 'OB_FRAGMENT',     layer: 'L2', row: 4, col: 5 },
-        { id: 'order_book_stacking',   label: 'STACKING',          layer: 'L2', row: 4, col: 6 },
-        // ── Row 5: Volatility Surface ──
-        { id: 'gamma_volume_convergence', label: 'GAMMA_VOL',       layer: 'L3', row: 5, col: 1 },
-        { id: 'iv_band_breakout',      label: 'IV_BAND',           layer: 'L3', row: 5, col: 2 },
-        { id: 'strike_concentration',  label: 'STRIKE_CONC',       layer: 'L3', row: 5, col: 3 },
-        { id: 'iv_skew_squeeze',       label: 'IV_SKEW',           layer: 'FULL', row: 5, col: 4 },
-        { id: 'skew_dynamics',         label: 'SKEW_DYN',          layer: 'FULL', row: 5, col: 5 },
-        { id: 'smile_dynamics',        label: 'SMILE_DYN',         layer: 'FULL', row: 5, col: 6 },
-        // ── Row 6: Volume & Sentiment ──
-        { id: 'theta_burn',            label: 'THETA_BURN',        layer: 'L3', row: 6, col: 1 },
-        { id: 'prob_weighted_magnet',  label: 'PROB_MAGNET',       layer: 'FULL', row: 6, col: 2 },
-        { id: 'prob_distribution_shift', label: 'PROB_DIST',       layer: 'FULL', row: 6, col: 3 },
-        { id: 'extrinsic_intrinsic_flow', label: 'EXTRINSIC',      layer: 'FULL', row: 6, col: 4 },
-        { id: 'ghost_premium',         label: 'GHOST_PREM',        layer: 'FULL', row: 6, col: 5 },
-        { id: 'extrinsic_flow',        label: 'EXTRINSIC_FLOW',    layer: 'FULL', row: 6, col: 6 },
-        // ── Row 7: Confluence ──
-        { id: 'gamma_breaker',         label: 'GAMMA_BREAK',       layer: 'FULL', row: 7, col: 1 },
-        { id: 'iron_anchor',           label: 'IRON_ANCHOR',       layer: 'FULL', row: 7, col: 2 },
-        { id: 'vortex_compression_breakout', label: 'VORTEX',      layer: 'L2', row: 7, col: 3 },
-        { id: 'sentiment_sync',        label: 'SENT_SYNC',         layer: 'FULL', row: 7, col: 4 },
-        { id: 'whale_tracker',         label: 'WHALE_TRACK',       layer: 'FULL', row: 7, col: 5 },
+        // ── Row 3: Afternoon (12:00–15:30) ──
+        { id: 'strike_concentration',  label: 'STRIKE_CONC',       layer: 'L3', row: 3, col: 1 },
+        { id: 'gamma_wall_bounce',     label: 'GEX_WALL',          layer: 'L1', row: 3, col: 2 },
+        { id: 'gamma_flip_breakout',   label: 'FLIP_BREAKOUT',     layer: 'L1', row: 3, col: 3 },
+        { id: 'gex_divergence',        label: 'GEX_DIV',           layer: 'L1', row: 3, col: 4 },
+        { id: 'confluence_reversal',   label: 'CONFLUENCE',        layer: 'L1', row: 3, col: 5 },
+        // ── Row 4: Gamma & Delta Momentum ──
+        { id: 'gamma_squeeze',         label: 'GAMMA_SQ',          layer: 'L1', row: 4, col: 1 },
+        { id: 'delta_gamma_squeeze',   label: 'DELTA_GAMMA',       layer: 'L2', row: 4, col: 2 },
+        { id: 'gamma_volume_convergence', label: 'GAMMA_VOL',       layer: 'L3', row: 4, col: 3 },
+        { id: 'delta_volume_exhaustion', label: 'DELTA_VOL',        layer: 'L2', row: 4, col: 4 },
+        { id: 'delta_iv_divergence',   label: 'TAIL_RISK',         layer: 'L2', row: 4, col: 5 },
+        { id: 'iv_gex_divergence',     label: 'IV_GEX_DIV',        layer: 'L2', row: 4, col: 6 },
+        // ── Row 5: Exchange Flow & Order Book ──
+        { id: 'exchange_flow_imbalance', label: 'FLOW_IMBALANCE',  layer: 'L2', row: 5, col: 1 },
+        { id: 'exchange_flow_asymmetry', label: 'FLOW_ASYMMETRY',  layer: 'L2', row: 5, col: 2 },
+        { id: 'exchange_flow_concentration', label: 'EXCHANGE',    layer: 'L2', row: 5, col: 3 },
+        { id: 'order_book_fragmentation', label: 'OB_FRAGMENT',     layer: 'L2', row: 5, col: 4 },
+        { id: 'order_book_stacking',   label: 'STACKING',          layer: 'L2', row: 5, col: 5 },
+        { id: 'obi_aggression_flow',   label: 'OBI_AF',            layer: 'L2', row: 5, col: 6 },
+        // ── Row 6: Participant & Depth ──
+        { id: 'participant_diversity_conviction', label: 'PARTICIPANT_CONV', layer: 'L2', row: 6, col: 1 },
+        { id: 'participant_divergence_scalper', label: 'DIVERGENCE_SCALP', layer: 'L2', row: 6, col: 2 },
+        { id: 'depth_decay_momentum',  label: 'DEPTH_DECAY',       layer: 'L2', row: 6, col: 3 },
+        { id: 'vamp_momentum',         label: 'VAMP',              layer: 'L2', row: 6, col: 4 },
+        { id: 'vortex_compression_breakout', label: 'VORTEX',      layer: 'L2', row: 6, col: 5 },
+        // ── Row 7: Volatility Surface ──
+        { id: 'iv_skew_squeeze',       label: 'IV_SKEW',           layer: 'FULL', row: 7, col: 1 },
+        { id: 'skew_dynamics',         label: 'SKEW_DYN',          layer: 'FULL', row: 7, col: 2 },
+        { id: 'smile_dynamics',        label: 'SMILE_DYN',         layer: 'FULL', row: 7, col: 3 },
+        { id: 'iv_band_breakout',      label: 'IV_BAND',           layer: 'L3', row: 7, col: 4 },
+        { id: 'vol_compression_range', label: 'VOL_COMP',          layer: 'L1', row: 7, col: 5 },
+        // ── Row 8: Full Data v2 — Options Flow ──
+        { id: 'extrinsic_flow',        label: 'EXTRINSIC_FLOW',    layer: 'FULL', row: 8, col: 1 },
+        { id: 'extrinsic_intrinsic_flow', label: 'EXTRINSIC',      layer: 'FULL', row: 8, col: 2 },
+        { id: 'ghost_premium',         label: 'GHOST_PREM',        layer: 'FULL', row: 8, col: 3 },
+        { id: 'prob_distribution_shift', label: 'PROB_DIST',       layer: 'FULL', row: 8, col: 4 },
+        { id: 'prob_weighted_magnet',  label: 'PROB_MAGNET',       layer: 'FULL', row: 8, col: 5 },
+        { id: 'sentiment_sync',        label: 'SENT_SYNC',         layer: 'FULL', row: 8, col: 6 },
+        // ── Row 9: Full Data v2 — Structural ──
+        { id: 'gamma_breaker',         label: 'GAMMA_BREAK',       layer: 'FULL', row: 9, col: 1 },
+        { id: 'iron_anchor',           label: 'IRON_ANCHOR',       layer: 'FULL', row: 9, col: 2 },
+        { id: 'theta_burn',            label: 'THETA_BURN',        layer: 'L3', row: 9, col: 3 },
+        { id: 'whale_tracker',         label: 'WHALE_TRACK',       layer: 'FULL', row: 9, col: 4 },
+        // ── Row 10: Empty (buffer for future additions) ──
+        { id: 'empty_1',               label: '—',                 layer: '—', row: 10, col: 1 },
+        { id: 'empty_2',               label: '—',                 layer: '—', row: 10, col: 2 },
     ];
 
     // ── Health classification ──────────────────────────────────────
@@ -1015,33 +1039,66 @@
     const grid = document.getElementById('grid');
     const cardElements = {};
 
-    // Create strategy cards
+    // Create strategy cards — handle duplicate IDs with unique DOM IDs
+    const idCounters = {};
     STRATEGIES.forEach(s => {
+        idCounters[s.id] = (idCounters[s.id] || 0) + 1;
+        const uniqueId = idCounters[s.id] > 1 ? `${s.id}-${idCounters[s.id]}` : s.id;
         const card = document.createElement('div');
         card.className = 'card health-idle';
-        card.id = `card-${s.id}`;
+        card.id = `card-${uniqueId}`;
 
         card.innerHTML = `
             <div class="card-header">
                 <div class="card-name">
                     <span class="card-layer">${s.layer}</span>${s.label}
                 </div>
-                <div class="led led-idle" id="led-${s.id}"></div>
+                <div class="led led-idle" id="led-${uniqueId}"></div>
             </div>
-            <div class="card-dir-bar void" id="dirbar-${s.id}"></div>
-            <div class="card-body" id="body-${s.id}">
+            <div class="card-dir-bar void" id="dirbar-${uniqueId}"></div>
+            <div class="card-body" id="body-${uniqueId}">
                 <div class="card-no-signal"><span>NO RECENT SIGNAL</span></div>
             </div>
             <div class="card-footer">
-                <span class="card-last" id="last-${s.id}">Last: --:--</span>
-                <span class="card-pnl neutral" id="pnl-${s.id}">$0</span>
+                <span class="card-last" id="last-${uniqueId}">Last: --:--</span>
+                <span class="card-pnl neutral" id="pnl-${uniqueId}">$0</span>
             </div>
             <div class="confidence-bar">
-                <div class="confidence-bar-fill" id="conf-${s.id}" style="width:0%;background:#475569;"></div>
+                <div class="confidence-bar-fill" id="conf-${uniqueId}" style="width:0%;background:#475569;"></div>
             </div>
         `;
         grid.appendChild(card);
-        cardElements[s.id] = { card, body: document.getElementById(`body-${s.id}`), dirbar: document.getElementById(`dirbar-${s.id}`) };
+        // Keep using s.id as key so updateDashboard lookup works
+        if (!cardElements[s.id]) cardElements[s.id] = [];
+        cardElements[s.id].push({ card, body: document.getElementById(`body-${uniqueId}`), dirbar: document.getElementById(`dirbar-${uniqueId}`), uniqueId });
+    });
+
+    // ── Section headers between time-group rows ──
+    // Calculate cumulative card count per row (including duplicates)
+    let cumulative = 0;
+    const rowEndPositions = {};
+    STRATEGIES.forEach((s, i) => {
+        cumulative++;
+        rowEndPositions[s.row] = cumulative;
+    });
+
+    // Insert section headers after the last card of each time-group row
+    // Insert in reverse order so DOM positions don't shift
+    const timeGroupRows = [
+        { label: '☀️ Afternoon (12:00–15:30)', row: 3 },
+        { label: '🌅 Morning (10:00–12:00)', row: 2 },
+        { label: '⏰ ORB (9:30–10:00)', row: 1 },
+    ];
+    timeGroupRows.forEach(group => {
+        const cardIndex = rowEndPositions[group.row];
+        if (!cardIndex) return;
+        const allStrategyCards = grid.querySelectorAll('.card:not(.card-l2-overview):not(.card-log):not(.card-extra):not(.section-header)');
+        if (allStrategyCards[cardIndex - 1]) {
+            const header = document.createElement('div');
+            header.className = 'section-header';
+            header.textContent = group.label;
+            allStrategyCards[cardIndex - 1].parentNode.insertBefore(header, allStrategyCards[cardIndex - 1].nextSibling);
+        }
     });
 
     // Create Layer 2 Overview card
@@ -1239,89 +1296,98 @@
         let l2Count = 0;
 
         Object.entries(strategies).forEach(([id, strat]) => {
-            const el = cardElements[id];
-            if (!el) return;
+            const els = cardElements[id];
+            if (!els) return;
 
             const health = classifyHealth(strat, dataValid);
 
-            el.card.className = `card health-${health}`;
+            els.forEach(el => {
+                el.card.className = `card health-${health}`;
 
-            const led = document.getElementById(`led-${id}`);
-            if (health === 'void') {
-                led.className = 'led led-void';
-            } else {
-                led.className = `led led-${strat.status === 'error' ? 'error' : (strat.status === 'idle' ? 'idle' : 'active')}`;
-            }
+                const led = document.getElementById(`led-${el.uniqueId}`);
+                if (led) {
+                    if (health === 'void') {
+                        led.className = 'led led-void';
+                    } else {
+                        led.className = `led led-${strat.status === 'error' ? 'error' : (strat.status === 'idle' ? 'idle' : 'active')}`;
+                    }
+                }
 
-            // ── Signal Tile body ──
-            const trigger = lastTriggers[id];
-            const body = el.body;
+                // ── Signal Tile body ──
+                const trigger = lastTriggers[id];
+                const body = el.body;
 
-            if (health === 'void' || !trigger) {
-                body.innerHTML = '<div class="card-no-signal"><span>NO RECENT SIGNAL</span></div>';
-                el.dirbar.className = 'card-dir-bar void';
-                document.getElementById(`last-${id}`).textContent = 'Last: —';
-                const pnlEl = document.getElementById(`pnl-${id}`);
-                pnlEl.textContent = '—';
-                pnlEl.className = 'card-pnl neutral';
-            } else {
-                const isLong = trigger.side === 'BUY';
-                const dirClass = isLong ? 'long' : 'short';
-                const dirIcon = isLong ? '▲' : '▼';
-                const confPct = (trigger.confidence * 100).toFixed(1);
+                if (health === 'void' || !trigger) {
+                    body.innerHTML = '<div class="card-no-signal"><span>NO RECENT SIGNAL</span></div>';
+                    el.dirbar.className = 'card-dir-bar void';
+                    const lastEl = document.getElementById(`last-${el.uniqueId}`);
+                    if (lastEl) lastEl.textContent = 'Last: —';
+                    const pnlEl = document.getElementById(`pnl-${el.uniqueId}`);
+                    if (pnlEl) { pnlEl.textContent = '—'; pnlEl.className = 'card-pnl neutral'; }
+                } else {
+                    const isLong = trigger.side === 'BUY';
+                    const dirClass = isLong ? 'long' : 'short';
+                    const dirIcon = isLong ? '▲' : '▼';
+                    const confPct = (trigger.confidence * 100).toFixed(1);
 
-                // Contrast-aware text color based on health background
-                const healthBgMap = {
-                    'profitable': '#065f46',
-                    'amber': '#92400e',
-                    'bleeding': '#7f1d1d',
-                    'idle': '#1f2937',
-                    'void': '#111827',
-                };
-                const bgColor = healthBgMap[health] || '#1f2937';
-                const textColor = getContrastColor(bgColor);
+                    // Contrast-aware text color based on health background
+                    const healthBgMap = {
+                        'profitable': '#065f46',
+                        'amber': '#92400e',
+                        'bleeding': '#7f1d1d',
+                        'idle': '#1f2937',
+                        'void': '#111827',
+                    };
+                    const bgColor = healthBgMap[health] || '#1f2937';
+                    const textColor = getContrastColor(bgColor);
 
-                body.innerHTML = `
-                    <div class="card-signal-header" style="color:${textColor};">
-                        <span>
-                            <span class="dir-icon ${dirClass}">${dirIcon}</span>
-                            <span class="dir-text ${dirClass}">${trigger.side}</span>
-                        </span>
-                        <span class="conf-badge" style="background:rgba(255,255,255,0.15);">${confPct}%</span>
-                    </div>
-                    <div class="card-separator"></div>
-                    <div class="card-data-row" style="color:${textColor};">
-                        <span class="data-at">@</span>
-                        <span class="data-value">$${trigger.entry.toFixed(2)}</span>
-                        <span style="opacity:0.3;margin:0 0.3rem;">│</span>
-                        <span class="data-label">S:</span>
-                        <span class="data-value">$${trigger.stop.toFixed(2)}</span>
-                    </div>
-                    <div class="card-data-row" style="color:${textColor};">
-                        <span class="data-label">T:</span>
-                        <span class="data-value">$${trigger.target.toFixed(2)}</span>
-                    </div>
-                `;
+                    body.innerHTML = `
+                        <div class="card-signal-header" style="color:${textColor};">
+                            <span>
+                                <span class="dir-icon ${dirClass}">${dirIcon}</span>
+                                <span class="dir-text ${dirClass}">${trigger.side}</span>
+                            </span>
+                            <span class="conf-badge" style="background:rgba(255,255,255,0.15);">${confPct}%</span>
+                        </div>
+                        <div class="card-separator"></div>
+                        <div class="card-data-row" style="color:${textColor};">
+                            <span class="data-at">@</span>
+                            <span class="data-value">$${trigger.entry.toFixed(2)}</span>
+                            <span style="opacity:0.3;margin:0 0.3rem;">│</span>
+                            <span class="data-label">S:</span>
+                            <span class="data-value">$${trigger.stop.toFixed(2)}</span>
+                        </div>
+                        <div class="card-data-row" style="color:${textColor};">
+                            <span class="data-label">T:</span>
+                            <span class="data-value">$${trigger.target.toFixed(2)}</span>
+                        </div>
+                    `;
 
-                // Directional bar color
-                el.dirbar.className = `card-dir-bar ${dirClass}`;
+                    // Directional bar color
+                    el.dirbar.className = `card-dir-bar ${dirClass}`;
 
-                document.getElementById(`last-${id}`).textContent = `Last: ${formatTime(trigger.timestamp)}`;
-                const pnlEl = document.getElementById(`pnl-${id}`);
-                const pnlVal = strat.pnl || 0;
-                pnlEl.textContent = formatPnL(pnlVal);
-                pnlEl.className = `card-pnl ${pnlVal > 0 ? 'positive' : (pnlVal < 0 ? 'negative' : 'neutral')}`;
-            }
+                    const lastEl = document.getElementById(`last-${el.uniqueId}`);
+                    if (lastEl) lastEl.textContent = `Last: ${formatTime(trigger.timestamp)}`;
+                    const pnlEl = document.getElementById(`pnl-${el.uniqueId}`);
+                    if (pnlEl) {
+                        const pnlVal = strat.pnl || 0;
+                        pnlEl.textContent = formatPnL(pnlVal);
+                        pnlEl.className = `card-pnl ${pnlVal > 0 ? 'positive' : (pnlVal < 0 ? 'negative' : 'neutral')}`;
+                    }
+                }
 
-            const conf = strat.win_rate || 0;
-            const confEl = document.getElementById(`conf-${id}`);
-            if (health === 'void') {
-                confEl.style.width = '0%';
-                confEl.style.background = '#1f2937';
-            } else {
-                confEl.style.width = `${conf * 100}%`;
-                confEl.style.background = strat.pnl > 0 ? '#10b981' : (strat.pnl < 0 ? '#ef4444' : '#475569');
-            }
+                const conf = strat.win_rate || 0;
+                const confEl = document.getElementById(`conf-${el.uniqueId}`);
+                if (confEl) {
+                    if (health === 'void') {
+                        confEl.style.width = '0%';
+                        confEl.style.background = '#1f2937';
+                    } else {
+                        confEl.style.width = `${conf * 100}%`;
+                        confEl.style.background = strat.pnl > 0 ? '#10b981' : (strat.pnl < 0 ? '#ef4444' : '#475569');
+                    }
+                }
+            });
 
             if (id.startsWith('delta_') || id.startsWith('call_put') || id.startsWith('iv_gex')) {
                 l2Active++;
