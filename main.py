@@ -2973,6 +2973,7 @@ class SyngexOrchestrator:
             "symbol": state["symbol"],
             "underlying_price": state["underlying_price"],
             "net_gamma": state["net_gamma"],
+            "net_gamma_normalized": state["net_gamma_normalized"],
             "active_strikes": state["active_strikes"],
             "total_messages": state["total_messages"],
             "strikes": profile["strikes"],

@@ -661,7 +661,7 @@
             </div>
         </div>
         <div class="stat-card">
-            <span class="stat-label centered">Active Strikes</span>
+            <span class="stat-label centered">Net Gamma Normalized</span>
             <span class="stat-value centered" id="stat-active-strikes">0</span>
         </div>
         <div class="stat-card">
@@ -1238,10 +1238,15 @@
             }
         }
 
-        // Active strikes
-        const gammaData = data.gamma_data || [];
-        const activeStrikes = gammaData.length;
-        document.getElementById('stat-active-strikes').textContent = activeStrikes;
+        const netGammaNorm = data.net_gamma_normalized;
+        const ngEl = document.getElementById('stat-active-strikes');
+        if (netGammaNorm !== undefined && netGammaNorm !== null) {
+            ngEl.textContent = netGammaNorm >= 0 ? `+${netGammaNorm.toFixed(2)}` : netGammaNorm.toFixed(2);
+            ngEl.className = `stat-value centered ${netGammaNorm >= 0 ? 'positive' : 'negative'}`;
+        } else {
+            ngEl.textContent = '—';
+            ngEl.className = 'stat-value centered';
+        }
 
         // Messages
         const msgCount = data.strategies ? Object.keys(data.strategies).length : 0;
