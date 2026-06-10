@@ -340,7 +340,7 @@ class GEXDivergence(BaseStrategy):
     def _compute_regime_intensity(self, gex_calc: Any, divergence_type: str) -> float:
         """Compute regime intensity bonus based on |net_gamma| magnitude."""
         try:
-            net_gamma = gex_calc.get_net_gamma()
+            net_gamma = gex_calc.get_normalized_net_gamma()
         except Exception:
             return 0.0
         if net_gamma is None:

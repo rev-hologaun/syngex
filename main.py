@@ -2524,6 +2524,7 @@ class SyngexOrchestrator:
             "timestamp": time.time(),
             "regime": self._gamma_filter.regime,
             "net_gamma": net_gamma,
+            "net_gamma_normalized": summary["net_gamma_normalized"],
             "gamma_flip": flip,
             "greeks_summary": self._calculator.get_greeks_summary(),
             "_gamma_sync": _gamma_sync,

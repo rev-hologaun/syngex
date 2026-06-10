@@ -135,7 +135,7 @@ class IVGEXDivergence(BaseStrategy):
             return []
 
         rolling_data = data.get("rolling_data", {})
-        net_gamma = data.get("net_gamma", 0)
+        net_gamma = data.get("net_gamma_normalized", 0)
         regime = data.get("regime", "")
         greeks_summary = data.get("greeks_summary", gex_calc.get_greeks_summary() or {})
 

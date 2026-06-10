@@ -273,7 +273,7 @@ class ObiAggressionFlow(BaseStrategy):
         # Use get_net_gamma() to determine the actual GEX bias direction.
         # Positive net gamma → positive GEX regime (bullish bias: dealers buy dips)
         # Negative net gamma → negative GEX regime (bearish bias: dealers sell dips)
-        net_gamma = gex_calc.get_net_gamma()
+        net_gamma = gex_calc.get_normalized_net_gamma()
 
         if net_gamma > 0:
             # Positive GEX regime: supports LONG (buy dips), opposes SHORT

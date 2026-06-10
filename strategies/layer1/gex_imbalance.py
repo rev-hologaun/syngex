@@ -120,7 +120,7 @@ class GEXImbalance(BaseStrategy):
         depth_snapshot = data.get("depth_snapshot")
 
         # Net gamma for regime intensity
-        net_gamma = gex_calc.get_net_gamma()
+        net_gamma = gex_calc.get_normalized_net_gamma()
 
         # Update ratio history for ROC
         self._update_ratio_history(ratio, ts)

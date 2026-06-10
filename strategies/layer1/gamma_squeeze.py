@@ -94,7 +94,7 @@ class GammaSqueeze(BaseStrategy):
         if not vol_check["recommended"]:
             return []
 
-        net_gamma = data.get("net_gamma", 0)
+        net_gamma = data.get("net_gamma_normalized", 0)
         regime = data.get("regime", "")
 
         signals: List[Signal] = []

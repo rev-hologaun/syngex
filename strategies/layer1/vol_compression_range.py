@@ -234,7 +234,7 @@ class VolCompressionRange(BaseStrategy):
         if regime != "POSITIVE":
             return NEGATIVE_REGIME_STOP_MULT
 
-        net_gamma = gex_calc.get_net_gamma()
+        net_gamma = gex_calc.get_normalized_net_gamma()
         if net_gamma is None:
             return 1.0
 

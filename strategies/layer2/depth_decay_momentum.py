@@ -334,7 +334,7 @@ class DepthDecayMomentum(BaseStrategy):
         # 5. GEX regime alignment: net_gamma from 0→5M, higher = higher
         net_gamma = 0
         if gex_calc and regime:
-            net_gamma = gex_calc.get_net_gamma() if hasattr(gex_calc, "get_net_gamma") else 0
+            net_gamma = gex_calc.get_normalized_net_gamma() if hasattr(gex_calc, "get_normalized_net_gamma") else 0
         c5 = normalize(abs(net_gamma), 0.0, 5000000.0)
 
         confidence = (c1 + c2 + c3 + c4 + c5) / 5.0

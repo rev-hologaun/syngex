@@ -136,7 +136,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
         total_delta = sum(
             v.get("net_delta", 0) for v in greeks_summary.values()
         ) if isinstance(greeks_summary, dict) else 0
-        net_gamma = data.get("net_gamma", 0)
+        net_gamma = data.get("net_gamma_normalized", 0)
         regime = data.get("regime", "")
         gex_calc = data.get("gex_calculator")
         depth_snapshot = data.get("depth_snapshot")

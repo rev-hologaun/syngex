@@ -86,7 +86,7 @@ class MagnetAccelerate(BaseStrategy):
 
         rolling_data = data.get("rolling_data", {})
         regime = data.get("regime", "")
-        net_gamma = data.get("net_gamma", 0)
+        net_gamma = data.get("net_gamma_normalized", 0)
 
         # Global volume filter — Phase 1 only (Phase 2 breakout is unaffected)
         vol_check = VolumeFilter.evaluate(rolling_data, MIN_CONFIDENCE)

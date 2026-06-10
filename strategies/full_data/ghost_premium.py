@@ -349,7 +349,7 @@ class GhostPremium(BaseStrategy):
             iv_ratio = 1.0
         c4 = normalize(iv_ratio, 0.5, 2.0)
         # 5. GEX regime alignment: use net_gamma
-        net_gamma = data.get("net_gamma", 0.0)
+        net_gamma = data.get("net_gamma_normalized", 0.0)
         c5 = normalize(abs(net_gamma), 0.0, 5000000.0)
         confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))
