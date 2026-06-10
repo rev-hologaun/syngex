@@ -196,7 +196,7 @@ layer2:
       wall_proximity_bonus: 0.10
 
   iv_gex_divergence:
-    enabled: false
+    enabled: true
     tracker:
       max_hold_seconds: 0
     params:
@@ -224,7 +224,7 @@ layer2:
       fallback_stop_pct: 0.006
 
   delta_iv_divergence:
-    enabled: false
+    enabled: true
     tracker:
       max_hold_seconds: 0
     params:
@@ -255,7 +255,7 @@ layer2:
       wall_proximity_bonus: 0.10
 
   vamp_momentum:
-    enabled: false
+    enabled: true
     tracker:
       max_hold_seconds: 0
     params:
@@ -280,7 +280,7 @@ layer2:
       target_risk_mult: 1.5                 # 1.5× risk for target
 
   obi_aggression_flow:
-    enabled: false
+    enabled: true
     tracker:
       max_hold_seconds: 0
     params:
@@ -425,7 +425,7 @@ layer2:
       min_fragility_strength: 0.2
 
   order_book_stacking:
-    enabled: false
+    enabled: true
     tracker:
       max_hold_seconds: 0
     params:
@@ -438,7 +438,7 @@ layer2:
       min_data_points: 10
 
   vortex_compression_breakout:
-    enabled: false
+    enabled: true
     tracker:
       max_hold_seconds: 0
     params:
@@ -556,7 +556,7 @@ layer3:
 # Layer 4: Full-Data (v2) — 4 strategies
 full_data:
   iv_skew_squeeze:
-    enabled: false
+    enabled: true
     tracker:
       max_hold_seconds: 0
     params:
@@ -580,7 +580,7 @@ full_data:
       target_min_pct: 0.005
 
   prob_weighted_magnet:
-    enabled: false
+    enabled: true
     tracker:
       max_hold_seconds: 0
     params:
@@ -600,7 +600,7 @@ full_data:
       target_min_pct: 0.005
 
   prob_distribution_shift:
-    enabled: false
+    enabled: true
     tracker:
       max_hold_seconds: 0
     params:
@@ -619,7 +619,7 @@ full_data:
       target_min_pct: 0.005
 
   extrinsic_intrinsic_flow:
-    enabled: false
+    enabled: true
     tracker:
       max_hold_seconds: 0
     params:
@@ -639,7 +639,7 @@ full_data:
       target_min_pct: 0.005
 
   ghost_premium:
-    enabled: false
+    enabled: true
     tracker:
       max_hold_seconds: 0
     params:
@@ -656,7 +656,7 @@ full_data:
       target_risk_mult: 2.0
 
   skew_dynamics:
-    enabled: false
+    enabled: true
     tracker:
       max_hold_seconds: 0
     params:
@@ -667,7 +667,7 @@ full_data:
       liquidity_oi_threshold: 100
 
   smile_dynamics:
-    enabled: false
+    enabled: true
     tracker:
       max_hold_seconds: 0
     params:
@@ -678,7 +678,7 @@ full_data:
       liquidity_oi_threshold: 100
 
   extrinsic_flow:
-    enabled: false
+    enabled: true
     tracker:
       max_hold_seconds: 0
     params:
@@ -690,7 +690,7 @@ full_data:
       target_risk_mult: 2.0
 
   gamma_breaker:
-    enabled: false
+    enabled: true
     tracker:
       max_hold_seconds: 0
     params:
@@ -702,7 +702,7 @@ full_data:
       target_risk_mult: 2.0
 
   iron_anchor:
-    enabled: false
+    enabled: true
     tracker:
       max_hold_seconds: 0
     params:
@@ -715,7 +715,7 @@ full_data:
       target_risk_mult: 1.5
 
   sentiment_sync:
-    enabled: false
+    enabled: true
     tracker:
       max_hold_seconds: 0
     params:
@@ -727,7 +727,7 @@ full_data:
       target_risk_mult: 2.0
 
   whale_tracker:
-    enabled: false
+    enabled: true
     tracker:
       max_hold_seconds: 0
     params:
