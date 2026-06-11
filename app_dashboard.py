@@ -116,7 +116,7 @@ def render_header(state: dict) -> None:
 
 def render_metrics(state: dict) -> None:
     """Metric cards — Net Gamma is color-coded green / red."""
-    net_gamma = state.get("net_gamma", 0.0)
+    net_gamma = state.get("net_gamma_normalized", 0.0)
     active_strikes = state.get("active_strikes", 0)
     total_messages = state.get("total_messages", 0)
     underlying_price = state.get("underlying_price", 0.0)

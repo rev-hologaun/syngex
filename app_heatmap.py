@@ -218,7 +218,7 @@ def _transform_for_socket(data: dict) -> dict:
     return {
         "symbol": data.get("symbol", SYMBOL),
         "underlying_price": data.get("underlying_price", 0.0),
-        "net_gamma": data.get("net_gamma", 0.0),
+        "net_gamma": data.get("net_gamma_normalized", 0.0),
         "regime": data.get("regime_filter", {}).get("regime", "UNKNOWN"),
         "timestamp": _latest_ts,
         "strategies": strategies,
