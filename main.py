@@ -2552,10 +2552,19 @@ class SyngexOrchestrator:
         # Run evaluation
         signals = self._strategy_engine.process(data)
 
-        if signals:
-            for s in signals:
+        # Apply global min_confidence filter
+        global_cfg = self._strategy_config.get("global", {})
+        min_confidence = global_cfg.get("min_confidence", 0.20)
+        filtered_signals = [s for s in signals if s.confidence >= min_confidence]
+
+        if filtered_signals:
+            dropped = len(signals) - len(filtered_signals)
+            for s in filtered_signals:
                 logger.info("SIGNAL  |  %s  |  %s  |  conf=%.2f  |  %s",
                            s.strategy_id, s.direction.value, s.confidence, s.reason)
+            if dropped:
+                logger.info("FILTERED  |  %d signals dropped below min_confidence %.2f",
+                           dropped, min_confidence)
 
     def _report_profile(self) -> None:
         """Log the current Gamma Profile — the evolving state."""
