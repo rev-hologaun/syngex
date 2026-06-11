@@ -343,7 +343,7 @@ class ObiAggressionFlow(BaseStrategy):
         # 7. GEX regime alignment — does the GEX bias support this signal?
         #    POSITIVE regime (dealers buy dips, sell rallies): LONG aligns, SHORT opposes
         #    NEGATIVE regime (dealers sell dips, buy rallies): SHORT aligns, LONG opposes
-        #    Use gex_calc.get_net_gamma() as ground truth for regime direction
+        #    Uses regime string from orchestrator (already reflects normalized gamma sign)
         c7 = self._gex_regime_alignment(regime, gex_calc, direction)
 
         confidence = (c1 + c2 + c3 + c4 + c5 + c6 + c7) / 7.0

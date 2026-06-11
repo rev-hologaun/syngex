@@ -496,8 +496,8 @@ class ParticipantDivergenceScalper(BaseStrategy):
         # 7. GEX regime alignment (weight 0.15)
         try:
             net_gamma = 0.0
-            if gex_calc and isinstance(gex_calc, dict):
-                net_gamma = gex_calc.get("net_gamma", 0.0)
+            if gex_calc and hasattr(gex_calc, "get_normalized_net_gamma"):
+                net_gamma = gex_calc.get_normalized_net_gamma()
             if direction == "LONG":
                 if net_gamma > 0.01:
                     c7 = 1.0
