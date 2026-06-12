@@ -662,7 +662,7 @@ class GammaSqueeze(BaseStrategy):
         Family A — simple average of 5 normalized components:
 
             1. Wall GEX: abs(wall_gex) in [0, 5_000_000], higher = higher.
-            2. Net gamma: net_gamma in [0, 500_000], higher = higher.
+            2. Net gamma: net_gamma in [0, 2_000], higher = higher.
             3. Risk tightness: risk_pct in [0, 0.005], tighter = higher.
             4. Liquidity vacuum: in [0, 1], higher = higher.
             5. Wall IV strength: in [0, 1], higher = higher.
@@ -675,8 +675,8 @@ class GammaSqueeze(BaseStrategy):
         # 1. Wall GEX: higher = higher, range [0, 5_000_000]
         norm_wall = min(1.0, abs(wall_gex) / 5_000_000)
 
-        # 2. Net gamma: higher = higher, range [0, 500_000]
-        norm_gamma = min(1.0, net_gamma / 500_000) if net_gamma > 0 else 0.0
+        # 2. Net gamma: higher = higher, range [0, 2_000]
+        norm_gamma = min(1.0, net_gamma / 2000.0) if net_gamma > 0 else 0.0
 
         # 3. Risk tightness: tighter = higher, range [0, 0.005]
         risk_pct = risk / price if price > 0 else 0.005

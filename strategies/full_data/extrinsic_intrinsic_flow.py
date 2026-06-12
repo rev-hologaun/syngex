@@ -47,7 +47,7 @@ Confidence factors (v2 — 10 equal-weight components, simple average):
     Structural scores (3):
         8. Extrinsic magnitude: abs(extrinsic_change_pct) / 0.10 (0→1)
         9. Volume spike: vol_ratio / 2.0 (0→1)
-        10. Net gamma: net_gamma / 5_000_000 (0→1)
+        10. Net gamma: min(1.0, abs(net_gamma) / 2_000) (0→1)
 """
 
 from __future__ import annotations
@@ -436,7 +436,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
             7.  Skew score: delta-skew coupling (post-gate)
             8.  Extrinsic magnitude: abs(extrinsic_change_pct) / 0.10 (structural)
             9.  Volume spike: vol_ratio / 2.0 (structural)
-            10. Net gamma: net_gamma / 5_000_000 (structural)
+            10. Net gamma: min(1.0, abs(net_gamma) / 2_000) (structural)
         """
         # 1.  Extrinsic score (pre-gate)
         c1 = extrinsic_score
@@ -457,7 +457,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
         # 9.  Volume spike (structural)
         c9 = normalize(vol_ratio or 1.0, 0.0, 2.0)
         # 10. Net gamma (structural)
-        c10 = normalize(net_gamma, 0.0, 5000000.0)
+        c10 = min(1.0, abs(net_gamma) / 2000.0)
         confidence = (c1 + c2 + c3 + c4 + c5 + c6 + c7 + c8 + c9 + c10) / 10.0
         return min(1.0, max(0.0, confidence))
 

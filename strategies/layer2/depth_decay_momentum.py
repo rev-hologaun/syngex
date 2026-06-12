@@ -331,11 +331,11 @@ class DepthDecayMomentum(BaseStrategy):
         vamp_alignment = 1.0 if ((direction == "LONG" and vamp_mid_dev >= 0) or (direction == "SHORT" and vamp_mid_dev <= 0)) else 0.0
         c4 = vamp_alignment
 
-        # 5. GEX regime alignment: net_gamma from 0→5M, higher = higher
+        # 5. GEX regime alignment: net_gamma from 0→2000, higher = higher
         net_gamma = 0
         if gex_calc and regime:
             net_gamma = gex_calc.get_normalized_net_gamma() if hasattr(gex_calc, "get_normalized_net_gamma") else 0
-        c5 = normalize(abs(net_gamma), 0.0, 5000000.0)
+        c5 = min(1.0, abs(net_gamma) / 2000.0)
 
         confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))

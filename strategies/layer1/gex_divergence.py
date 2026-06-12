@@ -56,7 +56,7 @@ MIN_CONFIDENCE = 0.20            # Minimum confidence to emit signal
 STOP_PCT = 0.005                 # 0.5% stop
 TARGET_RISK_MULT = 1.5           # 1.5× risk for target
 MIN_DATA_POINTS = 15             # Minimum data points for slope calculation
-MIN_TOTAL_GEX = 1000000.0        # 1M — minimum GEX wall strength
+GAMMA_CEILING = 2000.0           # Global max meaningful |net_gamma| for confidence scaling
 
 # v2 Structural-Decay params
 ACCEL_WINDOW_SHORT = 10
@@ -182,17 +182,27 @@ class GEXDivergence(BaseStrategy):
             wall_bonus=wall_bonus,
             regime_intensity=regime_intensity,
         )
-        if confidence < MIN_CONFIDENCE:
-            return []
-
-        # GEX wall strength gate: divergence on thin walls is worthless
+        # Gamma strength bonus (confidence-only, not a gate)
         try:
             summary = gex_calc.get_summary()
             net_gamma_val = summary.get("net_gamma", 0.0)
-            if abs(net_gamma_val) < MIN_TOTAL_GEX:
-                return []  # GEX walls too weak for a reliable signal
+            gamma_strength_bonus = min(1.0, abs(net_gamma_val) / GAMMA_CEILING)
         except Exception:
-            return []  # Can't assess GEX strength — skip
+            gamma_strength_bonus = 0.0
+
+        # Compute confidence (now with gamma strength as 6th component)
+        confidence = self._compute_confidence(
+            price_slope, gamma_slope, divergence_type,
+            price_window, gamma_window, regime, confirmed,
+            regime_misaligned,
+            price_accel=price_accel,
+            gamma_accel=gamma_accel,
+            wall_bonus=wall_bonus,
+            regime_intensity=regime_intensity,
+            gamma_strength_bonus=gamma_strength_bonus,
+        )
+        if confidence < MIN_CONFIDENCE:
+            return []
 
         # Build signal
         if divergence_type == "bearish":
@@ -411,20 +421,19 @@ class GEXDivergence(BaseStrategy):
         wall_bonus: float = 0.0,
         regime_intensity: float = 0.0,
         depth_score: Optional[float] = None,
+        gamma_strength_bonus: float = 0.0,
     ) -> float:
         """
         Compute divergence signal confidence.
 
-        Family A — simple average of 5 normalized components:
+        Family A — simple average of 6 normalized components:
 
             1. Price slope: abs(price_slope) in [0, 0.01], higher = higher.
             2. Gamma slope: abs(gamma_slope) in [0, 0.01], higher = higher.
             3. Balance (slope ratio): min(|price|, |gamma|) / max(|price|, |gamma|) in [0, 1].
             4. Data quality: min(window counts) in [MIN_DATA_POINTS, MIN_DATA_POINTS+100].
             5. Regime alignment: 1.0 if aligned, 0.5 if not.
-
-        Future (Phase 5):
-            depth_score: if provided, used as 5th component instead of regime.
+            6. Gamma strength: min(|net_gamma| / GAMMA_CEILING, 1.0) in [0, 1].
 
         Returns 0.0–1.0.
         """
@@ -457,7 +466,10 @@ class GEXDivergence(BaseStrategy):
         else:
             norm_regime = 0.5
 
-        confidence = (norm_price + norm_gamma + norm_balance + norm_data + norm_regime) / 5.0
+        # 6. Gamma strength: |net_gamma| / GAMMA_CEILING, capped at 1.0
+        norm_gamma_strength = min(1.0, gamma_strength_bonus)
+
+        confidence = (norm_price + norm_gamma + norm_balance + norm_data + norm_regime + norm_gamma_strength) / 6.0
 
         return min(1.0, max(0.0, confidence))
 

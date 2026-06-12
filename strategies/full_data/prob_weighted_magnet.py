@@ -82,8 +82,8 @@ CONSOLIDATION_RATIO = 0.50          # 50%
 # Delta acceleration: delta change must exceed this ratio
 DELTA_ACCEL_RATIO = 1.05            # 5% change in delta
 
-# Min net gamma for positive regime
-MIN_NET_GAMMA = 500000.0
+# Global ceiling for net_gamma normalization
+GAMMA_CEILING = 2000.0
 
 # Stop and target
 STOP_PCT = 0.005                    # 0.5% stop
@@ -179,11 +179,11 @@ class ProbWeightedMagnet(BaseStrategy):
         vol_score = vol_trend_scores.get(vol_trend, 0.5)
 
         # --- Net gamma soft score ---
-        # Soft score: 0 at 0 gamma, 0.5 at MIN_NET_GAMMA, 1.0 at 2×MIN_NET_GAMMA
+        # Soft score: 0 at 0 gamma, 0.5 at GAMMA_CEILING, 1.0 at 2×GAMMA_CEILING
         if net_gamma < 0:
             gamma_score = 0.0
         else:
-            gamma_score = min(1.0, net_gamma / (MIN_NET_GAMMA * 2))
+            gamma_score = min(1.0, net_gamma / (GAMMA_CEILING * 2))
 
         # --- Scan for magnet strikes ---
         signals: List[Signal] = []

@@ -102,7 +102,7 @@ MIDNIGHT_UTC_START = 16.5   # 16:30 UTC
 MIDNIGHT_UTC_END = 19.5     # 19:30 UTC
 
 # Gamma strength normalization for confidence
-GAMMA_STRENGTH_HIGH = 1_000_000.0  # Above this = max gamma strength bonus
+GAMMA_STRENGTH_HIGH = 2000.0  # Above this = max gamma strength bonus
 
 
 class ThetaBurn(BaseStrategy):

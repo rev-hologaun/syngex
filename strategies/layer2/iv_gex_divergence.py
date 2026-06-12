@@ -35,7 +35,7 @@ Exit: At major Gamma Wall or when IV stabilizes
 
 Confidence factors (10 components, simple average):
     1. Price extremeness          (0.0–1.0 normalized) — from price_percentile threshold→1.0
-    2. Net gamma magnitude        (0.0–1.0 normalized) — from abs(net_gamma) 0→5M
+    2. Net gamma magnitude        (0.0–1.0 normalized) — from abs(net_gamma) 0→2K
     3. Wall proximity             (0.0–1.0 normalized) — from wall GEX 0→5M
     4. Volume conviction          (0.0–1.0 normalized) — from total_volume 0→100k
     5. Regime alignment           (0.0–1.0 normalized) — from regime intensity 0.05→0.15
@@ -745,8 +745,8 @@ class IVGEXDivergence(BaseStrategy):
         # 1. Price extremeness: price_percentile from threshold→1.0
         c1 = normalize(price_percentile, PRICE_PERCENTILE_THRESHOLD, 1.0)
 
-        # 2. Net gamma magnitude: abs(net_gamma) from 0→5M
-        c2 = normalize(abs(net_gamma), 0.0, 5000000.0)
+        # 2. Net gamma magnitude: abs(net_gamma) from 0→2K
+        c2 = min(1.0, abs(net_gamma) / 2000.0)
 
         # 3. Wall proximity: wall GEX from 0→5M
         wall_gex = 0.0
@@ -837,8 +837,8 @@ class IVGEXDivergence(BaseStrategy):
     def _gamma_magnitude_confidence(self, net_gamma: float) -> float:
         """Net gamma magnitude: 0.0–0.10."""
         abs_gamma = abs(net_gamma)
-        # Scale: 0 → 0.0, 5M → 0.10
-        return min(0.10, 0.10 * min(1.0, abs_gamma / 5_000_000))
+        # Scale: 0 → 0.0, 2K → 0.10
+        return min(0.10, 0.10 * min(1.0, abs_gamma / 2000))
 
     def _wall_proximity_confidence(
         self,
@@ -853,13 +853,13 @@ class IVGEXDivergence(BaseStrategy):
     def _regime_intensity_confidence(self, net_gamma: float) -> float:
         """Regime intensity: 0.05–0.15 based on gamma magnitude."""
         abs_gamma = abs(net_gamma)
-        # Scale: 0 → 0.05, 5M → 0.15
-        return 0.05 + 0.10 * min(1.0, abs_gamma / 5_000_000)
+        # Scale: 0 → 0.05, 2K → 0.15
+        return 0.05 + 0.10 * min(1.0, abs_gamma / 2000)
 
     def _regime_intensity(self, net_gamma: float) -> float:
         """Regime intensity value for metadata (same logic as above)."""
         abs_gamma = abs(net_gamma)
-        return round(0.05 + 0.10 * min(1.0, abs_gamma / 5_000_000), 3)
+        return round(0.05 + 0.10 * min(1.0, abs_gamma / 2000), 3)
 
     # ------------------------------------------------------------------
     # v2: Signal Builder

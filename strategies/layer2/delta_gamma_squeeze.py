@@ -540,8 +540,8 @@ class DeltaGammaSqueeze(BaseStrategy):
         momentum = 1.0 if ((direction == "LONG" and price_trend == "UP") or (direction == "SHORT" and price_trend == "DOWN")) else 0.5
         c4 = momentum
 
-        # 5. Net gamma: abs(net_gamma) from 0→5M, higher = higher
-        c5 = normalize(abs(net_gamma), 0.0, 5000000.0)
+        # 5. Net gamma: abs(net_gamma) from 0→2K, higher = higher
+        c5 = min(1.0, abs(net_gamma) / 2000.0)
 
         # 6. Liquidity vacuum: 1.0 = vacuum present, 0.0 = thick depth
         c6 = liquidity_vacuum_score

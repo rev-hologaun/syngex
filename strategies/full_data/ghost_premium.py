@@ -332,7 +332,7 @@ class GhostPremium(BaseStrategy):
             2. PDR velocity (abs roc, 0→0.2)
             3. Ask size sigma (0→5)
             4. IV alignment (iv_ratio, 0.5→2.0)
-            5. GEX regime alignment (abs net_gamma, 0→5M)
+            5. GEX regime alignment (abs net_gamma, 0→2000)
         """
         # 1. PDR magnitude: current_pdr from 0.6 to 3.0, higher = higher
         c1 = normalize(current_pdr, 0.6, 3.0)
@@ -350,7 +350,7 @@ class GhostPremium(BaseStrategy):
         c4 = normalize(iv_ratio, 0.5, 2.0)
         # 5. GEX regime alignment: use net_gamma
         net_gamma = data.get("net_gamma_normalized", 0.0)
-        c5 = normalize(abs(net_gamma), 0.0, 5000000.0)
+        c5 = min(1.0, abs(net_gamma) / 2000.0)
         confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))
 

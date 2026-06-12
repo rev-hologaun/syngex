@@ -62,7 +62,7 @@ TARGET_RISK_MULT = 1.5                           # 1.5× risk for target
 STD_THRESHOLD = 0.002                            # Max std of price for compression
 IV_COMPRESSION_STD_THRESHOLD = 0.03              # Max rolling std of IV skew for compression
 DEPTH_SPIKE_THRESHOLD = 1.3                      # Current depth >= 1.3x rolling avg for edge validation
-REGIME_GAMMA_INTENSITY_THRESHOLD = 500000        # |net_gamma| for strong regime
+GAMMA_CEILING = 2000.0                          # Global ceiling for net_gamma normalization
 NEGATIVE_REGIME_STOP_MULT = 1.5                  # Wider stops (fallback, strategy requires POSITIVE)
 POSITIVE_REGIME_TIGHT_STOP_MULT = 0.7            # Tighter stops in strong positive gamma
 
@@ -239,12 +239,9 @@ class VolCompressionRange(BaseStrategy):
             return 1.0
 
         abs_gamma = abs(net_gamma)
-        if abs_gamma >= REGIME_GAMMA_INTENSITY_THRESHOLD:
-            return POSITIVE_REGIME_TIGHT_STOP_MULT
-
-        # Linear interpolation between 1.0 (at 0) and 0.7 (at threshold)
-        ratio = abs_gamma / REGIME_GAMMA_INTENSITY_THRESHOLD
-        return 1.0 - (1.0 - POSITIVE_REGIME_TIGHT_STOP_MULT) * ratio
+        # Conviction-loaded stop mult: stronger gamma → tighter stops, no hard gate
+        conviction = min(1.0, abs_gamma / GAMMA_CEILING)
+        return 1.0 - (1.0 - POSITIVE_REGIME_TIGHT_STOP_MULT) * conviction
 
     def _compute_wall_delta_density(
         self,

@@ -382,7 +382,7 @@ class MagnetAccelerate(BaseStrategy):
         Family A — simple average of 3 normalized components:
 
             1. Proximity: distance_pct in [0, 0.02], closer = higher.
-            2. Gamma strength: net_gamma in [0, 1_000_000], higher = higher.
+            2. Gamma strength: net_gamma in [0, 2_000], higher = higher.
             3. Momentum: in [0, 1], higher = higher.
 
         Returns 0.0–1.0.
@@ -391,7 +391,7 @@ class MagnetAccelerate(BaseStrategy):
         proximity = 0.2 + 0.2 * (1 - distance_pct / 0.02)
 
         # Gamma strength: higher net_gamma = higher confidence (0.2–0.3)
-        gamma_strength = 0.2 + 0.3 * min(1.0, net_gamma / 1000000)
+        gamma_strength = 0.2 + 0.3 * min(1.0, net_gamma / 2000)
 
         # Momentum: 0.1–0.2
         momentum_conf = 0.1 + 0.1 * momentum
@@ -427,7 +427,7 @@ class MagnetAccelerate(BaseStrategy):
         regime_conf = 0.3 if (regime == "NEGATIVE" and net_gamma < 0) else 0.15
 
         # Gamma magnitude: stronger negative gamma = higher confidence (0.1–0.2)
-        gamma_conf = 0.1 + 0.1 * min(1.0, abs(net_gamma) / 500000)
+        gamma_conf = 0.1 + 0.1 * min(1.0, abs(net_gamma) / 2000)
 
         # Normalize each component to [0,1] and average
         norm_dist = (dist_conf - 0.2) / (0.3 - 0.2) if 0.3 != 0.2 else 1.0

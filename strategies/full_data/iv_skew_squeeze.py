@@ -68,7 +68,7 @@ SKEW_EXTREME_NEGATIVE = -0.07      # Puts 7%+ more expensive (panic)
 PRICE_STABLE_THRESHOLD = 0.005     # 0.5% change max
 
 # Min net gamma for positive regime confirmation
-MIN_NET_GAMMA = 500000.0  # 500k — matches other strategies' thresholds
+GAMMA_CEILING = 2000.0  # Global ceiling for net_gamma normalization
 
 # Stop and target
 STOP_PCT = 0.005                   # 0.5% stop
@@ -164,9 +164,8 @@ class IVSkewSqueeze(BaseStrategy):
         if volume_window is None or volume_window.count < MIN_DATA_POINTS:
             return []
 
-        # --- Get net gamma ---
-        if net_gamma < MIN_NET_GAMMA:
-            return []
+        # --- Net gamma conviction (non-blocking) ---
+        _gamma_conviction = min(1.0, max(0.0, net_gamma / GAMMA_CEILING)) if net_gamma > 0 else 0.0
 
         # --- Check for LONG (panic overblown) ---
         long_sig = self._check_long(
@@ -424,10 +423,10 @@ class IVSkewSqueeze(BaseStrategy):
         Net gamma strength confidence (soft, 0.05–0.10).
         Stable environment.
         """
-        if net_gamma < MIN_NET_GAMMA:
-            return 0.05  # Below threshold
-        # Scale: MIN_NET_GAMMA → 0.05, 2× → 0.10
-        scale = min(1.0, net_gamma / (MIN_NET_GAMMA * 2))
+        if net_gamma < 0:
+            return 0.05  # Negative gamma — low confidence
+        # Scale: GAMMA_CEILING → 0.05, 2× → 0.10
+        scale = min(1.0, net_gamma / (GAMMA_CEILING * 2))
         return 0.05 + 0.05 * scale
 
     def _compute_confidence_v2(
@@ -449,7 +448,7 @@ class IVSkewSqueeze(BaseStrategy):
             2. Volume stability (conviction_stability, 0→1)
             3. Delta-skew convergence (inverted abs delta_roc, 0→0.2)
             4. Skew extremity (current_skew, 0→10)
-            5. Net gamma (0→5M)
+            5. Net gamma (0→2000, directional)
         """
         # 1. Skew acceleration: skew_roc from -0.2 to 0.2, use abs for magnitude
         abs_roc = abs(skew_roc) if skew_roc is not None else 0.0
@@ -461,8 +460,8 @@ class IVSkewSqueeze(BaseStrategy):
         c3 = 1.0 - normalize(abs_d, 0.0, 0.2)
         # 4. Skew extremity: current_skew 0→10, higher = more extreme = higher
         c4 = normalize(current_skew, 0.0, 10.0)
-        # 5. Net gamma: net_gamma 0→5M, higher = higher
-        c5 = normalize(net_gamma, 0.0, 5000000.0)
+        # 5. Net gamma: net_gamma 0→2000, higher = higher (directional, no abs)
+        c5 = min(1.0, net_gamma / 2000.0)
         confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))
 

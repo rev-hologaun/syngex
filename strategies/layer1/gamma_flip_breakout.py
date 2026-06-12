@@ -202,8 +202,8 @@ class GammaFlipBreakout(BaseStrategy):
                 # Negative gamma regime: negative skew confirms
                 skew_score = 0.5 + 0.3 * min(1.0, -skew)
 
-        # 3. Net gamma magnitude (regime strength)
-        gamma_score = min(1.0, abs(net_gamma) / 1_000_000)
+        # 3. Net gamma magnitude (regime strength) — normalized to 2K ceiling
+        gamma_score = min(1.0, abs(net_gamma) / 2000.0)
 
         return round(0.4 * density_score + 0.3 * skew_score + 0.3 * gamma_score, 3)
 
@@ -602,9 +602,9 @@ class GammaFlipBreakout(BaseStrategy):
 
             1. Risk/rward: for fade, tighter risk = higher (range [0, 0.005]);
                for breakout, wider risk = higher (range [0.005, 0.02]).
-            2. Gamma strength: abs(net_gamma) in [0, 1_000_000], higher = higher.
+            2. Gamma strength: abs(net_gamma) in [0, 2_000], higher = higher.
             3. Regime alignment: 1.0 if aligned, 0.5 if not.
-            4. Wall proximity: abs(net_gamma) in [0, 500_000], higher = higher.
+            4. Wall proximity: abs(net_gamma) in [0, 2_000], higher = higher.
 
         Future (Phase 5):
             depth_score: if provided, used as 5th component instead of wall proximity.
@@ -635,8 +635,8 @@ class GammaFlipBreakout(BaseStrategy):
         else:
             risk_norm = 0.5  # unknown side — neutral
 
-        # 2. Gamma strength: abs(net_gamma) in [0, 1_000_000]
-        gamma_norm = min(1.0, abs(net_gamma) / 1_000_000)
+        # 2. Gamma strength: abs(net_gamma) in [0, 2_000], higher = higher
+        gamma_norm = min(1.0, abs(net_gamma) / 2000.0)
 
         # 3. Regime alignment: 1.0 if aligned, 0.5 if not
         if regime == "POSITIVE":
@@ -646,8 +646,8 @@ class GammaFlipBreakout(BaseStrategy):
         else:
             regime_norm = 0.5
 
-        # 4. Wall proximity: abs(net_gamma) in [0, 500_000]
-        wall_norm = min(1.0, abs(net_gamma) / 500_000)
+        # 4. Wall proximity: abs(net_gamma) in [0, 2_000]
+        wall_norm = min(1.0, abs(net_gamma) / 2000.0)
 
         confidence = (risk_norm + gamma_norm + regime_norm + wall_norm) / 4.0
 

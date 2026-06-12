@@ -266,13 +266,13 @@ class CallPutFlowAsymmetry(BaseStrategy):
         Compute regime intensity multiplier based on net gamma magnitude.
 
         abs(net_gamma) < 200000 → 0.8  (low gamma = less conviction)
-        abs(net_gamma) > 500000 → 1.3  (high gamma = explosive)
+        abs(net_gamma) > 2000 → 1.3  (high gamma = explosive)
         otherwise → 1.0  (baseline)
         """
         abs_gamma = abs(net_gamma)
         if abs_gamma < 200000:
             return 0.8
-        elif abs_gamma > 500000:
+        elif abs_gamma > 2000:
             return 1.3
         return 1.0
 
@@ -491,7 +491,7 @@ class CallPutFlowAsymmetry(BaseStrategy):
                 "active_call_strikes": active_call_strikes,
                 "active_put_strikes": active_put_strikes,
                 "total_active_strikes": total_active_strikes,
-                "gamma_intensity": round(abs(net_gamma) / 1_000_000, 3),
+                "gamma_intensity": round(abs(net_gamma) / 2_000, 3),
                 "regime_mult": round(regime_mult, 2),
                 "wall_proximity_pct": round(wall_dist_pct, 4),
                 "nearest_wall_type": wall_type if wall_type else None,
@@ -584,7 +584,7 @@ class CallPutFlowAsymmetry(BaseStrategy):
                 "active_call_strikes": active_call_strikes,
                 "active_put_strikes": active_put_strikes,
                 "total_active_strikes": total_active_strikes,
-                "gamma_intensity": round(abs(net_gamma) / 1_000_000, 3),
+                "gamma_intensity": round(abs(net_gamma) / 2_000, 3),
                 "regime_mult": round(regime_mult, 2),
                 "wall_proximity_pct": round(wall_dist_pct, 4),
                 "nearest_wall_type": wall_type if wall_type else None,

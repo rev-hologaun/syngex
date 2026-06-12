@@ -556,8 +556,8 @@ class DeltaVolumeExhaustion(BaseStrategy):
                 iv_conf = iv_window.latest / iv_window.mean - 1.0 if iv_window.mean > 0 else 0.0
         c4 = normalize(iv_conf, -0.05, 0.15)
 
-        # 5. Net gamma: abs(net_gamma) from 0→5M, higher = higher
-        c5 = normalize(abs(net_gamma), 0.0, 5000000.0)
+        # 5. Net gamma: abs(net_gamma) from 0→2K, higher = higher
+        c5 = min(1.0, abs(net_gamma) / 2000.0)
 
         confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
 

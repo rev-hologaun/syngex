@@ -1205,7 +1205,7 @@ class StrikeConcentration(BaseStrategy):
             signal_conf = 0.10  # baseline
 
         # 5. Regime alignment (0.05–0.10)
-        regime_conf = 0.05 + 0.05 * min(1.0, abs(net_gamma) / 5_000_000)
+        regime_conf = 0.05 + 0.05 * min(1.0, abs(net_gamma) / 2000)
 
         # 6. ATR target quality (0.05–0.10) — NEW
         # How well the target scales with market speed
@@ -1320,7 +1320,7 @@ class StrikeConcentration(BaseStrategy):
             delta_conf = 0.10
 
         # 7. Regime alignment (0.05–0.10)
-        regime_conf = 0.05 + 0.05 * min(1.0, abs(net_gamma) / 5_000_000)
+        regime_conf = 0.05 + 0.05 * min(1.0, abs(net_gamma) / 2000)
 
         # 8. ATR target quality (0.05–0.10) — NEW
         atr_window = rolling_data.get(KEY_ATR_5M)

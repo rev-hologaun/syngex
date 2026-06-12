@@ -59,7 +59,7 @@ MIN_CONFIDENCE = 0.20        # Minimum confidence to emit signal
 # v2 Imbalance-Velocity constants
 RATIO_ROC_WINDOW = 5         # Number of ticks back for ROC
 RATIO_ROC_THRESHOLD = 0.10   # Minimum ROC to trigger (10% change)
-REGIME_GAMMA_THRESHOLD = 500000
+REGIME_GAMMA_THRESHOLD = 2000
 VWAP_DEVIATION_MIN_STD = 1.0
 
 

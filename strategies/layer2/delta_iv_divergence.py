@@ -730,14 +730,14 @@ class DeltaIVDivergence(BaseStrategy):
         # 4. Divergence strength: from 0→2.0, higher = higher
         c4 = normalize(divergence_strength, 0.0, 2.0)
 
-        # 5. Net gamma: abs(net_gamma) from 0→500k, higher = higher
+        # 5. Net gamma: abs(net_gamma) from 0→2k, higher = higher
         if greeks_summary:
             net_gamma_from_summary = 0.0
             for strike_data in greeks_summary.values():
                 net_gamma_from_summary += strike_data.get("net_gamma", 0.0)
-            c5 = normalize(abs(net_gamma_from_summary), 0.0, 500000.0)
+            c5 = min(1.0, abs(net_gamma_from_summary) / 2000.0)
         else:
-            c5 = normalize(abs(net_gamma), 0.0, 500000.0)
+            c5 = min(1.0, abs(net_gamma) / 2000.0)
 
         confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))
@@ -780,9 +780,9 @@ class DeltaIVDivergence(BaseStrategy):
         Gamma magnitude scaling: stronger gamma = more conviction.
         """
         gamma_abs = abs(net_gamma)
-        if gamma_abs > 500_000:
+        if gamma_abs > 2_000:
             return 0.10
-        elif gamma_abs > 100_000:
+        elif gamma_abs > 1_000:
             return 0.08
         else:
             return 0.05

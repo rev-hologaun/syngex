@@ -38,7 +38,7 @@ Confidence (10 equal-weight components, unified for LONG and SHORT):
     4. Skew coupling score: from _score_delta_skew_coupling (0–1)
     5. Consecutive score: min(1.0, (consec_long + consec_short) / 10.0)
     6. Volume score: from vol_trend lookup (0–1)
-    7. Gamma score: normalize(net_gamma, 0, 10000000) (0–1)
+    7. Gamma score: min(1.0, net_gamma / 2_000) (0–1, directional)
     8. Directional z-score: long_z_score or short_z_score (0–1)
     9. Momentum acceleration: normalize(momentum_accel, 0.0, 0.30) (0–1)
     10. Capital weight: normalize(capital_weight, 0.0, 0.30) (0–1)
@@ -80,8 +80,8 @@ Z_SCORE_THRESHOLD = 1.5             # 1.5 standard deviations
 # Minimum consecutive same-direction signals
 MIN_CONSECUTIVE_SIGNALS = 2         # 2 consecutive evaluations
 
-# Min net gamma for positive regime
-MIN_NET_GAMMA = 500000.0
+# Global ceiling for net_gamma normalization
+GAMMA_CEILING = 2000.0
 
 # Stop and target
 STOP_PCT = 0.005                    # 0.5% stop
@@ -153,9 +153,8 @@ class ProbDistributionShift(BaseStrategy):
         if not greeks_summary:
             return []
 
-        # --- Net gamma check ---
-        if net_gamma < MIN_NET_GAMMA:
-            return []
+        # --- Gamma conviction (non-blocking): stronger net_gamma = higher confidence ---
+        _gamma_conviction = min(1.0, max(0.0, net_gamma / GAMMA_CEILING)) if net_gamma > 0 else 0.0
 
         # --- Calculate probability momentum ---
         momentum = self._calculate_momentum(
@@ -710,7 +709,7 @@ class ProbDistributionShift(BaseStrategy):
         4. Skew coupling score: from _score_delta_skew_coupling
         5. Consecutive score: min(1.0, (consec_long + consec_short) / 10.0)
         6. Volume score: from vol_trend lookup
-        7. Gamma score: normalize(net_gamma, 0, 10000000)
+        7. Gamma score: min(1.0, net_gamma / 2_000) (0–1, directional)
         8. Directional z-score: long_z_score or short_z_score
         9. Momentum acceleration: normalize(momentum_accel, 0.0, 0.30)
         10. Capital weight: normalize(capital_weight, 0.0, 0.30)
@@ -728,7 +727,7 @@ class ProbDistributionShift(BaseStrategy):
         # 6. Volume score
         c6 = vol_score
         # 7. Gamma score
-        c7 = normalize(net_gamma, 0.0, 10000000.0)
+        c7 = min(1.0, net_gamma / 2000.0)
         # 8. Directional z-score
         c8 = dir_z_score
         # 9. Momentum acceleration (scaled to 0–1)
