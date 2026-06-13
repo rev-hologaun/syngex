@@ -26,6 +26,7 @@ import logging
 import math
 import os
 import signal
+import statistics
 import subprocess
 import sys
 import time
@@ -2283,29 +2284,29 @@ class SyngexOrchestrator:
                     top_n = min(N_TOP_LEVELS, len(bids)) if bids else 0
                     top_n_ask = min(N_TOP_LEVELS, len(asks)) if asks else 0
 
-                    # Compute rolling avg of top N level sizes
+                    # Compute rolling median of top N level sizes (robust to outliers)
                     bid_sizes = [int(b.get("Size", 0)) for b in bids[:top_n]] if bids else []
                     ask_sizes = [int(a.get("Size", 0)) for a in asks[:top_n_ask]] if asks else []
 
-                    bid_avg = sum(bid_sizes) / len(bid_sizes) if bid_sizes else 0
-                    ask_avg = sum(ask_sizes) / len(ask_sizes) if ask_sizes else 0
+                    bid_level_median = statistics.median(bid_sizes) if bid_sizes else 0
+                    ask_level_median = statistics.median(ask_sizes) if ask_sizes else 0
 
-                    # Push level averages to rolling windows
+                    # Push level medians to rolling windows
                     if KEY_DEPTH_BID_LEVEL_AVG_5M in self._rolling_data:
-                        self._rolling_data[KEY_DEPTH_BID_LEVEL_AVG_5M].push(bid_avg, ts)
+                        self._rolling_data[KEY_DEPTH_BID_LEVEL_AVG_5M].push(bid_level_median, ts)
                     if KEY_DEPTH_ASK_LEVEL_AVG_5M in self._rolling_data:
-                        self._rolling_data[KEY_DEPTH_ASK_LEVEL_AVG_5M].push(ask_avg, ts)
+                        self._rolling_data[KEY_DEPTH_ASK_LEVEL_AVG_5M].push(ask_level_median, ts)
 
-                    # Compute SIS = max(level_size) / rolling_avg(level_size)
-                    if bid_avg > 0 and bid_sizes:
+                    # Compute SIS = max(level_size) / rolling_median(level_size)
+                    if bid_level_median > 0 and bid_sizes:
                         max_bid_size = max(bid_sizes)
-                        sis_bid = max_bid_size / bid_avg
+                        sis_bid = max_bid_size / bid_level_median
                     else:
                         sis_bid = 0.0
 
-                    if ask_avg > 0 and ask_sizes:
+                    if ask_level_median > 0 and ask_sizes:
                         max_ask_size = max(ask_sizes)
-                        sis_ask = max_ask_size / ask_avg
+                        sis_ask = max_ask_size / ask_level_median
                     else:
                         sis_ask = 0.0
 

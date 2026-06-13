@@ -56,6 +56,9 @@ def normalize(val: float, vmin: float, vmax: float) -> float:
 
 MIN_CONFIDENCE = 0.20
 
+# Normalized wall strength threshold (matches global 2K ceiling)
+MIN_GAMMA_STRENGTH = 2000
+
 
 class GammaBreaker(BaseStrategy):
     """
@@ -88,13 +91,13 @@ class GammaBreaker(BaseStrategy):
         self._apply_params(data)
         rolling_data = data.get("rolling_data", {})
         params = self._params
-        self._regime_mismatch = False
+
         regime_soft = params.get("regime_soft", True)
         regime = data.get("regime", "")
         gex_calc = data.get("gex_calculator")
 
         # 1. Get gamma breaker data from rolling windows
-        min_gamma_break = params.get("min_gamma_break", 0.0005)
+        min_gamma_break = params.get("min_gamma_break", 0.005)
         min_wall_gex_sigma = params.get("min_wall_gex_sigma", 2.0)
         min_wall_distance_pct = params.get("min_wall_distance_pct", 0.005)
         volume_spike_mult = params.get("volume_spike_mult", 1.5)
@@ -125,31 +128,32 @@ class GammaBreaker(BaseStrategy):
         # Velocity accelerating means current velocity > previous velocity
         velocity_accelerating = current_velocity > prev_velocity
 
+        # Use price-wall proximity for directionality (not purely regime-based)
+        # wall_dist < 0 → price above call wall → LONG breakout
+        # wall_dist > 0 → price below put wall → SHORT breakdown
         long_signal = (
             current_gamma_break > min_gamma_break
             and velocity_accelerating
+            and current_wall_dist < 0
         )
         short_signal = (
             current_gamma_break > min_gamma_break
             and velocity_accelerating
+            and current_wall_dist > 0
         )
 
         if not long_signal and not short_signal:
             return []
 
-        # Use gamma_break direction: positive means breakout detected
-        # Direction determined by regime: POSITIVE → LONG, NEGATIVE → SHORT
-        if regime == "POSITIVE":
+        # Direction already determined by price-wall proximity in long_signal/short_signal
+        # wall_dist < 0 → LONG (price above call wall)
+        # wall_dist > 0 → SHORT (price below put wall)
+        if long_signal:
             direction = "LONG"
-        elif regime == "NEGATIVE":
+        elif short_signal:
             direction = "SHORT"
         else:
-            # Neutral regime — use wall side to determine direction
-            if wall_gex_window and wall_gex_window.count > 0:
-                # Default to LONG if we have data (conservative)
-                direction = "LONG"
-            else:
-                return []
+            return []
 
         # 3. Apply 3 HARD GATES
         gate_a = self._gate_a_wall_strength(
@@ -291,8 +295,7 @@ class GammaBreaker(BaseStrategy):
             return True
         if direction == "SHORT" and regime == "NEGATIVE":
             return True
-        self._regime_mismatch = True
-        return True
+        return False
 
     def _gate_c_volume_confirmation(
         self,
@@ -332,9 +335,7 @@ class GammaBreaker(BaseStrategy):
 
         Returns 0.0–1.0.
         """
-        if getattr(self, '_regime_mismatch', False):
-            # Phase 1: regime-soft mode — 30% penalty for mismatch
-            confidence *= 0.7
+
         # 1. Γ_break magnitude: current_gamma_break from 0→0.01, higher = higher
         c1 = normalize(current_gamma_break, 0.0, 0.01)
         # 2. Wall proximity: current_wall_dist from 0→0.02, closer = higher, invert
@@ -344,6 +345,8 @@ class GammaBreaker(BaseStrategy):
         # 4. Velocity: current_velocity from 0→0.02, higher = higher
         c4 = normalize(current_velocity, 0.0, 0.02)
         # 5. Wall GEX: current_wall_gex from 0→1M, higher = higher
-        c5 = normalize(current_wall_gex, 0.0, 1000000.0)
+        # Dynamic normalization: use 2k as the ceiling (normalized scale)
+        # instead of hardcoded 1M — scales with typical wall GEX magnitudes
+        c5 = normalize(current_wall_gex, 0.0, 2000.0)
         confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))

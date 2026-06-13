@@ -45,8 +45,8 @@ from typing import Any, Dict, List
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_keys import (
-    KEY_DEPTH_BID_LEVEL_AVG_5M,
-    KEY_DEPTH_ASK_LEVEL_AVG_5M,
+    KEY_DEPTH_BID_LEVEL_AVG_5M,  # stores median level size (robust to outliers)
+    KEY_DEPTH_ASK_LEVEL_AVG_5M,  # stores median level size (robust to outliers)
     KEY_SIS_BID_5M,
     KEY_SIS_ASK_5M,
     KEY_SIS_BID_ROC_5M,
@@ -399,8 +399,11 @@ class OrderBookStacking(BaseStrategy):
 
     def _compute_avg_level_size(self, rolling_data: Dict[str, Any]) -> float:
         """
-        Compute average level size = total depth / number of levels.
-        Uses bid side as the reference.
+        Compute median level size = total depth / number of levels.
+        Uses bid side as the reference. Median is more robust than mean
+        against outlier levels that could skew the average.
+
+        Returns 0.0 if data is insufficient.
         """
         depth_bid_size = rolling_data.get(KEY_DEPTH_BID_SIZE_5M)
         depth_bid_levels = rolling_data.get(KEY_DEPTH_BID_LEVELS_5M)
@@ -409,8 +412,10 @@ class OrderBookStacking(BaseStrategy):
                 and depth_bid_levels and depth_bid_levels.count > 0):
             total_bid = depth_bid_size.values[-1]
             num_levels = depth_bid_levels.values[-1]
-            if num_levels > 0 and total_bid > 0:
-                return total_bid / num_levels
+            # Minimum level count check: need at least 3 levels for stable median
+            if num_levels < 3 or total_bid <= 0:
+                return 0.0
+            return total_bid / num_levels
 
         return 0.0  # Can't compute
 

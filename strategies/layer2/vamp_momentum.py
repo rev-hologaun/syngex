@@ -92,6 +92,11 @@ class VampMomentum(BaseStrategy):
         if not bid_levels and not ask_levels:
             return []
 
+        # Minimum level count check for VAMP stability
+        # Need at least 2 levels per side for a meaningful VAMP calculation
+        if len(bid_levels) < 2 or len(ask_levels) < 2:
+            return []
+
         # 2. Compute VAMP
         bid_weighted = sum(l["price"] * l["size"] for l in bid_levels)
         bid_total = sum(l["size"] for l in bid_levels)
@@ -294,9 +299,13 @@ class VampMomentum(BaseStrategy):
         else:
             c2 = 0.10  # minimal baseline for misaligned ROC
 
-        # 3. Participant conviction: avg_participants from 1.0→3.0, higher = higher
-        # (relaxed from min_participants→2×min_participants to 1.0→3.0 for softer scale)
-        c3 = normalize(avg_participants, 1.0, 5.0)
+        # 3. Participant conviction: avg_participants from 1.0→20.0, higher = higher
+        # Confidence penalty for ≤3 participants (increased from ≤2 threshold)
+        # Fewer participants = less conviction, so we apply a penalty
+        if avg_participants <= 3:
+            c3 = normalize(avg_participants, 1.0, 3.0) * 0.5  # halve confidence
+        else:
+            c3 = normalize(avg_participants, 1.0, 20.0)
 
         # 4. Liquidity density: density_ratio from 0→2.0, higher = higher
         density_ratio = 0.0

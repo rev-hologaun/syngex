@@ -60,9 +60,8 @@ DELTA_ACCEL_RATIO = 1.15
 # above this ratio of rolling avg (ensures delta is declining, not negative).
 DELTA_ACCEL_MIN_RATIO = 0.30
 
-# Gamma spike threshold (kept for metadata): current total_gamma must exceed
-# rolling avg by this ratio
-GAMMA_SPIKE_RATIO = 1.20
+# Gamma spike threshold (deprecated — not used in logic, removed)
+# GAMMA_SPIKE_RATIO = 1.20  # REMOVED: dead constant, never referenced in logic
 
 # Volume spike threshold (kept for metadata)
 VOLUME_SPIKE_RATIO = 1.20
@@ -507,9 +506,17 @@ class GammaVolumeConvergence(BaseStrategy):
             spike_window = vol_down
             spike_threshold = 1.20
 
-        if spike_window is not None and spike_window.mean is not None and spike_window.mean > 0:
-            if current_up < spike_window.mean * spike_threshold and current_down < spike_window.mean * spike_threshold:
-                return None
+        # Volume spike check: use per-direction rolling mean to avoid cross-contamination.
+        # LONG: VolumeUp must exceed its own rolling mean * threshold.
+        # SHORT: VolumeDown must exceed its own rolling mean * threshold.
+        if direction == "LONG":
+            if vol_up.mean is not None and vol_up.mean > 0:
+                if current_up < vol_up.mean * spike_threshold:
+                    return None
+        else:
+            if vol_down.mean is not None and vol_down.mean > 0:
+                if current_down < vol_down.mean * spike_threshold:
+                    return None
 
         return aggressor_ratio
 
@@ -542,9 +549,9 @@ class GammaVolumeConvergence(BaseStrategy):
         gamma_5_ago = vals[-5]
         gamma_10_ago = vals[-10]
 
-        if gamma_5_ago == 0 or gamma_10_ago == 0:
+        # Division-by-zero protection: guard against near-zero gamma values
+        if abs(gamma_5_ago) < 1e-12 or abs(gamma_10_ago) < 1e-12:
             return None
-
         roc_current = (gamma_current - gamma_5_ago) / abs(gamma_5_ago)
         roc_prev = (gamma_5_ago - gamma_10_ago) / abs(gamma_10_ago)
 
@@ -668,7 +675,7 @@ class GammaVolumeConvergence(BaseStrategy):
             return None
 
         rolling_avg = window.mean
-        if rolling_avg is None or rolling_avg == 0:
+        if rolling_avg is None or abs(rolling_avg) < 1e-12:
             return None
 
         current = window.latest
@@ -689,7 +696,7 @@ class GammaVolumeConvergence(BaseStrategy):
             return None
 
         rolling_avg = window.mean
-        if rolling_avg is None or rolling_avg == 0:
+        if rolling_avg is None or abs(rolling_avg) < 1e-12:
             return None
 
         current = window.latest

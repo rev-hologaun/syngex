@@ -77,8 +77,10 @@ MIN_PRICE_POINTS = 10
 # Min data points for IV window
 MIN_IV_POINTS = 5
 
-# Min positive net gamma threshold (cumulative — used for sign detection only)
-MIN_POSITIVE_GAMMA = 200000           # $200k net gamma (cumulative, sign detection)
+# Min positive net gamma threshold (cumulative — legacy, not used in v2)
+# Deprecated: strategy uses net_gamma_normalized (per-message avg) throughout.
+# Proportional to 2K normalized ceiling: 10% = 200.
+MIN_POSITIVE_GAMMA = 200              # deprecated — kept for backward compat
 
 # Min positive normalized net gamma threshold (per-message average)
 MIN_POSITIVE_NORMALIZED_GAMMA = 5.0   # normalized gamma threshold for signal trigger
@@ -752,7 +754,7 @@ class IVGEXDivergence(BaseStrategy):
         wall_gex = 0.0
         if wall:
             wall_gex = abs(wall.get("gex", 0))
-        c3 = normalize(wall_gex, 0.0, 5000000.0)
+        c3 = normalize(wall_gex, 0.0, 2000.0)
 
         # 4. Volume conviction: total_volume from 0→100k
         total_volume = 0.0
@@ -787,9 +789,13 @@ class IVGEXDivergence(BaseStrategy):
         c9 = density_score
 
         # 10. Gamma direction score (from normalized net gamma)
+        # NOTE: c2 and c10 both measure gamma magnitude/direction — this is
+        # intentional as c2 captures magnitude while c10 captures sign alignment.
+        # However, to reduce double-counting, c10 weight is halved via reduced denominator.
         c10 = gamma_dir_score
 
-        confidence = (c1 + c2 + c3 + c4 + c5 + c6 + c7 + c8 + c9 + c10) / 10.0
+        # Use 9 components (c10 is partially redundant with c2)
+        confidence = (c1 + c2 + c3 + c4 + c5 + c6 + c7 + c8 + c9 + c10 * 0.5) / 9.5
         return min(1.0, max(0.0, confidence))
 
     def _price_extremeness_confidence(self, price_percentile: float) -> float:

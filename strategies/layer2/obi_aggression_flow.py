@@ -6,8 +6,8 @@ Detects high-conviction entries when passive order book skew and active
 trade execution agree on direction — filters out spoofing and passive
 walls that never get tested.
 
-LONG: OBI > 0.75 (bid-heavy book) AND AF > 0.5 (buy aggression)
-SHORT: OBI < -0.75 (ask-heavy book) AND AF < -0.5 (sell aggression)
+LONG: OBI > 0.65 (bid-heavy book) AND AF > 0.40 (buy aggression)
+SHORT: OBI < -0.65 (ask-heavy book) AND AF < -0.40 (sell aggression)
 
 Logic:
     1. Compute OBI = (bid_size - ask_size) / total_depth from depth_agg
@@ -94,7 +94,7 @@ class ObiAggressionFlow(BaseStrategy):
         _eval_counter += 1
 
         # --- 3. Master trigger: OBI × AF ---
-        obi_threshold = params.get("obi_threshold", 0.60)
+        obi_threshold = params.get("obi_threshold", 0.65)
         af_threshold = params.get("af_threshold", 0.40)
         min_obi_points = params.get("min_obi_data_points", 10)
         min_af_points = params.get("min_af_data_points", 5)
@@ -106,7 +106,7 @@ class ObiAggressionFlow(BaseStrategy):
 
         # Combined score approach: OBI and AF agree on direction
         combined = abs(current_obi) + abs(current_af)
-        combined_threshold = obi_threshold + af_threshold  # 0.60 + 0.40 = 1.0
+        combined_threshold = obi_threshold + af_threshold  # 0.65 + 0.40 = 1.05
 
         direction = None
         if combined > combined_threshold:

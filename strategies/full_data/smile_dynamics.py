@@ -324,7 +324,7 @@ class SmileDynamics(BaseStrategy):
         Returns 0.0–1.0.
         """
         # 1. Ω magnitude: higher = more curvature asymmetry
-        c1 = normalize(current_omega, 0.0, 5.0)
+        c1 = normalize(current_omega, 0.0, 3.0)
         # 2. Ω velocity: use abs — magnitude of change matters
         c2 = normalize(abs(current_omega_roc), 0.0, 0.1)
         # 3. Ω sigma significance: higher = more statistically notable

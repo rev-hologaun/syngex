@@ -357,9 +357,10 @@ class IVBandBreakout(BaseStrategy):
             return None
 
         # 6. Volume trending DOWN (put volume)
+        # FIX: Only accept DOWN for SHORT (was accepting UP too — bug)
         vol_window = rolling_data.get(KEY_VOLUME_DOWN_5M)
         vol_trend = vol_window.trend if vol_window else "UNKNOWN"
-        if vol_trend not in ("UP", "DOWN"):
+        if vol_trend != "DOWN":
             return None
         vol_gate_score = 1.0
 

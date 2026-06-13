@@ -193,7 +193,9 @@ class DeltaIVDivergence(BaseStrategy):
         gamma_score = self._gamma_regime_score(gex_calc, rolling_data, price)
 
         # Minimum acceptable signal from soft gates (any one zero = dead)
-        if skew_score + decouple_score + gamma_score < 0.15:
+        # Lowered from 0.15 to 0.05 — was too restrictive, required at least one
+        # soft gate to be non-zero but filtered too many legitimate signals
+        if skew_score + decouple_score + gamma_score < 0.05:
             return None
 
         # ── v2 soft factors ──
@@ -287,6 +289,15 @@ class DeltaIVDivergence(BaseStrategy):
 
     # ------------------------------------------------------------------
     # v2 Hard Gate: Skew Divergence
+    # ------------------------------------------------------------------
+    # REVIEW: These `_check_*` methods are defined but never called
+    # from evaluate(). The strategy uses the `_*_score` variants instead.
+    # Consider removing or wiring in if needed in future.
+    #   - _check_skew_divergence (line ~294)
+    #   - _check_gamma_regime (line ~456)
+    #   - _divergence_confidence (line ~693)
+    #   - _volume_conviction_confidence (line ~697)
+    #   - _regime_confidence (line ~724)
     # ------------------------------------------------------------------
 
     def _check_skew_divergence(
@@ -417,10 +428,12 @@ class DeltaIVDivergence(BaseStrategy):
         if mean_density <= 0:
             return 0.0
 
-        # ratio = current / mean. Score = 1.0 when ratio = 0 (no gamma), 0.0 when ratio >= 1.0
+        # ratio = current / mean. Score = 1.0 when ratio >= 1.0 (stable/high gamma = bullish regime),
+        # 0.0 when ratio = 0 (no gamma = unstable/bearish regime).
+        # Fixed: was inverted — positive score should mean bullish regime.
         ratio = current / mean_density
-        score = max(0.0, 1.0 - ratio)
-        return round(min(1.0, max(0.0, score)), 3)
+        score = min(1.0, ratio)
+        return round(max(0.0, min(1.0, score)), 3)
 
     def _get_skew_divergence_value(
         self, rolling_data: Dict[str, Any], direction: str,
@@ -446,45 +459,6 @@ class DeltaIVDivergence(BaseStrategy):
         atm_roc = (atm_current - atm_5_ago) / max(abs(atm_5_ago), 0.001)
 
         return abs(otm_roc - atm_roc) / max(abs(atm_roc), 0.001)
-
-    # ------------------------------------------------------------------
-    # v2 Hard Gate: Decoupling Coefficient
-    # ------------------------------------------------------------------
-
-    def _check_decoupling(
-        self, rolling_data: Dict[str, Any],
-        history_window: int, threshold: float,
-    ) -> bool:
-        """
-        Check if Delta-IV correlation has collapsed.
-
-        Logic:
-        - Read KEY_DELTA_IV_CORR_5M rolling window
-        - Compute rolling mean correlation over last `history_window` points
-        - Hard gate: current correlation < rolling mean × threshold
-          (correlation collapsed by ≥50% when threshold=0.50)
-
-        Returns True if decoupling passes the threshold.
-        """
-        corr_window = rolling_data.get(KEY_DELTA_IV_CORR_5M)
-        if corr_window is None or corr_window.count < 2:
-            return False
-
-        corr_vals = corr_window.values
-        current_corr = corr_vals[-1]
-
-        if corr_window.count < 2:
-            return False
-
-        # Rolling mean over last min(history_window, count) points
-        history = min(history_window, len(corr_vals) - 1)
-        if history < 1:
-            return False
-        mean_corr = statistics.mean(corr_vals[-(history + 1):-1]) if history > 0 else current_corr
-
-        # Hard gate: current correlation < rolling mean × threshold
-        # Use abs() to handle negative mean_corr (Fix 1: negative mean bug)
-        return abs(current_corr) < abs(mean_corr) * threshold
 
     def _get_decoupling_coefficient(self, rolling_data: Dict[str, Any]) -> float:
         """Get the raw decoupling coefficient for metadata."""
@@ -730,14 +704,16 @@ class DeltaIVDivergence(BaseStrategy):
         # 4. Divergence strength: from 0→2.0, higher = higher
         c4 = normalize(divergence_strength, 0.0, 2.0)
 
-        # 5. Net gamma: abs(net_gamma) from 0→2k, higher = higher
+        # 5. Net gamma: abs(net_gamma) from 0→1600, higher = higher
+        # Lowered divisor from 2000.0 to ~1600.0 for proper normalization
+        # against bounded gamma scale (typical range ~0–1600)
         if greeks_summary:
             net_gamma_from_summary = 0.0
             for strike_data in greeks_summary.values():
                 net_gamma_from_summary += strike_data.get("net_gamma", 0.0)
-            c5 = min(1.0, abs(net_gamma_from_summary) / 2000.0)
+            c5 = min(1.0, abs(net_gamma_from_summary) / 1600.0)
         else:
-            c5 = min(1.0, abs(net_gamma) / 2000.0)
+            c5 = min(1.0, abs(net_gamma) / 1600.0)
 
         confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))

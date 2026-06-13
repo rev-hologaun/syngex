@@ -8,10 +8,11 @@ Bullish Sync: ΔSkew falling (complacency) AND VSI positive (buying) → LONG
 Bearish Sync: ΔSkew rising (fear) AND VSI negative (selling) → SHORT
 Filters out false signals where options positioning doesn't translate to stock flow.
 
-Trigger: |ΔSkew| > 2σ AND |VSI| > 2σ AND signs agree
+Trigger: |ΔSkew| > 2σ OR |VSI| > 1.5σ (OR logic — either indicator can trigger)
 
 Hard gates (ALL must pass):
-    Gate A: Magnitude gate — both skew change and VSI > 2σ over rolling window
+    Gate A: Magnitude gate — OR logic: ΔSkew > 2σ OR VSI magnitude > 1.5σ
+            (relaxed from dual-2σ to prevent filtering out all but black swan events)
     Gate B: Volume anchor — total volume above rolling average
     Gate C: Price confirmation — price moving in direction of sync
 
@@ -68,8 +69,9 @@ class SentimentSync(BaseStrategy):
     Γ_sync = +1: Both positive → fear + selling (bearish confirmation)
     Γ_sync = -1: Both negative → complacency + buying (bullish confirmation)
 
-    LONG: ΔSkew < 0 (falling/complacency) AND VSI > 0 (buying) AND regime == "POSITIVE"
-    SHORT: ΔSkew > 0 (rising/fear) AND VSI < 0 (selling) AND regime == "NEGATIVE"
+    LONG: ΔSkew < 0 (falling/complacency) AND VSI > 0 (buying)
+    SHORT: ΔSkew > 0 (rising/fear) AND VSI < 0 (selling)
+    Note: Gate A now uses OR logic — either ΔSkew > 2σ OR VSI > 1.5σ triggers the gate.
     """
 
     strategy_id = "sentiment_sync"
@@ -243,16 +245,30 @@ class SentimentSync(BaseStrategy):
         min_sigma: float,
     ) -> bool:
         """
-        Gate A: Magnitude gate.
+        Gate A: Magnitude gate — OR logic.
 
-        Both ΔSkew and VSI must exceed the σ threshold, indicating
-        that both options sentiment and equity flow are moving significantly
-        — not just noise in one dimension.
+        Changed from dual-2σ requirement to OR logic where either indicator
+        can trigger independently:
+          - ΔSkew z-score > 2σ  OR  VSI magnitude > 1.5σ
+          - Fallback: both at 1.5σ (if neither hits 2σ)
+
+        The previous dual-extreme 2σ requirement filtered out all but black
+        swan events. This OR logic allows more realistic market conditions.
         """
         if sigma <= 0:
             return False
+
         zscore = abs(skew_change) / sigma
-        return zscore >= min_sigma
+        vsi_threshold = self._get_param("vsi_mag_threshold", 1.5)
+
+        # Primary OR: either indicator exceeds its threshold independently
+        if zscore >= min_sigma:
+            return True
+        if abs(vsi_mag) >= vsi_threshold:
+            return True
+
+        # Fallback: both must meet lower threshold
+        return zscore >= vsi_threshold and abs(vsi_mag) >= vsi_threshold
 
     def _gate_b_volume(
         self,

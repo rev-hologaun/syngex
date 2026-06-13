@@ -51,10 +51,10 @@ logger = logging.getLogger("Syngex.Strategies.GammaSqueeze")
 PIN_MAX_RANGE_PCT = 0.003     # 0.3% — max rolling range for pin detection
 WALL_PROXIMITY_PCT = 0.003    # 0.3% — price must be near wall for breakout
 VOLUME_SURGE_MULT = 1.5       # 1.5× average volume = confirmation
-MIN_WALL_GEX = 500000         # Minimum |GEX| for wall consideration
+MIN_WALL_GEX = 100            # Minimum |GEX| for wall consideration (normalized scale)
 MIN_CONFIDENCE = 0.20         # was 0.25
 TARGET_RISK_MULT = 2.0        # 2× risk for squeeze targets
-MIN_MASSIVE_WALL_GEX = 5_000_000  # Fallback threshold for POSITIVE regime filter
+MIN_MASSIVE_WALL_GEX = 500    # Fallback threshold for POSITIVE regime filter (normalized scale)
 
 
 class GammaSqueeze(BaseStrategy):
@@ -488,7 +488,7 @@ class GammaSqueeze(BaseStrategy):
         Score wall strength for squeeze potential (0.0-1.0).
 
         IV component: (wall_iv - atm_iv) / atm_iv → score 0.5-0.8
-        GEX component: abs(gex) / 5M → score 0.5-1.0
+        GEX component: abs(gex) / 50K → score 0.5-1.0
         Classification bonus: 1.0 if "wall", 0.0 if "magnet"
 
         Returns: 0.4*iv + 0.4*gex + 0.2*classification
@@ -506,7 +506,7 @@ class GammaSqueeze(BaseStrategy):
             iv_score = 0.5 + 0.3 * min(1.0, max(-1.0, iv_premium))
 
         # GEX component: higher GEX = bigger potential
-        gex_score = 0.5 + 0.5 * min(1.0, abs(wall.get("gex", 0)) / 5_000_000)
+        gex_score = 0.5 + 0.5 * min(1.0, abs(wall.get("gex", 0)) / 2_000)
 
         # Classification bonus: only trade "wall" type
         classification_bonus = 1.0 if wall.get("classification") == "wall" else 0.0
@@ -661,7 +661,7 @@ class GammaSqueeze(BaseStrategy):
 
         Family A — simple average of 5 normalized components:
 
-            1. Wall GEX: abs(wall_gex) in [0, 5_000_000], higher = higher.
+            1. Wall GEX: abs(wall_gex) in [0, 2_000], higher = higher.
             2. Net gamma: net_gamma in [0, 2_000], higher = higher.
             3. Risk tightness: risk_pct in [0, 0.005], tighter = higher.
             4. Liquidity vacuum: in [0, 1], higher = higher.
@@ -672,8 +672,8 @@ class GammaSqueeze(BaseStrategy):
 
         Returns 0.0–1.0.
         """
-        # 1. Wall GEX: higher = higher, range [0, 5_000_000]
-        norm_wall = min(1.0, abs(wall_gex) / 5_000_000)
+        # 1. Wall GEX: higher = higher, range [0, 2_000]
+        norm_wall = min(1.0, abs(wall_gex) / 2_000)
 
         # 2. Net gamma: higher = higher, range [0, 2_000]
         norm_gamma = min(1.0, net_gamma / 2000.0) if net_gamma > 0 else 0.0

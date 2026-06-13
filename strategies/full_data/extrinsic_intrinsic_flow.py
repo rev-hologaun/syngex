@@ -84,7 +84,7 @@ def normalize(val: float, vmin: float, vmax: float) -> float:
 STOP_PCT = 0.005                        # 0.5% stop
 
 # Min confidence — raised from 0.25 to 0.35 (v2 Conviction-Master)
-MIN_CONFIDENCE = 0.20
+MIN_CONFIDENCE = 0.35
 
 # Min data points — need more data for extrinsic tracking
 MIN_DATA_POINTS = 5
@@ -664,7 +664,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
             extrinsic_accel = roc_window.latest
 
         # 1. Extrinsic acceleration score
-        accel_score = self._score_extrinsic_acceleration(rolling_data, "expansion")
+        accel_score = self._score_extrinsic_acceleration(rolling_data, "short")
 
         # 2. Aggressor volume score
         aggressor_score = self._score_aggressor_volume(data, "SHORT")
@@ -742,7 +742,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
                 f"trend={vol_trend}, gamma={net_gamma:.0f}"
             ),
             metadata={
-                "signal_type": "expansion",
+                "signal_type": "short",
                 "extrinsic_change_pct": round(extrinsic_change_pct, 4),
                 "extrinsic_roc": round(extrinsic_accel, 4),
                 "extrinsic_accel": round(extrinsic_accel, 4),
@@ -954,129 +954,6 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
                 ),
             },
         )
-
-    # ------------------------------------------------------------------
-    # Legacy confidence methods (kept for backwards compat)
-    # ------------------------------------------------------------------
-
-    def _compute_long_confidence(
-        self,
-        extrinsic_change_pct: float,
-        vol_ratio: float,
-        vol_trend: str,
-        net_gamma: float,
-        price: float,
-    ) -> float:
-        """Legacy LONG confidence — kept for backwards compat."""
-        # 1. Extrinsic expansion magnitude (0.20–0.30)
-        exp_scaled = min(1.0, (extrinsic_change_pct - EXTRINSIC_EXPANSION_THRESHOLD)
-                         / (EXTRINSIC_EXPANSION_THRESHOLD * 3))
-        exp_component = 0.20 + 0.10 * exp_scaled
-
-        # 2. Volume spike magnitude (0.20–0.25)
-        vol_scaled = min(1.0, (vol_ratio - VOLUME_SPIKE_RATIO)
-                         / (VOLUME_SPIKE_RATIO))
-        vol_component = 0.20 + 0.05 * vol_scaled
-
-        # 3. Volume direction alignment (0.10–0.15)
-        if vol_trend == "UP":
-            vol_dir_component = 0.15
-        else:
-            vol_dir_component = 0.05
-
-        # 4. Net gamma strength (0.15–0.20)
-        gamma_scaled = min(1.0, net_gamma / (MIN_NET_GAMMA * 4))
-        gamma_component = 0.15 + 0.05 * gamma_scaled
-
-        # Normalize each component to [0,1] and average
-        norm_exp = (exp_component - 0.20) / (0.30 - 0.20) if 0.30 != 0.20 else 1.0
-        norm_vol = (vol_component - 0.20) / (0.25 - 0.20) if 0.25 != 0.20 else 1.0
-        norm_vol_dir = (vol_dir_component - 0.05) / (0.15 - 0.05) if 0.15 != 0.05 else 1.0
-        norm_gamma = (gamma_component - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
-        confidence = (norm_exp + norm_vol + norm_vol_dir + norm_gamma) / 4.0
-
-        return max(0.0, confidence)
-
-    def _compute_short_confidence(
-        self,
-        extrinsic_change_pct: float,
-        vol_ratio: float,
-        vol_trend: str,
-        net_gamma: float,
-        price: float,
-    ) -> float:
-        """Legacy SHORT confidence — kept for backwards compat."""
-        # 1. Extrinsic expansion magnitude (0.20–0.30)
-        exp_scaled = min(1.0, (extrinsic_change_pct - EXTRINSIC_EXPANSION_THRESHOLD)
-                         / (EXTRINSIC_EXPANSION_THRESHOLD * 3))
-        exp_component = 0.20 + 0.10 * exp_scaled
-
-        # 2. Volume spike magnitude (0.20–0.25)
-        vol_scaled = min(1.0, (vol_ratio - VOLUME_SPIKE_RATIO)
-                         / (VOLUME_SPIKE_RATIO))
-        vol_component = 0.20 + 0.05 * vol_scaled
-
-        # 3. Volume direction alignment (0.10–0.15)
-        if vol_trend == "DOWN":
-            vol_dir_component = 0.15
-        else:
-            vol_dir_component = 0.05
-
-        # 4. Net gamma strength (0.15–0.20)
-        gamma_scaled = min(1.0, net_gamma / (MIN_NET_GAMMA * 4))
-        gamma_component = 0.15 + 0.05 * gamma_scaled
-
-        # Normalize each component to [0,1] and average
-        norm_exp = (exp_component - 0.20) / (0.30 - 0.20) if 0.30 != 0.20 else 1.0
-        norm_vol = (vol_component - 0.20) / (0.25 - 0.20) if 0.25 != 0.20 else 1.0
-        norm_vol_dir = (vol_dir_component - 0.05) / (0.15 - 0.05) if 0.15 != 0.05 else 1.0
-        norm_gamma = (gamma_component - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
-        confidence = (norm_exp + norm_vol + norm_vol_dir + norm_gamma) / 4.0
-
-        return max(0.0, confidence)
-
-    def _compute_fade_confidence(
-        self,
-        extrinsic_change_pct: float,
-        vol_ratio: float,
-        vol_trend: str,
-        net_gamma: float,
-        price: float,
-    ) -> float:
-        """Legacy FADE confidence — kept for backwards compat."""
-        # 1. Extrinsic collapse magnitude (0.25–0.35)
-        collapse_magnitude = abs(extrinsic_change_pct)
-        collapse_scaled = min(1.0, (collapse_magnitude - EXTRINSIC_COLLAPSE_THRESHOLD)
-                              / (EXTRINSIC_COLLAPSE_THRESHOLD * 1.5))
-        collapse_component = 0.25 + 0.10 * collapse_scaled
-
-        # 2. Volume decline (0.15–0.20)
-        if vol_ratio is not None and vol_ratio > 0:
-            vol_decline = 1.0 - min(1.0, vol_ratio)
-            vol_decline_component = 0.15 + 0.05 * vol_decline
-        else:
-            vol_decline_component = 0.15
-
-        # 3. Volume trend alignment (0.10–0.15)
-        if vol_trend == "DOWN":
-            vol_dir_component = 0.15
-        elif vol_trend == "FLAT":
-            vol_dir_component = 0.12
-        else:
-            vol_dir_component = 0.05
-
-        # 4. Net gamma strength (0.15–0.20)
-        gamma_scaled = min(1.0, net_gamma / (MIN_NET_GAMMA * 4))
-        gamma_component = 0.15 + 0.05 * gamma_scaled
-
-        # Normalize each component to [0,1] and average
-        norm_collapse = (collapse_component - 0.25) / (0.35 - 0.25) if 0.35 != 0.25 else 1.0
-        norm_vol_decline = (vol_decline_component - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
-        norm_vol_dir = (vol_dir_component - 0.05) / (0.15 - 0.05) if 0.15 != 0.05 else 1.0
-        norm_gamma = (gamma_component - 0.15) / (0.20 - 0.15) if 0.20 != 0.15 else 1.0
-        confidence = (norm_collapse + norm_vol_decline + norm_vol_dir + norm_gamma) / 4.0
-
-        return max(0.0, confidence)
 
     # ------------------------------------------------------------------
     # Helpers

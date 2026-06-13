@@ -85,6 +85,10 @@ class GhostPremium(BaseStrategy):
     The strategy always produces LONG signals — overpriced calls mean
     speculative demand is pushing prices up.
 
+    NOTE: LONG-only limitation — this strategy only evaluates call options.
+    A put-side equivalent (SHORT signals from overpriced puts) would require
+    a separate implementation with inverted logic.
+
     Intensity classification (for metadata):
         Yellow (caution): PDR ≈ 0.60–1.00
         Orange (warning): PDR ≈ 1.00–1.50
@@ -190,7 +194,10 @@ class GhostPremium(BaseStrategy):
         # Intensity classification
         intensity = self._classify_intensity(current_pdr)
 
-        return [Signal(
+        # Also evaluate put-side for SHORT signals
+        short_signals = self._evaluate_short(data)
+
+        signals = [Signal(
             direction=Direction.LONG,
             confidence=round(confidence, 3),
             entry=round(entry, 2),
@@ -224,7 +231,7 @@ class GhostPremium(BaseStrategy):
                 "risk_reward_ratio": round(target_risk_mult, 2),
                 "volume_latest": round(current_volume, 2),
             },
-        )]
+        )] + short_signals
 
     # ------------------------------------------------------------------
     # Hard Gates
@@ -237,11 +244,14 @@ class GhostPremium(BaseStrategy):
         min_sigma: float,
     ) -> tuple[bool, float]:
         """
-        Gate A: ask_size > 2σ above 5-min rolling avg ask_size.
+        Gate A: PDR > mean + sigma_mult * std (PDR elevation check).
 
-        Uses the PDR window's std as a proxy for ask_size volatility.
-        The current PDR must be significantly above the rolling average,
-        indicating real tradeable event, not stale quote.
+        NOTE: Despite the method name, this gate checks whether the current
+        PDR is significantly elevated above its rolling mean (mean +
+        sigma_mult * std), confirming the premium is a real tradeable event
+        rather than a stale quote. The PDR window's std serves as a proxy
+        for ask_size volatility since ask_size data comes from the option
+        update stream.
 
         Returns (passes, sigma_value).
         """
@@ -353,6 +363,134 @@ class GhostPremium(BaseStrategy):
         c5 = min(1.0, abs(net_gamma) / 2000.0)
         confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))
+
+    # ------------------------------------------------------------------
+    # SHORT: Put-side Ghost Premium (PDR on puts)
+    # ------------------------------------------------------------------
+
+    def _evaluate_short(self, data: Dict[str, Any]) -> List[Signal]:
+        """
+        Evaluate put-side Ghost Premium signals (SHORT direction).
+
+        Detects when put options are significantly overpriced vs theoretical.
+        Overpriced puts signal bearish speculative demand — SHORT signal.
+
+        Same gates as LONG but inverted: PDR < -0.60 on puts.
+        """
+        underlying_price = data.get("underlying_price", 0)
+        if underlying_price <= 0:
+            return []
+
+        self._apply_params(data)
+        rolling_data = data.get("rolling_data", {})
+        params = self._params
+        gex_calc = data.get("gex_calculator")
+        regime = data.get("regime", "")
+
+        # --- Read config values ---
+        min_pdr = params.get("min_pdr", PDR_TRIGGER)
+        min_pdr_data_points = params.get("min_pdr_data_points", MIN_PDR_DATA_POINTS)
+        ask_size_sigma_mult = params.get("ask_size_sigma_mult", ASK_SIZE_SIGMA_MULT)
+        min_ask_size_sigma = params.get("min_ask_size_sigma", MIN_ASK_SIZE_SIGMA)
+        max_net_change_pct = params.get("max_net_change_pct", MAX_NET_CHANGE_PCT)
+        stop_pct = params.get("stop_pct", STOP_PCT)
+        target_risk_mult = params.get("target_risk_mult", TARGET_RISK_MULT)
+        min_confidence = MIN_CONFIDENCE
+
+        # --- Get PDR rolling window ---
+        pdr_window = rolling_data.get(KEY_PDR_5M)
+        if pdr_window is None or pdr_window.count < min_pdr_data_points:
+            return []
+
+        current_pdr = pdr_window.latest
+        if current_pdr is None:
+            return []
+
+        # Only evaluate put options (PDR < -0.60 means puts are overpriced)
+        if current_pdr > -min_pdr:
+            return []
+
+        # --- Get PDR ROC window ---
+        pdr_roc_window = rolling_data.get(KEY_PDR_ROC_5M)
+        current_pdr_roc = pdr_roc_window.latest if pdr_roc_window else None
+
+        # --- Gate C: volume > 0 ---
+        volume_window = rolling_data.get(KEY_VOLUME_5M)
+        current_volume = volume_window.latest if volume_window else 0
+        if current_volume is None or current_volume <= 0:
+            return []
+
+        # --- Gate A: PDR elevation check ---
+        gate_a_pass, ask_size_sigma = self._gate_a_ask_size(
+            pdr_window, ask_size_sigma_mult, min_ask_size_sigma
+        )
+        if not gate_a_pass:
+            logger.debug(
+                "Ghost Premium SHORT: Gate A failed — PDR not sufficiently depressed "
+                "(sigma=%.4f, mult=%.1f)", ask_size_sigma, ask_size_sigma_mult
+            )
+            return []
+
+        # --- Gate B: stability check ---
+        gate_b_pass = self._gate_b_stability(data, max_net_change_pct, abs(current_pdr), pdr_roc_window)
+        if not gate_b_pass:
+            logger.debug("Ghost Premium SHORT: Gate B failed — underlying not stable")
+            return []
+
+        # --- All hard gates passed — compute confidence ---
+        confidence = self._compute_confidence(
+            abs(current_pdr), current_pdr_roc, pdr_window,
+            ask_size_sigma, data, params, regime, gex_calc,
+        )
+
+        confidence = max(min_confidence, confidence)
+        if confidence < min_confidence:
+            return []
+
+        # --- Build signal ---
+        entry = underlying_price
+        stop_distance = entry * stop_pct
+        stop = entry + stop_distance
+        target = entry - (stop_distance * target_risk_mult)
+
+        # Intensity classification
+        intensity = self._classify_intensity(abs(current_pdr))
+
+        return [Signal(
+            direction=Direction.SHORT,
+            confidence=round(confidence, 3),
+            entry=round(entry, 2),
+            stop=round(stop, 2),
+            target=round(target, 2),
+            strategy_id=self.strategy_id,
+            reason=(
+                f"Ghost Premium SHORT: PDR={current_pdr:.3f} "
+                f"({abs(current_pdr)*100:.1f}% overpriced puts), "
+                f"PDR-ROC={current_pdr_roc:+.4f if current_pdr_roc is not None else 'N/A'}, "
+                f"intensity={intensity}"
+            ),
+            metadata={
+                "pdr": round(current_pdr, 4),
+                "pdr_pct": round(abs(current_pdr) * 100, 2),
+                "pdr_roc": round(current_pdr_roc, 6) if current_pdr_roc is not None else None,
+                "pdr_window_count": pdr_window.count,
+                "pdr_window_mean": round(pdr_window.mean or 0, 4),
+                "pdr_window_std": round(pdr_window.std or 0, 4),
+                "ask_size_sigma": round(ask_size_sigma, 4),
+                "intensity": intensity,
+                "gates": {
+                    "A_ask_size": True,
+                    "B_stability": True,
+                    "C_volume": True,
+                },
+                "regime": regime,
+                "stop_pct": stop_pct,
+                "target_risk_mult": target_risk_mult,
+                "target_pct": round((entry - target) / entry, 4),
+                "risk_reward_ratio": round(target_risk_mult, 2),
+                "volume_latest": round(current_volume, 2),
+            },
+        )]
 
     # ------------------------------------------------------------------
     # Intensity Classification

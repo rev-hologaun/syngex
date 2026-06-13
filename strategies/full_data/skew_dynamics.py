@@ -305,8 +305,8 @@ class SkewDynamics(BaseStrategy):
 
         Returns 0.0–1.0.
         """
-        # 1. Ψ magnitude: current_psi from 0→5, higher = higher
-        c1 = normalize(current_psi, 0.0, 5.0)
+        # 1. Ψ magnitude: current_psi from 0→1, higher = higher
+        c1 = normalize(current_psi, 0.0, 1.0)
         # 2. Ψ velocity: current_psi_roc from -0.1 to 0.1, use abs
         c2 = normalize(abs(current_psi_roc), 0.0, 0.1)
         # 3. Ψ sigma significance: current_psi_sigma from 0→5, higher = higher

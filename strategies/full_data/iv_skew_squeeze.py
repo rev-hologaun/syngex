@@ -458,8 +458,8 @@ class IVSkewSqueeze(BaseStrategy):
         # 3. Delta-skew convergence: delta_roc from -0.2 to 0.2, invert for convergence
         abs_d = abs(delta_roc) if delta_roc is not None else 0.0
         c3 = 1.0 - normalize(abs_d, 0.0, 0.2)
-        # 4. Skew extremity: current_skew 0→10, higher = more extreme = higher
-        c4 = normalize(current_skew, 0.0, 10.0)
+        # 4. Skew extremity: current_skew 0→1, higher = more extreme = higher
+        c4 = normalize(current_skew, 0.0, 1.0)
         # 5. Net gamma: net_gamma 0→2000, higher = higher (directional, no abs)
         c5 = min(1.0, net_gamma / 2000.0)
         confidence = (c1 + c2 + c3 + c4 + c5) / 5.0

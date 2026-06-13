@@ -29,7 +29,7 @@ Entry (SHORT):
     - Capital-weighted breadth > threshold (concentration in high-OI strikes)
     - Delta-skew coupling negative (skew normalizing from positive toward zero)
     - Volume not rising (FLAT or DOWN)
-    - Net gamma positive
+    - Net gamma: abs(net_gamma) used so SHORT works in negative regime (short squeezes)
 
 Confidence (10 equal-weight components, unified for LONG and SHORT):
     1. Z-score magnitude: normalize(abs_z_score, 0.0, 4.0)
@@ -113,9 +113,11 @@ class ProbDistributionShift(BaseStrategy):
     options chain.
 
     v2 additions:
-    - Momentum ROC acceleration as hard gate
-    - Capital-weighted breadth (OI-weighted)
-    - Delta-skew coupling check
+    - Momentum ROC acceleration (soft score, not hard gate)
+    - Capital-weighted breadth (OI-weighted, soft score)
+    - Delta-skew coupling check (soft score)
+    - Triple-gate softened: z-score + breadth + ROC acceleration now use
+      continuous scoring instead of simultaneous hard gates
     - IV-scaled targets
     - 10-component equal-weight confidence scoring
 
@@ -153,8 +155,10 @@ class ProbDistributionShift(BaseStrategy):
         if not greeks_summary:
             return []
 
-        # --- Gamma conviction (non-blocking): stronger net_gamma = higher confidence ---
-        _gamma_conviction = min(1.0, max(0.0, net_gamma / GAMMA_CEILING)) if net_gamma > 0 else 0.0
+        # --- Gamma conviction (non-blocking): stronger |net_gamma| = higher confidence ---
+        # Allow SHORT with negative net_gamma (short squeezes in negative regime)
+        # Changed from net_gamma > 0 to abs(net_gamma) so both regimes contribute
+        _gamma_conviction = min(1.0, max(0.0, abs(net_gamma) / GAMMA_CEILING))
 
         # --- Calculate probability momentum ---
         momentum = self._calculate_momentum(
@@ -709,7 +713,7 @@ class ProbDistributionShift(BaseStrategy):
         4. Skew coupling score: from _score_delta_skew_coupling
         5. Consecutive score: min(1.0, (consec_long + consec_short) / 10.0)
         6. Volume score: from vol_trend lookup
-        7. Gamma score: min(1.0, net_gamma / 2_000) (0–1, directional)
+        7. Gamma score: min(1.0, abs(net_gamma) / 2_000) (0–1, both directions)
         8. Directional z-score: long_z_score or short_z_score
         9. Momentum acceleration: normalize(momentum_accel, 0.0, 0.30)
         10. Capital weight: normalize(capital_weight, 0.0, 0.30)
@@ -726,8 +730,10 @@ class ProbDistributionShift(BaseStrategy):
         c5 = consec_score
         # 6. Volume score
         c6 = vol_score
-        # 7. Gamma score
-        c7 = min(1.0, net_gamma / 2000.0)
+        # 7. Gamma score: min(1.0, abs(net_gamma) / 2_000)
+        # Changed from net_gamma to abs(net_gamma) so SHORT signals in negative gamma
+        # regime also score well (short squeezes in negative regime are valid setups)
+        c7 = min(1.0, abs(net_gamma) / 2000.0)
         # 8. Directional z-score
         c8 = dir_z_score
         # 9. Momentum acceleration (scaled to 0–1)

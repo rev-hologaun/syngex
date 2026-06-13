@@ -84,6 +84,8 @@ class ExtrinsicFlow(BaseStrategy):
         self._apply_params(data)
         rolling_data = data.get("rolling_data", {})
         params = self._params
+        # Initialize _regime_mismatch at start to prevent UnboundLocalError
+        # in _compute_confidence if gates fail before gate_b is called
         self._regime_mismatch = False
         regime_soft = params.get("regime_soft", True)
         regime = data.get("regime", "")
@@ -263,13 +265,15 @@ class ExtrinsicFlow(BaseStrategy):
         by buying dips, supporting the long thesis).
         SHORT signals require NEGATIVE gamma regime (market makers hedging
         by selling rallies, supporting the short thesis).
+
+        Returns False on mismatch — this is a HARD gate.
         """
         if direction == "LONG" and regime == "POSITIVE":
             return True
         if direction == "SHORT" and regime == "NEGATIVE":
             return True
         self._regime_mismatch = True
-        return True
+        return False
 
     def _compute_confidence(
         self,
@@ -289,18 +293,19 @@ class ExtrinsicFlow(BaseStrategy):
 
         Returns 0.0–1.0.
         """
+        # 1. RΦ magnitude: phi_ratio from 0→5, higher = higher
+        c1 = normalize(phi_ratio, 0.0, 5.0)
+        # 2. Total phi: phi_total from 0→500000 (actual observed max), higher = higher
+        c2 = normalize(phi_total, 0.0, 500000.0)
+        # 3. Phi sigma: phi_sigma from 0→5, higher = higher
+        c3 = normalize(phi_sigma, 0.0, 5.0)
+        # 4. Call bias: phi_call from 0→250000 (half of total max), higher = higher
+        c4 = normalize(phi_call, 0.0, 250000.0)
+        # 5. Put bias: phi_put from 0→250000 (half of total max), higher = higher
+        c5 = normalize(phi_put, 0.0, 250000.0)
+        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+        # Apply regime penalty AFTER confidence is computed
         if getattr(self, '_regime_mismatch', False):
             # Phase 1: regime-soft mode — 30% penalty for mismatch
             confidence *= 0.7
-        # 1. RΦ magnitude: phi_ratio from 0→5, higher = higher
-        c1 = normalize(phi_ratio, 0.0, 5.0)
-        # 2. Total phi: phi_total from 0→1, higher = higher
-        c2 = normalize(phi_total, 0.0, 1.0)
-        # 3. Phi sigma: phi_sigma from 0→5, higher = higher
-        c3 = normalize(phi_sigma, 0.0, 5.0)
-        # 4. Call bias: phi_call from 0→5, higher = higher
-        c4 = normalize(phi_call, 0.0, 5.0)
-        # 5. Put bias: phi_put from 0→5, higher = higher
-        c5 = normalize(phi_put, 0.0, 5.0)
-        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
         return min(1.0, max(0.0, confidence))

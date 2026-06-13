@@ -122,6 +122,11 @@ class VortexCompressionBreakout(BaseStrategy):
         vol_spike_threshold = params.get("vol_spike_threshold", 1.5)
         spread_widening_threshold = params.get("spread_widening_threshold", 0.0)
 
+        # Gate D guard: if spread_widening_threshold param is missing entirely,
+        # Gate D cannot be evaluated — fail safe (return []).
+        if "spread_widening_threshold" not in params:
+            return []
+
         # 4. Evaluate hard gates
         direction = None
         gate_a = False

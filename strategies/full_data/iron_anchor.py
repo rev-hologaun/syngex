@@ -82,16 +82,16 @@ class IronAnchor(BaseStrategy):
         self._apply_params(data)
         rolling_data = data.get("rolling_data", {})
         params = self._params
-        self._regime_mismatch = False
         regime_soft = params.get("regime_soft", True)
         regime = data.get("regime", "")
         gex_calc = data.get("gex_calculator")
 
         # 1. Get confluence metrics from rolling windows
         min_data_points = params.get("min_data_points", 5)
-        max_confluence_distance = params.get("max_confluence_distance", 1.0)
+        max_confluence_distance = params.get("max_confluence_distance", 500.0)
+        proximity_threshold_pct = params.get("proximity_threshold_pct", 0.002)  # 0.2% of price
         min_liq_wall_sigma = params.get("min_liq_wall_sigma", 3.0)
-        min_gamma_wall_gex = params.get("min_gamma_wall_gex", 500000)
+        min_gamma_wall_gex = params.get("min_gamma_wall_gex", 2000)
         exhaustion_velocity_mult = params.get("exhaustion_velocity_mult", 0.8)
 
         prox_window = rolling_data.get(KEY_CONFLUENCE_PROX_5M)
@@ -137,11 +137,14 @@ class IronAnchor(BaseStrategy):
         else:
             direction = "SHORT"
 
-        # 3. Check confluence proximity threshold
-        if current_prox > max_confluence_distance:
+        # 3. Check confluence proximity threshold (percentage-based)
+        # current_prox is already normalized to [0, 1] range.
+        # proximity_threshold_pct is a fraction (e.g. 0.002 = 0.2%),
+        # so it compares directly against the normalized proximity.
+        if current_prox > proximity_threshold_pct:
             logger.debug(
-                "Iron Anchor: Confluence proximity %.2f exceeds %.1f for %s",
-                current_prox, max_confluence_distance, direction,
+                "Iron Anchor: Confluence proximity %.4f exceeds %.4f (%.1f%%) for %s",
+                current_prox, proximity_threshold_pct, proximity_threshold_pct * 100, direction,
             )
             return []
 
@@ -294,13 +297,6 @@ class IronAnchor(BaseStrategy):
             return False
 
         # GEX regime alignment — same pattern as other full_data strategies
-        if direction == "LONG" and regime != "POSITIVE":
-            self._regime_mismatch = True
-            return True
-        if direction == "SHORT" and regime != "NEGATIVE":
-            self._regime_mismatch = True
-            return True
-
         # Check that the gamma wall is significant
         if gex_calc and hasattr(gex_calc, "get_gamma_walls"):
             walls = gex_calc.get_gamma_walls(threshold=min_gamma_wall_gex)
@@ -346,13 +342,11 @@ class IronAnchor(BaseStrategy):
 
         Returns 0.0–1.0.
         """
-        if getattr(self, '_regime_mismatch', False):
-            # Phase 1: regime-soft mode — 30% penalty for mismatch
-            confidence *= 0.7
+
         # 1. Confluence proximity: current_prox from 0→2, closer = higher, invert
         c1 = 1.0 - normalize(current_prox, 0.0, 2.0)
-        # 2. Liquidity weight: current_liq_size from 0→1M, higher = higher
-        c2 = normalize(current_liq_size, 0.0, 1000000.0)
+        # 2. Liquidity weight: proportional to normalized ceiling (2K)
+        c2 = normalize(current_liq_size, 0.0, 2000.0)
         # 3. Liquidity sigma: current_liq_sigma from 0→5, higher = higher
         c3 = normalize(current_liq_sigma, 0.0, 5.0)
         # 4. Velocity: current_velocity from 0→0.02, higher = higher

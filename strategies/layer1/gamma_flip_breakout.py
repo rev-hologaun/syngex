@@ -45,7 +45,7 @@ STOP_OTHER_SIDE_PCT = 0.01      # 1% — stop on other side of flip
 ATR_MULT = 1.5                   # 1.5× rolling range as ATR proxy
 TARGET_RR = 2.5                  # 1:2.5 risk-reward minimum
 MIN_CONFIDENCE = 0.20            # Minimum confidence to emit signal
-MIN_GAMMA_STRENGTH = 100000      # Minimum |net_gamma| for regime confidence
+MIN_GAMMA_STRENGTH = 2000        # Minimum |net_gamma| for regime confidence (normalized scale)
 
 # Regime-adjusted stop multipliers
 NEGATIVE_GAMMA_STOP_MULT = 2.5   # Wider stops in negative gamma (more noise)
@@ -87,7 +87,7 @@ class GammaFlipBreakout(BaseStrategy):
         regime = data.get("regime", "")
 
         # Require sufficient gamma strength for meaningful regime
-        if abs(net_gamma) < 200000:
+        if abs(net_gamma) < 2000:
             return []
 
         # Get the flip zone (v2: zone instead of single point)
