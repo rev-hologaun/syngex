@@ -82,6 +82,8 @@ class TradeStationClient:
         self._depth_quote_symbols: List[str] = []
         self._depth_agg_symbols: List[str] = []
         self._option_chain_failed = False
+        self._option_chain_connect_attempts: int = 0
+        self._option_chain_max_retries: int = 5
         self._watched_symbol: str = ""  # Symbol whose quotes feed the underlying price
         self._stream_tasks: list[asyncio.Task] = []
 
@@ -215,7 +217,7 @@ class TradeStationClient:
 
     async def _ensure_option_chain_session(self) -> aiohttp.ClientSession:
         if self._option_chain_session is None or self._option_chain_session.closed:
-            timeout = aiohttp.ClientTimeout(sock_read=60)
+            timeout = aiohttp.ClientTimeout(total=30, connect=5)
             self._option_chain_session = aiohttp.ClientSession(timeout=timeout)
         return self._option_chain_session
 
@@ -326,6 +328,18 @@ class TradeStationClient:
 
         while self._is_running:
             try:
+                # Track connect attempts for fail-fast on thin symbols
+                self._option_chain_connect_attempts += 1
+                if self._option_chain_connect_attempts > self._option_chain_max_retries:
+                    logger.critical(
+                        "[%s] Option-chain connect retry limit exceeded (%d/%d). Failing fast.",
+                        symbol,
+                        self._option_chain_connect_attempts,
+                        self._option_chain_max_retries,
+                    )
+                    self._option_chain_failed = True
+                    break
+
                 await self._refresh_token_if_needed()
 
                 session = await self._ensure_option_chain_session()
@@ -347,29 +361,42 @@ class TradeStationClient:
 
                     resp.raise_for_status()
                     logger.info("[%s] Option-chain stream connected", symbol)
+                    # Reset attempt counter on successful connect
+                    self._option_chain_connect_attempts = 0
                     retry_delay = 1
 
                     msg_count = 0
-                    async for line in resp.content:
-                        if not self._is_running:
-                            break
-                        line_str = line.decode("utf-8", errors="replace").strip()
-                        if not line_str:
-                            continue
-                        msg_count += 1
-                        try:
-                            raw = json.loads(line_str)
-                            # Transform raw TradeStation option-chain JSON
-                            # into per-contract option_update messages
-                            contracts = self._extract_contracts(raw)
-                            if contracts:
-                                for contract in contracts:
-                                    self._dispatch(contract)
-                            else:
-                                # Raw individual contract format — dispatch directly
-                                self._dispatch(raw)
-                        except json.JSONDecodeError:
-                            pass
+
+                    async def _read_body():
+                        nonlocal msg_count
+                        async for line in resp.content:
+                            if not self._is_running:
+                                break
+                            line_str = line.decode("utf-8", errors="replace").strip()
+                            if not line_str:
+                                continue
+                            msg_count += 1
+                            try:
+                                raw = json.loads(line_str)
+                                # Transform raw TradeStation option-chain JSON
+                                # into per-contract option_update messages
+                                contracts = self._extract_contracts(raw)
+                                if contracts:
+                                    for contract in contracts:
+                                        self._dispatch(contract)
+                                else:
+                                    # Raw individual contract format — dispatch directly
+                                    self._dispatch(raw)
+                            except json.JSONDecodeError:
+                                pass
+
+                    try:
+                        await asyncio.wait_for(_read_body(), timeout=30)
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "[%s] Read timeout during option-chain body after %d messages. Reconnecting…",
+                            symbol, msg_count,
+                        )
 
             except aiohttp.ClientConnectorError as exc:
                 logger.warning("[%s] Option-chain connection error: %s. Retrying in %ds…", symbol, exc, retry_delay)
@@ -380,9 +407,17 @@ class TradeStationClient:
                 logger.warning("[%s] Option-chain timeout. Reconnecting…", symbol)
                 await asyncio.sleep(2)
 
+            except aiohttp.ClientPayloadError as exc:
+                logger.warning("[%s] Option-chain payload error: %s. Reconnecting…", symbol, exc)
+                await asyncio.sleep(2)
+
             except Exception as exc:
-                logger.error("[%s] Option-chain error: %s", symbol, exc, exc_info=True)
-                if "JSON" in type(exc).__name__ or "decode" in str(exc).lower():
+                exc_type = type(exc).__name__
+                logger.error(
+                    "[%s] Option-chain error (%s): %s",
+                    symbol, exc_type, exc, exc_info=True,
+                )
+                if "JSON" in exc_type or "decode" in str(exc).lower():
                     logger.error("[%s] Unrecoverable option-chain error — failing fast.", symbol)
                     self._option_chain_failed = True
                     break
