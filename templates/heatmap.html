@@ -712,68 +712,63 @@
 
     <script>
     // ── Strategy card definitions ──────────────────────────────────
-    // 47 strategy-slots across 10 rows (duplicates in rows 1-3 for time-of-day context)
+    // Organized by layer groups (each strategy appears once per layer)
+    // All 41 strategies grouped by layer, ordered by signal complexity
     const STRATEGIES = [
-        // ── Row 1: ORB (9:30–10:00) ──
-        { id: 'strike_concentration',  label: 'STRIKE_CONC',       layer: 'L3', row: 1, col: 1 },
-        { id: 'gex_imbalance',         label: 'GEX_IMBAL',         layer: 'L1', row: 1, col: 2 },
-        { id: 'gamma_flip_breakout',   label: 'FLIP_BREAKOUT',     layer: 'L1', row: 1, col: 3 },
-        { id: 'magnet_accelerate',     label: 'MAGNET',            layer: 'L1', row: 1, col: 4 },
-        { id: 'depth_imbalance_momentum', label: 'DEPTH_IMBAL',    layer: 'L2', row: 1, col: 5 },
-        // ── Row 2: Morning (10:00–12:00) ──
-        { id: 'strike_concentration',  label: 'STRIKE_CONC',       layer: 'L3', row: 2, col: 1 },
-        { id: 'gex_imbalance',         label: 'GEX_IMBAL',         layer: 'L1', row: 2, col: 2 },
-        { id: 'gamma_flip_breakout',   label: 'FLIP_BREAKOUT',     layer: 'L1', row: 2, col: 3 },
-        { id: 'gex_divergence',        label: 'GEX_DIV',           layer: 'L1', row: 2, col: 4 },
-        { id: 'confluence_reversal',   label: 'CONFLUENCE',        layer: 'L1', row: 2, col: 5 },
-        { id: 'call_put_flow_asymmetry', label: 'CALL_PUT_FLOW',    layer: 'L2', row: 2, col: 6 },
-        // ── Row 3: Afternoon (12:00–15:30) ──
-        { id: 'strike_concentration',  label: 'STRIKE_CONC',       layer: 'L3', row: 3, col: 1 },
-        { id: 'gamma_wall_bounce',     label: 'GEX_WALL',          layer: 'L1', row: 3, col: 2 },
-        { id: 'gamma_flip_breakout',   label: 'FLIP_BREAKOUT',     layer: 'L1', row: 3, col: 3 },
-        { id: 'gex_divergence',        label: 'GEX_DIV',           layer: 'L1', row: 3, col: 4 },
-        { id: 'confluence_reversal',   label: 'CONFLUENCE',        layer: 'L1', row: 3, col: 5 },
-        // ── Row 4: Gamma & Delta Momentum ──
-        { id: 'gamma_squeeze',         label: 'GAMMA_SQ',          layer: 'L1', row: 4, col: 1 },
-        { id: 'delta_gamma_squeeze',   label: 'DELTA_GAMMA',       layer: 'L2', row: 4, col: 2 },
-        { id: 'gamma_volume_convergence', label: 'GAMMA_VOL',       layer: 'L3', row: 4, col: 3 },
-        { id: 'delta_volume_exhaustion', label: 'DELTA_VOL',        layer: 'L2', row: 4, col: 4 },
-        { id: 'delta_iv_divergence',   label: 'TAIL_RISK',         layer: 'L2', row: 4, col: 5 },
-        { id: 'iv_gex_divergence',     label: 'IV_GEX_DIV',        layer: 'L2', row: 4, col: 6 },
-        // ── Row 5: Exchange Flow & Order Book ──
-        { id: 'exchange_flow_imbalance', label: 'FLOW_IMBALANCE',  layer: 'L2', row: 5, col: 1 },
-        { id: 'exchange_flow_asymmetry', label: 'FLOW_ASYMMETRY',  layer: 'L2', row: 5, col: 2 },
-        { id: 'exchange_flow_concentration', label: 'EXCHANGE',    layer: 'L2', row: 5, col: 3 },
-        { id: 'order_book_fragmentation', label: 'OB_FRAGMENT',     layer: 'L2', row: 5, col: 4 },
-        { id: 'order_book_stacking',   label: 'STACKING',          layer: 'L2', row: 5, col: 5 },
-        { id: 'obi_aggression_flow',   label: 'OBI_AF',            layer: 'L2', row: 5, col: 6 },
-        // ── Row 6: Participant & Depth ──
-        { id: 'participant_diversity_conviction', label: 'PARTICIPANT_CONV', layer: 'L2', row: 6, col: 1 },
-        { id: 'participant_divergence_scalper', label: 'DIVERGENCE_SCALP', layer: 'L2', row: 6, col: 2 },
-        { id: 'depth_decay_momentum',  label: 'DEPTH_DECAY',       layer: 'L2', row: 6, col: 3 },
-        { id: 'vamp_momentum',         label: 'VAMP',              layer: 'L2', row: 6, col: 4 },
-        { id: 'vortex_compression_breakout', label: 'VORTEX',      layer: 'L2', row: 6, col: 5 },
-        // ── Row 7: Volatility Surface ──
-        { id: 'iv_skew_squeeze',       label: 'IV_SKEW',           layer: 'FULL', row: 7, col: 1 },
-        { id: 'skew_dynamics',         label: 'SKEW_DYN',          layer: 'FULL', row: 7, col: 2 },
-        { id: 'smile_dynamics',        label: 'SMILE_DYN',         layer: 'FULL', row: 7, col: 3 },
-        { id: 'iv_band_breakout',      label: 'IV_BAND',           layer: 'L3', row: 7, col: 4 },
-        { id: 'vol_compression_range', label: 'VOL_COMP',          layer: 'L1', row: 7, col: 5 },
-        // ── Row 8: Full Data v2 — Options Flow ──
-        { id: 'extrinsic_flow',        label: 'EXTRINSIC_FLOW',    layer: 'FULL', row: 8, col: 1 },
-        { id: 'extrinsic_intrinsic_flow', label: 'EXTRINSIC',      layer: 'FULL', row: 8, col: 2 },
-        { id: 'ghost_premium',         label: 'GHOST_PREM',        layer: 'FULL', row: 8, col: 3 },
-        { id: 'prob_distribution_shift', label: 'PROB_DIST',       layer: 'FULL', row: 8, col: 4 },
-        { id: 'prob_weighted_magnet',  label: 'PROB_MAGNET',       layer: 'FULL', row: 8, col: 5 },
-        { id: 'sentiment_sync',        label: 'SENT_SYNC',         layer: 'FULL', row: 8, col: 6 },
-        // ── Row 9: Full Data v2 — Structural ──
-        { id: 'gamma_breaker',         label: 'GAMMA_BREAK',       layer: 'FULL', row: 9, col: 1 },
-        { id: 'iron_anchor',           label: 'IRON_ANCHOR',       layer: 'FULL', row: 9, col: 2 },
-        { id: 'theta_burn',            label: 'THETA_BURN',        layer: 'L3', row: 9, col: 3 },
-        { id: 'whale_tracker',         label: 'WHALE_TRACK',       layer: 'FULL', row: 9, col: 4 },
-        // ── Row 10: Empty (buffer for future additions) ──
-        { id: 'empty_1',               label: '—',                 layer: '—', row: 10, col: 1 },
-        { id: 'empty_2',               label: '—',                 layer: '—', row: 10, col: 2 },
+        // ── Layer 1 · Direct Flow Signals ─────────────────────────────
+        { id: 'price_velocity',          label: 'PRICE_VEL',           layer: 'L1', col: 1 },
+        { id: 'volume_spike',            label: 'VOLUME_SPIKE',        layer: 'L1', col: 2 },
+        { id: 'flow_delta',              label: 'FLOW_DELTA',          layer: 'L1', col: 3 },
+        { id: 'volume_imbalance',        label: 'VOL_IMBALANCE',       layer: 'L1', col: 4 },
+        { id: 'order_flow_imbalance',    label: 'ORDER_FLOW',          layer: 'L1', col: 5 },
+        { id: 'tick_momentum',           label: 'TICK_MOMENTUM',       layer: 'L1', col: 6 },
+        // ── Layer 2 · Gamma & Volatility Dynamics ────────────────────
+        { id: 'extrinsic_proximity',     label: 'EXTRINSIC_PROX',      layer: 'L2', col: 1 },
+        { id: 'gamma_flip_zone',         label: 'GAMMA_FLIP',          layer: 'L2', col: 2 },
+        { id: 'gamma_breaker',           label: 'GAMMA_BREAKER',       layer: 'L2', col: 3 },
+        { id: 'iv_skew_squeeze',         label: 'IV_SKEW_SQZ',         layer: 'L2', col: 4 },
+        { id: 'volatility_term_structure',label: 'TERM_STRUCTURE',     layer: 'L2', col: 5 },
+        { id: 'skew_dynamics',           label: 'SKEW_DYNAMICS',       layer: 'L2', col: 6 },
+        { id: 'smile_dynamics',          label: 'SMILE_DYNAMICS',      layer: 'L2', col: 1 },
+        { id: 'strike_concentration',    label: 'STRIKE_CONC',         layer: 'L2', col: 2 },
+        { id: 'gex_imbalance',           label: 'GEX_IMBAL',           layer: 'L2', col: 3 },
+        { id: 'gamma_flip_breakout',     label: 'FLIP_BREAKOUT',       layer: 'L2', col: 4 },
+        { id: 'magnet_accelerate',       label: 'MAGNET_ACCEL',        layer: 'L2', col: 5 },
+        { id: 'depth_imbalance_momentum',label: 'DEPTH_IMBAL',         layer: 'L2', col: 6 },
+        { id: 'confluence_reversal',     label: 'CONFLUENCE_REV',      layer: 'L2', col: 1 },
+        { id: 'call_put_flow_asymmetry', label: 'CALL_PUT_FLOW',       layer: 'L2', col: 2 },
+        { id: 'vamp_momentum',           label: 'VAMP_MOMENTUM',       layer: 'L2', col: 3 },
+        { id: 'vortex_compression_breakout',label: 'VORTEX_COMP',      layer: 'L2', col: 4 },
+        { id: 'depth_decay_momentum',    label: 'DEPTH_DECAY',         layer: 'L2', col: 5 },
+        { id: 'exchange_flow_imbalance', label: 'FLOW_IMBAL_XCH',      layer: 'L2', col: 6 },
+        { id: 'exchange_flow_asymmetry', label: 'FLOW_ASYM_XCH',       layer: 'L2', col: 1 },
+        { id: 'exchange_flow_concentration',label:'FLOW_CONC_XCH',      layer: 'L2', col: 2 },
+        { id: 'order_book_fragmentation',label: 'OB_FRAGMENT',         layer: 'L2', col: 3 },
+        { id: 'order_book_stacking',     label: 'OB_STACKING',         layer: 'L2', col: 4 },
+        { id: 'obi_aggression_flow',     label: 'OBI_AF',              layer: 'L2', col: 5 },
+        { id: 'participant_diversity_conviction',label:'PARTICIPANT',  layer: 'L2', col: 6 },
+        { id: 'participant_divergence_scalper',label:'DIVERGENCE_SCALP',layer: 'L2', col: 1 },
+        { id: 'delta_gamma_squeeze',     label: 'DELTA_GAMMA_SQZ',     layer: 'L2', col: 2 },
+        { id: 'delta_volume_exhaustion', label: 'DELTA_VOL_EXH',       layer: 'L2', col: 3 },
+        { id: 'delta_iv_divergence',     label: 'TAIL_RISK',           layer: 'L2', col: 4 },
+        { id: 'iv_gex_divergence',       label: 'IV_GEX_DIV',          layer: 'L2', col: 5 },
+        { id: 'vol_compression_range',   label: 'VOL_COMP_RANGE',      layer: 'L2', col: 6 },
+        { id: 'gex_divergence',          label: 'GEX_DIV',             layer: 'L2', col: 1 },
+        // ── Full Data · Options Analytics ─────────────────────────────
+        { id: 'prob_weighted_magnet',    label: 'PROB_MAGNET',         layer: 'FULL', col: 1 },
+        { id: 'ghost_premium',           label: 'GHOST_PREMIUM',       layer: 'FULL', col: 2 },
+        { id: 'prob_distribution_shift', label: 'PROB_DIST_SHIFT',     layer: 'FULL', col: 3 },
+        { id: 'extrinsic_intrinsic_flow',label: 'EXT_INTR_FLOW',       layer: 'FULL', col: 4 },
+        { id: 'extrinsic_flow',          label: 'EXTRINSIC_FLOW',      layer: 'FULL', col: 5 },
+        { id: 'sentiment_sync',          label: 'SENTIMENT_SYNC',      layer: 'FULL', col: 6 },
+        { id: 'iron_anchor',             label: 'IRON_ANCHOR',         layer: 'FULL', col: 1 },
+        { id: 'whale_tracker',           label: 'WHALE_TRACKER',       layer: 'FULL', col: 2 },
+        // ── Layer 3 · Macro Signals ──────────────────────────────────
+        { id: 'gamma_volume_convergence',label: 'GAMMA_VOL_CONV',      layer: 'L3', col: 1 },
+        { id: 'gamma_squeeze',           label: 'GAMMA_SQUEEZE',       layer: 'L3', col: 2 },
+        { id: 'gamma_wall_bounce',       label: 'GAMMA_WALL_BNC',      layer: 'L3', col: 3 },
+        { id: 'theta_burn',              label: 'THETA_BURN',          layer: 'L3', col: 4 },
+        { id: 'iv_band_breakout',        label: 'IV_BAND_BREAK',       layer: 'L3', col: 5 },
     ];
 
     // ── Health classification ──────────────────────────────────────
@@ -1040,9 +1035,20 @@
     const grid = document.getElementById('grid');
     const cardElements = {};
 
-    // Create strategy cards — handle duplicate IDs with unique DOM IDs
+    // Create strategy cards — grouped by layer with visual separators
     const idCounters = {};
-    STRATEGIES.forEach(s => {
+    let lastLayer = null;
+    STRATEGIES.forEach((s, i) => {
+        // Inject layer separator when layer changes
+        if (lastLayer !== s.layer && i > 0) {
+            const header = document.createElement('div');
+            header.className = 'section-header';
+            const layerNames = { L1: 'LAYER 1 · Direct Flow Signals', L2: 'LAYER 2 · Gamma & Volatility Dynamics', FULL: 'FULL DATA · Options Analytics', L3: 'LAYER 3 · Macro Signals' };
+            header.textContent = layerNames[s.layer] || s.layer.toUpperCase();
+            grid.appendChild(header);
+        }
+        lastLayer = s.layer;
+        
         idCounters[s.id] = (idCounters[s.id] || 0) + 1;
         const uniqueId = idCounters[s.id] > 1 ? `${s.id}-${idCounters[s.id]}` : s.id;
         const card = document.createElement('div');
@@ -1072,34 +1078,6 @@
         // Keep using s.id as key so updateDashboard lookup works
         if (!cardElements[s.id]) cardElements[s.id] = [];
         cardElements[s.id].push({ card, body: document.getElementById(`body-${uniqueId}`), dirbar: document.getElementById(`dirbar-${uniqueId}`), uniqueId });
-    });
-
-    // ── Section headers between time-group rows ──
-    // Calculate cumulative card count per row (including duplicates)
-    let cumulative = 0;
-    const rowEndPositions = {};
-    STRATEGIES.forEach((s, i) => {
-        cumulative++;
-        rowEndPositions[s.row] = cumulative;
-    });
-
-    // Insert section headers after the last card of each time-group row
-    // Insert in reverse order so DOM positions don't shift
-    const timeGroupRows = [
-        { label: '☀️ Afternoon (12:00–15:30)', row: 3 },
-        { label: '🌅 Morning (10:00–12:00)', row: 2 },
-        { label: '⏰ ORB (9:30–10:00)', row: 1 },
-    ];
-    timeGroupRows.forEach(group => {
-        const cardIndex = rowEndPositions[group.row];
-        if (!cardIndex) return;
-        const allStrategyCards = grid.querySelectorAll('.card:not(.card-l2-overview):not(.card-log):not(.card-extra):not(.section-header)');
-        if (allStrategyCards[cardIndex - 1]) {
-            const header = document.createElement('div');
-            header.className = 'section-header';
-            header.textContent = group.label;
-            allStrategyCards[cardIndex - 1].parentNode.insertBefore(header, allStrategyCards[cardIndex - 1].nextSibling);
-        }
     });
 
     // Create Layer 2 Overview card
