@@ -81,6 +81,9 @@ MIN_DATA_POINTS = 3
 PRICE_UP_THRESHOLD = 0.001       # 0.1% rise over 5m window
 PRICE_DOWN_THRESHOLD = -0.001    # 0.1% drop over 5m window
 
+# Minimum absolute net_gamma for a signal to fire (dealer positioning threshold)
+MIN_GAMMA_THRESHOLD = 200
+
 
 class GammaVolumeConvergence(BaseStrategy):
     """
@@ -163,6 +166,10 @@ class GammaVolumeConvergence(BaseStrategy):
         # Get ATM strike
         atm_strike = self._get_atm_strike(gex_calc, price)
         if atm_strike is None:
+            return None
+
+        # Gamma magnitude gate — need meaningful dealer positioning
+        if abs(net_gamma) < MIN_GAMMA_THRESHOLD:
             return None
 
         # Check delta acceleration
@@ -265,6 +272,7 @@ class GammaVolumeConvergence(BaseStrategy):
                 "price_trend": "UP",
                 "rolling_trend": rolling_trend,
                 "net_gamma": round(net_gamma, 2),
+                "gamma_regime_aligned": True,
                 "call_wall_above": call_wall_above["strike"] if call_wall_above else None,
                 "distance_to_call_wall_pct": (
                     round((call_wall_above["strike"] - price) / price, 4)
@@ -318,6 +326,10 @@ class GammaVolumeConvergence(BaseStrategy):
         # Get ATM strike
         atm_strike = self._get_atm_strike(gex_calc, price)
         if atm_strike is None:
+            return None
+
+        # Gamma magnitude gate — need meaningful dealer positioning
+        if abs(net_gamma) < MIN_GAMMA_THRESHOLD:
             return None
 
         # Check delta acceleration (looking for downward acceleration)
@@ -424,6 +436,7 @@ class GammaVolumeConvergence(BaseStrategy):
                 "price_trend": "DOWN",
                 "rolling_trend": rolling_trend,
                 "net_gamma": round(net_gamma, 2),
+                "gamma_regime_aligned": True,
                 "put_wall_below": put_wall_below["strike"] if put_wall_below else None,
                 "distance_to_put_wall_pct": (
                     round((price - put_wall_below["strike"]) / price, 4)

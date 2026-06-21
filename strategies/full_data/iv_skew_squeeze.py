@@ -70,6 +70,9 @@ PRICE_STABLE_THRESHOLD = 0.005     # 0.5% change max
 # Min net gamma for positive regime confirmation
 GAMMA_CEILING = 2000.0  # Global ceiling for net_gamma normalization
 
+# Minimum |net_gamma| for meaningful dealer positioning
+MIN_GAMMA_CONVICTION = 200
+
 # Stop and target
 STOP_PCT = 0.005                   # 0.5% stop
 TARGET_PCT = 0.008                 # 0.8% target (1.6:1 R:R)
@@ -166,6 +169,10 @@ class IVSkewSqueeze(BaseStrategy):
 
         # --- Net gamma conviction (non-blocking) ---
         _gamma_conviction = min(1.0, max(0.0, net_gamma / GAMMA_CEILING)) if net_gamma > 0 else 0.0
+
+        # Gamma conviction gate — need meaningful dealer positioning
+        if abs(net_gamma) < MIN_GAMMA_CONVICTION:
+            return []
 
         # --- Check for LONG (panic overblown) ---
         long_sig = self._check_long(
@@ -426,7 +433,7 @@ class IVSkewSqueeze(BaseStrategy):
         if net_gamma < 0:
             return 0.05  # Negative gamma — low confidence
         # Scale: GAMMA_CEILING → 0.05, 2× → 0.10
-        scale = min(1.0, net_gamma / (GAMMA_CEILING * 2))
+        scale = min(1.0, abs(net_gamma) / (GAMMA_CEILING * 2))
         return 0.05 + 0.05 * scale
 
     def _compute_confidence_v2(
@@ -559,6 +566,7 @@ class IVSkewSqueeze(BaseStrategy):
                 "skew_direction": "NEGATIVE",
                 "price_change_pct": round(price_change, 4),
                 "net_gamma": round(net_gamma, 2),
+                "gamma_conviction_met": True,
                 "volume_ratio": volume_ratio,
                 "skew_normalizing": True,
                 "stop_pct": STOP_PCT,
@@ -671,6 +679,7 @@ class IVSkewSqueeze(BaseStrategy):
                 "skew_direction": "POSITIVE",
                 "price_change_pct": round(price_change, 4),
                 "net_gamma": round(net_gamma, 2),
+                "gamma_conviction_met": True,
                 "volume_ratio": volume_ratio,
                 "skew_normalizing": True,
                 "stop_pct": STOP_PCT,

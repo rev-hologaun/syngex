@@ -354,20 +354,22 @@ class WhaleTracker(BaseStrategy):
         """
         Compute 5-component confidence score (Family A).
 
-        Returns 0.0–1.0.
+        Returns 0.0-1.0.
         """
-        if getattr(self, '_regime_mismatch', False):
-            # Phase 1: regime-soft mode — 30% penalty for mismatch
-            confidence *= 0.7
-        # 1. Concentration magnitude: current_conc_ratio from 0→1, higher = higher
+        # 1. Concentration magnitude: current_conc_ratio from 0->1, higher = higher
         c1 = normalize(current_conc_ratio, 0.0, 1.0)
-        # 2. Concentration sigma: current_conc_sigma from 0→5, higher = higher
+        # 2. Concentration sigma: current_conc_sigma from 0->5, higher = higher
         c2 = normalize(current_conc_sigma, 0.0, 5.0)
-        # 3. Z-score: conc_zscore from 0→5, higher = higher
+        # 3. Z-score: conc_zscore from 0->5, higher = higher
         c3 = normalize(conc_zscore, 0.0, 5.0)
-        # 4. Biggest whale: current_biggest from 0→1, higher = higher
+        # 4. Biggest whale: current_biggest from 0->1, higher = higher
         c4 = normalize(current_biggest, 0.0, 1.0)
-        # 5. Participant diversity: current_participants from 0→5, higher = higher
+        # 5. Participant diversity: current_participants from 0->5, higher = higher
         c5 = normalize(current_participants, 0.0, 5.0)
         confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+
+        # Apply regime mismatch penalty after computing base confidence
+        if getattr(self, '_regime_mismatch', False):
+            confidence *= 0.7
+
         return min(1.0, max(0.0, confidence))

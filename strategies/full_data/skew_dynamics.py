@@ -54,6 +54,9 @@ def normalize(val: float, vmin: float, vmax: float) -> float:
 
 MIN_CONFIDENCE = 0.20
 
+# Minimum |net_gamma| for dealer anchoring behind skew moves
+MIN_GAMMA_CONVICTION = 200
+
 
 class SkewDynamics(BaseStrategy):
     """
@@ -87,6 +90,11 @@ class SkewDynamics(BaseStrategy):
         rolling_data = data.get("rolling_data", {})
         params = self._params
         regime = data.get("regime", "")
+
+        # Gamma conviction gate — need dealer positioning behind skew moves
+        net_gamma = data.get("net_gamma_normalized", 0.0)
+        if abs(net_gamma) < MIN_GAMMA_CONVICTION:
+            return []
 
         # 1. Get Ψ data from rolling windows
         min_psi_data_points = params.get("min_psi_data_points", 5)
@@ -123,6 +131,10 @@ class SkewDynamics(BaseStrategy):
             direction = "LONG"
         else:
             direction = "SHORT"
+
+        # Regime alignment gate — must align with direction
+        if (direction == "LONG" and regime != "POSITIVE") or (direction == "SHORT" and regime != "NEGATIVE"):
+            return []
 
         # 3. Compute soft scores (replaces hard gates)
         liquidity_score = self._score_liquidity(rolling_data, params)
@@ -199,6 +211,7 @@ class SkewDynamics(BaseStrategy):
                 "psi_zscore": round(psi_zscore, 2),
                 "intensity": intensity,
                 "regime": regime,
+                "gamma_conviction_met": True,
                 "gates": {
                     "A_liquidity": round(liquidity_score, 3),
                     "B_gex_regime": round(regime_score, 3),
@@ -247,11 +260,11 @@ class SkewDynamics(BaseStrategy):
         if direction == "SHORT" and regime == "NEGATIVE":
             return 1.0
         if direction == "LONG" and regime == "NEGATIVE":
-            return 0.3
+            return 0.0
         if direction == "SHORT" and regime == "POSITIVE":
-            return 0.3
+            return 0.0
         # regime is empty or unknown
-        return 0.5
+        return 0.0
 
     def _score_iv_divergence(
         self,

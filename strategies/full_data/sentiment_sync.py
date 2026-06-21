@@ -16,7 +16,7 @@ Hard gates (ALL must pass):
     Gate B: Volume anchor — total volume above rolling average
     Gate C: Price confirmation — price moving in direction of sync
 
-Confidence model (5 components):
+Confidence model (6 components):
     1. Skew significance (0.0–0.25) — ΔSkew in σ units
     2. VSI significance (0.0–0.25) — Aggressor VSI in σ units
     3. Sign agreement (0.0–0.15) — how cleanly both signals agree
@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
 from strategies.rolling_keys import (
+    KEY_PRICE_5M,
     KEY_SYNC_CORR_5M,
     KEY_SYNC_SIGMA_5M,
     KEY_SKEW_CHANGE_5M,
@@ -302,18 +303,27 @@ class SentimentSync(BaseStrategy):
         """
         Gate C: Price confirmation.
 
-        Since we don't have tick-level price change data in the strategy
-        evaluation context, we use the VSI sign as a proxy for price direction.
-        VSI > 0 implies buying pressure (price should rise → supports LONG).
-        VSI < 0 implies selling pressure (price should fall → supports SHORT).
-
-        The VSI magnitude must also exceed a minimum threshold to confirm
-        the signal has enough force to move price.
+        Requires actual price movement in the signal direction.
+        LONG: price must have risen above threshold.
+        SHORT: price must have fallen below threshold.
         """
-        price_confirm_pct = params.get("price_confirm_pct", 0.001)
-        # Use price_confirm_pct as a minimum VSI magnitude threshold
-        # VSI magnitude must exceed this to confirm directional force
-        return vsi_mag >= price_confirm_pct
+        price_confirm_pct = params.get("price_confirm_pct", 0.0005)
+        current_price = data.get("underlying_price", 0)
+        price_window = rolling_data.get(KEY_PRICE_5M)
+
+        if current_price <= 0 or not price_window or price_window.count < 2:
+            return True  # can't confirm — pass gate gracefully
+
+        previous_price = price_window.values[-2] if len(price_window.values) >= 2 else price_window.values[-1]
+        if previous_price <= 0:
+            return True
+
+        price_change_pct = (current_price - previous_price) / previous_price
+
+        if direction == "LONG":
+            return price_change_pct >= price_confirm_pct
+        else:  # SHORT
+            return price_change_pct <= -price_confirm_pct
 
     def _compute_confidence(
         self,
@@ -328,7 +338,7 @@ class SentimentSync(BaseStrategy):
         depth_score=None,
     ) -> float:
         """
-        Compute 5-component confidence score (Family A).
+        Compute 6-component confidence score (Family A).
 
         Returns 0.0–1.0.
         """
@@ -346,5 +356,13 @@ class SentimentSync(BaseStrategy):
         vol_window = rolling_data.get("volume_5m")
         vol_ratio = vol_window.latest / vol_window.mean if vol_window and vol_window.mean > 0 else 1.0
         c5 = normalize(vol_ratio, 0.0, 2.0)
-        confidence = (c1 + c2 + c3 + c4 + c5) / 5.0
+        # 6. GEX regime alignment (0.0–0.10) — signal direction matches GEX bias
+        gex_bias = data.get("gex_bias", 0)
+        if direction == "LONG":
+            # Long wants bullish GEX → gex_bias > 0 aligns
+            c6 = normalize(gex_bias, -1.0, 1.0) * 0.10
+        else:  # SHORT
+            # Short wants bearish GEX → gex_bias < 0 aligns
+            c6 = normalize(-gex_bias, -1.0, 1.0) * 0.10
+        confidence = c1 * 0.20 + c2 * 0.20 + c3 * 0.20 + c4 * 0.10 + c5 * 0.10 + min(c6, 0.10) * 0.20
         return min(1.0, max(0.0, confidence))

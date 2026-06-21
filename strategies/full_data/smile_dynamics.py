@@ -59,6 +59,9 @@ def normalize(val: float, vmin: float, vmax: float) -> float:
 
 MIN_CONFIDENCE = 0.20
 
+# Minimum |net_gamma| for dealer anchoring behind curve moves
+MIN_GAMMA_CONVICTION = 200
+
 
 class SmileDynamics(BaseStrategy):
     """
@@ -93,6 +96,11 @@ class SmileDynamics(BaseStrategy):
 
         regime_soft = params.get("regime_soft", True)
         regime = data.get("regime", "")
+
+        # Gamma conviction gate — need dealer positioning behind curve moves
+        net_gamma = data.get("net_gamma_normalized", 0.0)
+        if abs(net_gamma) < MIN_GAMMA_CONVICTION:
+            return []
 
         # 1. Get Ω data from rolling windows
         min_omega_data_points = params.get("min_omega_data_points", 5)
@@ -136,6 +144,10 @@ class SmileDynamics(BaseStrategy):
             direction = "LONG"
         else:
             direction = "SHORT"
+
+        # Regime alignment gate — must align with direction
+        if (direction == "LONG" and regime != "POSITIVE") or (direction == "SHORT" and regime != "NEGATIVE"):
+            return []
 
         # 3. Check if Ω change exceeds σ threshold
         if current_omega_sigma <= 0:
@@ -231,6 +243,7 @@ class SmileDynamics(BaseStrategy):
                 "regime": regime,
                 "long_dir_score": round(long_dir_score, 3),
                 "short_dir_score": round(short_dir_score, 3),
+                "gamma_conviction_met": True,
                 "gates": {
                     "A_liquidity": round(liquidity_score, 3),
                     "B_gex_regime": round(regime_score, 3),
@@ -271,11 +284,11 @@ class SmileDynamics(BaseStrategy):
         if direction == "SHORT" and regime == "NEGATIVE":
             return 1.0
         if direction == "LONG" and regime == "NEGATIVE":
-            return 0.3
+            return 0.0
         if direction == "SHORT" and regime == "POSITIVE":
-            return 0.3
+            return 0.0
         # regime is empty/unknown
-        return 0.5
+        return 0.0
 
     def _score_vol_divergence(
         self,

@@ -80,6 +80,9 @@ Z_SCORE_THRESHOLD = 1.5             # 1.5 standard deviations
 # Minimum consecutive same-direction signals
 MIN_CONSECUTIVE_SIGNALS = 2         # 2 consecutive evaluations
 
+# Minimum |net_gamma| conviction for dealer-backed signals
+MIN_GAMMA_CONVICTION = 200
+
 # Global ceiling for net_gamma normalization
 GAMMA_CEILING = 2000.0
 
@@ -153,6 +156,15 @@ class ProbDistributionShift(BaseStrategy):
 
         # --- Validate data ---
         if not greeks_summary:
+            return []
+
+        # Gamma conviction gate — need meaningful dealer positioning
+        if abs(net_gamma) < MIN_GAMMA_CONVICTION:
+            return []
+
+        # Regime filter — NEUTRAL means no dealer pressure
+        regime = data.get("regime", "UNKNOWN")
+        if regime == "NEUTRAL":
             return []
 
         # --- Gamma conviction (non-blocking): stronger |net_gamma| = higher confidence ---
@@ -335,6 +347,7 @@ class ProbDistributionShift(BaseStrategy):
                 "volume_trend": vol_trend,
                 "price_trend": price_trend,
                 "net_gamma": round(net_gamma, 2),
+                "gamma_conviction_met": True,
                 "regime": data.get("regime", "UNKNOWN"),
                 "momentum_window_count": momentum_window.count,
                 "momentum_window_mean": round(momentum_window.mean, 4)
