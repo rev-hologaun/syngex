@@ -81,7 +81,7 @@ Z_SCORE_THRESHOLD = 1.5             # 1.5 standard deviations
 MIN_CONSECUTIVE_SIGNALS = 2         # 2 consecutive evaluations
 
 # Minimum |net_gamma| conviction for dealer-backed signals
-MIN_GAMMA_CONVICTION = 200
+MIN_GAMMA_CONVICTION = 10.0
 
 # Global ceiling for net_gamma normalization
 GAMMA_CEILING = 2000.0
