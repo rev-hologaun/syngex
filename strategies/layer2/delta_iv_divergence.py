@@ -50,7 +50,7 @@ logger = logging.getLogger("Syngex.Strategies.DeltaIVDivergence")
 MIN_DATA_POINTS = 3
 
 # Minimum divergence strength (combined z-score magnitude)
-MIN_DIVERSION_STRENGTH = 0.2
+MIN_DIVERSION_STRENGTH = 0.05
 
 # Stop distance
 STOP_PCT = 0.008  # 0.8%
@@ -636,7 +636,7 @@ class DeltaIVDivergence(BaseStrategy):
             return (0.0, 0.0, None)
 
         try:
-            walls = gex_calc.get_gamma_walls(threshold=500_000)
+            walls = gex_calc.get_gamma_walls(threshold=10.0)
         except Exception:
             return (0.0, 0.0, None)
 
