@@ -60,7 +60,7 @@ def normalize(val: float, vmin: float, vmax: float) -> float:
 MIN_CONFIDENCE = 0.20
 
 # Minimum |net_gamma| for dealer anchoring behind curve moves
-MIN_GAMMA_CONVICTION = 200
+MIN_GAMMA_CONVICTION = 10.0
 
 
 class SmileDynamics(BaseStrategy):
