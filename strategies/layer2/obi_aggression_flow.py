@@ -210,7 +210,7 @@ class ObiAggressionFlow(BaseStrategy):
         Evaluate gates and return confidence scores (0.0–1.0) for each.
         """
         # --- Gate A: Volume score ---
-        trade_size_mult = params.get("volume_spike_mult", 1.5)
+        trade_size_mult = params.get("volume_spike_mult", 1.2)
         trade_size_window = rolling_data.get(KEY_TRADE_SIZE_5M)
         gate_a_score = 1.0
         if trade_size_window and trade_size_window.count > 0:
@@ -226,21 +226,10 @@ class ObiAggressionFlow(BaseStrategy):
                 else:
                     gate_a_score = 0.0
 
-        # --- Gate B: Participant score ---
-        min_avg_participants = params.get("min_avg_participants", 1.0)
+        # --- Gate B: Participant score (REMOVED) ---
         gate_b_score = 1.0
-        depth_snapshot = data.get("depth_snapshot", {})
-        bid_avg = depth_snapshot.get("bid_avg_participants", 0)
-        ask_avg = depth_snapshot.get("ask_avg_participants", 0)
-        if bid_avg > 0 or ask_avg > 0:
-            avg_participants = (bid_avg + ask_avg) / 2
-            if avg_participants >= min_avg_participants:
-                gate_b_score = 1.0
-            else:
-                gate_b_score = avg_participants / min_avg_participants
 
         # --- Gate C: Spread score (0.0 on extreme widening) ---
-        max_spread_mult = params.get("max_spread_multiplier", 1.5)
         gate_c_score = 1.0
         spread_window = rolling_data.get(KEY_DEPTH_SPREAD_5M)
         if spread_window and spread_window.count > 0:
@@ -250,8 +239,8 @@ class ObiAggressionFlow(BaseStrategy):
                 spread_ratio = current_spread / ma_spread
                 if spread_ratio <= 1.0:
                     gate_c_score = 1.0
-                elif spread_ratio <= max_spread_mult:
-                    gate_c_score = 1.0 - (spread_ratio - 1.0) / max_spread_mult * 0.5
+                elif spread_ratio <= 4.0:
+                    gate_c_score = 1.0 - (spread_ratio - 1.0) / 4.0 * 0.5
                 else:
                     gate_c_score = 0.0
 
