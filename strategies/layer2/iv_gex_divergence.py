@@ -86,7 +86,7 @@ MIN_POSITIVE_GAMMA = 200              # deprecated — kept for backward compat
 MIN_POSITIVE_NORMALIZED_GAMMA = 5.0   # normalized gamma threshold for signal trigger
 
 # IV decline threshold: IV at ATM must be below rolling avg by this ratio
-IV_DECLINE_RATIO = 0.85             # IV below 85% of rolling avg
+IV_DECLINE_RATIO = 0.97             # IV below 97% of rolling avg (~3% decline)
 
 # Stop and target
 STOP_PCT = 0.006                      # 0.6% fallback stop
@@ -403,7 +403,10 @@ class IVGEXDivergence(BaseStrategy):
             return False, 0.0, 0.0
         iv_window = rolling_data.get(f"iv_{atm_strike}_5m")
         if iv_window is None or iv_window.count < MIN_IV_POINTS:
-            return False, 0.0, 0.0
+            fallback_window = self._find_any_iv_window(rolling_data, min_points=MIN_IV_POINTS)
+            if fallback_window is None:
+                return False, 0.0, 0.0
+            iv_window = fallback_window
         latest = iv_window.latest
         avg = iv_window.mean
         if latest is None or avg is None or avg == 0:
@@ -433,7 +436,10 @@ class IVGEXDivergence(BaseStrategy):
             return False, 0.0, 0.0
         iv_window = rolling_data.get(f"iv_{atm_strike}_5m")
         if iv_window is None or iv_window.count < MIN_IV_POINTS:
-            return False, 0.0, 0.0
+            fallback_window = self._find_any_iv_window(rolling_data, min_points=MIN_IV_POINTS)
+            if fallback_window is None:
+                return False, 0.0, 0.0
+            iv_window = fallback_window
         latest = iv_window.latest
         avg = iv_window.mean
         if latest is None or avg is None or avg == 0:
@@ -448,6 +454,14 @@ class IVGEXDivergence(BaseStrategy):
     def _find_atm_strike(self, gex_calc: Any, price: float) -> Optional[float]:
         """Find the nearest strike in the gamma ladder to the current price."""
         return gex_calc.get_atm_strike(price)
+
+    def _find_any_iv_window(self, rolling_data: Dict[str, Any], min_points: int = 5):
+        """Fallback: find any iv_* rolling window with sufficient data."""
+        for key, window in rolling_data.items():
+            if isinstance(key, str) and key.startswith("iv_") and key.endswith("_5m"):
+                if window is not None and window.count >= min_points:
+                    return window
+        return None
 
     # ------------------------------------------------------------------
     # v2: IV Skew Acceleration
@@ -464,7 +478,8 @@ class IVGEXDivergence(BaseStrategy):
         Score IV skew acceleration on a 0.0–1.0 scale.
 
         Always uses OTM Put skew (strike below ATM) regardless of signal direction.
-        Returns 0.0 if skew ROC <= 0, otherwise min(1.0, skew_roc / 0.20).
+        Bidirectional: SHORT rewards rising put skew (fear entering),
+        LONG rewards falling put skew (fear subsiding / capitulation).
         """
         atm_strike = gex_calc.get_atm_strike(price)
         if atm_strike is None:
@@ -502,10 +517,15 @@ class IVGEXDivergence(BaseStrategy):
         # Compute ROC
         skew_roc = (current_skew - skew_old) / abs(skew_old)
 
-        # Soft score: 0.0 if skew moving wrong direction, otherwise normalize
-        if skew_roc <= 0:
-            return 0.0
-        return min(1.0, skew_roc / 0.20)
+        # Bidirectional: SHORT wants rising put skew, LONG wants falling put skew
+        if signal_type == "SHORT":
+            if skew_roc <= 0:
+                return 0.0
+            return min(1.0, skew_roc / 0.20)
+        else:  # LONG
+            if skew_roc >= 0:
+                return 0.0
+            return min(1.0, abs(skew_roc) / 0.20)
 
     def _get_skew_data(
         self,
