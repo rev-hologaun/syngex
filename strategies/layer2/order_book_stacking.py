@@ -112,7 +112,7 @@ class OrderBookStacking(BaseStrategy):
         sis_bid_roc_window = rolling_data.get(KEY_SIS_BID_ROC_5M)
         sis_ask_roc_window = rolling_data.get(KEY_SIS_ASK_ROC_5M)
 
-        min_data = params.get("min_data_points", 10)
+        min_data = params.get("min_data_points", 5)
         if not sis_bid_window or sis_bid_window.count < min_data:
             return []
         if not sis_ask_window or sis_ask_window.count < min_data:
@@ -128,9 +128,9 @@ class OrderBookStacking(BaseStrategy):
         current_ask_roc = sis_ask_roc_window.values[-1]
 
         # 2. Compute continuous strength for each of the 4 signal types
-        sis_threshold = params.get("sis_threshold", 4.0)
-        roc_threshold = params.get("roc_threshold", -0.5)
-        moderate_threshold = params.get("moderate_threshold", 2.0)
+        sis_threshold = params.get("sis_threshold", 2.0)
+        roc_threshold = params.get("roc_threshold", -0.3)
+        moderate_threshold = params.get("moderate_threshold", 1.0)
 
         # STACK_BOUNCE_LONG — massive bid stack holding (high SIS, neutral/positive ROC)
         stack_bounce_long_strength = 0.0
@@ -207,7 +207,7 @@ class OrderBookStacking(BaseStrategy):
         )
 
         # Emit when signal_strength >= threshold
-        if signal_strength < 0.25:
+        if signal_strength < 0.15:
             logger.debug(
                 "Stacking: signal_strength %.3f below threshold for %s (%s)",
                 signal_strength, direction, signal_type,
@@ -333,7 +333,7 @@ class OrderBookStacking(BaseStrategy):
             return 0.5  # Can't evaluate — neutral
 
         current_participants = window.values[-1]
-        return min(1.0, current_participants / 5.0)
+        return min(1.0, current_participants / 10.0)
 
     def _gate_c_vol_score(
         self,
@@ -466,7 +466,7 @@ class OrderBookStacking(BaseStrategy):
 
         if part_window and part_window.count >= 1:
             current_parts = part_window.values[-1]
-            c5 = min(1.0, current_parts / 5.0)  # scales 0→1 as participants grow from 0→5
+            c5 = min(1.0, current_parts / 10.0)  # scales 0→1 as participants grow from 0→10
         else:
             c5 = 0.5  # neutral when no data
 
