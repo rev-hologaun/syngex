@@ -55,7 +55,7 @@ def normalize(val: float, vmin: float, vmax: float) -> float:
 MIN_CONFIDENCE = 0.20
 
 # Minimum |net_gamma| for dealer anchoring behind skew moves
-MIN_GAMMA_CONVICTION = 200
+MIN_GAMMA_CONVICTION = 10.0
 
 
 class SkewDynamics(BaseStrategy):
