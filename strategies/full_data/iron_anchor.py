@@ -91,7 +91,7 @@ class IronAnchor(BaseStrategy):
         max_confluence_distance = params.get("max_confluence_distance", 500.0)
         proximity_threshold_pct = params.get("proximity_threshold_pct", 0.002)  # 0.2% of price
         min_liq_wall_sigma = params.get("min_liq_wall_sigma", 3.0)
-        min_gamma_wall_gex = params.get("min_gamma_wall_gex", 2000)
+        min_gamma_wall_gex = params.get("min_gamma_wall_gex", 10.0)
         exhaustion_velocity_mult = params.get("exhaustion_velocity_mult", 0.8)
 
         prox_window = rolling_data.get(KEY_CONFLUENCE_PROX_5M)
