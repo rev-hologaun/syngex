@@ -23,7 +23,7 @@ Confidence model (7 components, simple average):
     6. Regime confidence            (0.0–1.0)
     7. Wall proximity bonus         (0.0–0.15)
 
-MIN_CONFIDENCE = 0.20
+MIN_CONFIDENCE = 0.12
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.VampMomentum")
 
-MIN_CONFIDENCE = 0.20
+MIN_CONFIDENCE = 0.12
 
 
 class VampMomentum(BaseStrategy):
@@ -171,12 +171,12 @@ class VampMomentum(BaseStrategy):
         # Deviation score: 0.0 at threshold, 1.0 at 5× threshold
         dev_threshold = vamp_mid_dev_threshold
         if abs(vamp_mid_dev) >= dev_threshold:
-            dev_score = min(1.0, abs(vamp_mid_dev) / (dev_threshold * 5))
+            dev_score = min(1.0, abs(vamp_mid_dev) / (dev_threshold * 3))
         else:
-            dev_score = abs(vamp_mid_dev) / (dev_threshold * 5) * 0.5  # partial credit below threshold
+            dev_score = abs(vamp_mid_dev) / (dev_threshold * 3) * 0.5  # partial credit below threshold
 
-        # ROC score: 0.0 at 0, 1.0 at 0.01
-        roc_score = min(1.0, abs(vamp_roc) / 0.01) if vamp_roc != 0 else 0.0
+        # ROC score: 0.0 at 0, 1.0 at 0.005
+        roc_score = min(1.0, abs(vamp_roc) / 0.005) if vamp_roc != 0 else 0.0
 
         # Combined trigger: 60% deviation + 40% ROC
         combined_trigger = 0.6 * dev_score + 0.4 * roc_score
@@ -185,17 +185,25 @@ class VampMomentum(BaseStrategy):
         long_score = 0.6 * dev_score + 0.4 * (1.0 if vamp_roc > vamp_roc_threshold else 0.0)
         short_score = 0.6 * dev_score + 0.4 * (1.0 if vamp_roc < vamp_roc_threshold else 0.0)
 
+        # Minimum absolute deviation cutoff — prevent sub-tick noise flipping signals
+        tick_threshold = underlying_price * 0.00005  # 0.005% minimum move
+        if abs(vamp_mid_dev) < tick_threshold:
+            logger.debug("VAMP: deviation %.4f below tick threshold %.4f", vamp_mid_dev, tick_threshold)
+            return []
+
         direction = None
-        if long_score > short_score and long_score > 0.20:
+        # Require both a minimum score AND a clear margin over the other side
+        margin = abs(long_score - short_score)
+        if long_score > short_score and long_score > 0.15 and margin > 0.05:
             direction = "LONG"
-        elif short_score > long_score and short_score > 0.20:
+        elif short_score > long_score and short_score > 0.15 and margin > 0.05:
             direction = "SHORT"
 
         if direction is None:
             return []
 
-        # 5b. Gate score filter — combined gate must be at least 0.15
-        if combined_gate_score < 0.15:
+        # 5b. Gate score filter — combined gate must be at least 0.05
+        if combined_gate_score < 0.05:
             return []
 
         # 6. Compute confidence (7-component model)
@@ -300,12 +308,7 @@ class VampMomentum(BaseStrategy):
             c2 = 0.10  # minimal baseline for misaligned ROC
 
         # 3. Participant conviction: avg_participants from 1.0→20.0, higher = higher
-        # Confidence penalty for ≤3 participants (increased from ≤2 threshold)
-        # Fewer participants = less conviction, so we apply a penalty
-        if avg_participants <= 3:
-            c3 = normalize(avg_participants, 1.0, 3.0) * 0.5  # halve confidence
-        else:
-            c3 = normalize(avg_participants, 1.0, 20.0)
+        c3 = normalize(avg_participants, 1.0, 20.0)
 
         # 4. Liquidity density: density_ratio from 0→2.0, higher = higher
         density_ratio = 0.0
@@ -323,7 +326,7 @@ class VampMomentum(BaseStrategy):
                 spread_ratio = min(2.0, current_spread / ma_spread)  # cap at 2× MA
         c5 = 1.0 - normalize(spread_ratio, 0.0, 2.0)  # normalize against 0→2.0 range
 
-        # 6. Regime confidence — 1.0 for low-vol regimes, 0.6 for mixed, 0.25 for high-vol
+        # 6. Regime confidence — 1.0 for low-vol regimes, 0.7 for mixed, 0.5 for high-vol
         regime_score = self._regime_confidence(regime)
 
         # 7. Wall proximity bonus — check if near gamma wall
@@ -342,9 +345,9 @@ class VampMomentum(BaseStrategy):
         if "low" in regime_lower or "calm" in regime_lower:
             return 1.0
         elif "medium" in regime_lower or "moderate" in regime_lower or "mixed" in regime_lower:
-            return 0.6
+            return 0.7
         elif "high" in regime_lower or "volatile" in regime_lower or "stress" in regime_lower:
-            return 0.25
+            return 0.5
         else:
             return 0.5  # unknown regime — neutral
 
