@@ -71,7 +71,7 @@ PRICE_STABLE_THRESHOLD = 0.005     # 0.5% change max
 GAMMA_CEILING = 2000.0  # Global ceiling for net_gamma normalization
 
 # Minimum |net_gamma| for meaningful dealer positioning
-MIN_GAMMA_CONVICTION = 200
+MIN_GAMMA_CONVICTION = 10.0
 
 # Stop and target
 STOP_PCT = 0.005                   # 0.5% stop
