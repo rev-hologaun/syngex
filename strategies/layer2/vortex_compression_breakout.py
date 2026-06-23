@@ -150,6 +150,16 @@ class VortexCompressionBreakout(BaseStrategy):
             spread_widening = 0.0
         gate_d = spread_widening > spread_widening_threshold
 
+        # Debug: log all gate states for bottleneck tracking
+        logger.debug(
+            "VORTEX_GATE | %s | A=%s(%s) B=%s(%s) C=%s(%s) D=%s(%s)",
+            data.get("symbol", "?"),
+            gate_a, current_spread_z,
+            gate_b, current_liq_density,
+            gate_c, current_vol_spike,
+            gate_d, spread_widening,
+        )
+
         # All 4 gates must pass
         if not (gate_a and gate_b and gate_c and gate_d):
             return []
@@ -162,12 +172,17 @@ class VortexCompressionBreakout(BaseStrategy):
             direction = "SHORT"
 
         # 5. VAMP validation
-        use_vamp_validation = params.get("use_vamp_validation", True)
+        use_vamp_validation = params.get("use_vamp_validation", False)
         vamp_validated = True
+        vamp_levels = rolling_data.get(KEY_VAMP_LEVELS)
         if use_vamp_validation:
             vamp_validated = self._vamp_validation(rolling_data, direction)
 
         if not vamp_validated:
+            logger.info(
+                "VORTEX_VAMP_KILL | %s | part_eq=%.4f vamp_mid_dev=%s direction=%s",
+                data.get("symbol", "?"), current_part_eq, str(vamp_levels.get("vamp_mid_dev")) if vamp_levels else "no_vamp", direction,
+            )
             return []
 
         # 6. Compute confidence (7-component model)
@@ -177,11 +192,17 @@ class VortexCompressionBreakout(BaseStrategy):
             rolling_data, data, params, regime, gex_calc,
         )
 
+        computed_confidence = confidence
         min_confidence = MIN_CONFIDENCE
         max_confidence = 1.0
         confidence = max(min_confidence, confidence)
 
         if confidence < min_confidence:
+            logger.debug(
+                "VORTEX_CONF_LOW | %s | raw=%.3f floored=%.3f threshold=%.3f",
+                data.get("symbol", "?"), computed_confidence,
+                max(min_confidence, computed_confidence), min_confidence
+            )
             return []
 
         # 7. Build signal
