@@ -148,7 +148,7 @@ class ExtrinsicIntrinsicFlow(BaseStrategy):
 
         rolling_data = data.get("rolling_data", {})
         net_gamma = data.get("net_gamma_normalized", 0.0)
-        self._min_net_gamma = self._params.get("min_net_gamma", 5000.0)
+        self._min_net_gamma = self._params.get("min_net_gamma", 10.0)
         greeks_summary = data.get("greeks_summary", {})
 
         # --- Validate data ---
