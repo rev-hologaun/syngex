@@ -82,7 +82,7 @@ PRICE_UP_THRESHOLD = 0.001       # 0.1% rise over 5m window
 PRICE_DOWN_THRESHOLD = -0.001    # 0.1% drop over 5m window
 
 # Minimum absolute net_gamma for a signal to fire (dealer positioning threshold)
-MIN_GAMMA_THRESHOLD = 200
+MIN_GAMMA_THRESHOLD = 10.0
 
 
 class GammaVolumeConvergence(BaseStrategy):
@@ -120,21 +120,21 @@ class GammaVolumeConvergence(BaseStrategy):
             return []
 
         rolling_data = data.get("rolling_data", {})
-        net_gamma = data.get("net_gamma_normalized", 0)
+        net_gamma_normalized = data.get("net_gamma_normalized", 0)
         regime = data.get("regime", "neutral")
 
         signals: List[Signal] = []
 
         # Check LONG ignition
         long_sig = self._check_long(
-            underlying_price, gex_calc, rolling_data, net_gamma,
+            underlying_price, gex_calc, rolling_data, net_gamma_normalized,
         )
         if long_sig:
             signals.append(long_sig)
 
         # Check SHORT ignition
         short_sig = self._check_short(
-            underlying_price, gex_calc, rolling_data, net_gamma,
+            underlying_price, gex_calc, rolling_data, net_gamma_normalized,
         )
         if short_sig:
             signals.append(short_sig)
@@ -150,7 +150,7 @@ class GammaVolumeConvergence(BaseStrategy):
         price: float,
         gex_calc: Any,
         rolling_data: Dict[str, Any],
-        net_gamma: float,
+        net_gamma_normalized: float,
     ) -> Optional[Signal]:
         """
         Evaluate LONG ignition signal.
@@ -169,7 +169,7 @@ class GammaVolumeConvergence(BaseStrategy):
             return None
 
         # Gamma magnitude gate — need meaningful dealer positioning
-        if abs(net_gamma) < MIN_GAMMA_THRESHOLD:
+        if abs(net_gamma_normalized) < MIN_GAMMA_THRESHOLD:
             return None
 
         # Check delta acceleration
@@ -215,7 +215,7 @@ class GammaVolumeConvergence(BaseStrategy):
         # All conditions met — compute confidence and build signal
         confidence = self._compute_confidence(
             price, delta_accel, gamma_accel,
-            aggressor_ratio, rolling_data, "LONG", net_gamma, gex_calc,
+            aggressor_ratio, rolling_data, "LONG", net_gamma_normalized, gex_calc,
         )
         if confidence < MIN_CONFIDENCE:
             return None
@@ -271,7 +271,7 @@ class GammaVolumeConvergence(BaseStrategy):
                 "volume_up_spike": True,
                 "price_trend": "UP",
                 "rolling_trend": rolling_trend,
-                "net_gamma": round(net_gamma, 2),
+                "net_gamma": round(net_gamma_normalized, 2),
                 "gamma_regime_aligned": True,
                 "call_wall_above": call_wall_above["strike"] if call_wall_above else None,
                 "distance_to_call_wall_pct": (
@@ -310,7 +310,7 @@ class GammaVolumeConvergence(BaseStrategy):
         price: float,
         gex_calc: Any,
         rolling_data: Dict[str, Any],
-        net_gamma: float,
+        net_gamma_normalized: float,
     ) -> Optional[Signal]:
         """
         Evaluate SHORT ignition signal.
@@ -329,7 +329,7 @@ class GammaVolumeConvergence(BaseStrategy):
             return None
 
         # Gamma magnitude gate — need meaningful dealer positioning
-        if abs(net_gamma) < MIN_GAMMA_THRESHOLD:
+        if abs(net_gamma_normalized) < MIN_GAMMA_THRESHOLD:
             return None
 
         # Check delta acceleration (looking for downward acceleration)
@@ -379,7 +379,7 @@ class GammaVolumeConvergence(BaseStrategy):
         # All conditions met — compute confidence and build signal
         confidence = self._compute_confidence(
             price, delta_accel, gamma_accel,
-            aggressor_ratio, rolling_data, "SHORT", net_gamma, gex_calc,
+            aggressor_ratio, rolling_data, "SHORT", net_gamma_normalized, gex_calc,
         )
         if confidence < MIN_CONFIDENCE:
             return None
@@ -435,7 +435,7 @@ class GammaVolumeConvergence(BaseStrategy):
                 "volume_down_spike": True,
                 "price_trend": "DOWN",
                 "rolling_trend": rolling_trend,
-                "net_gamma": round(net_gamma, 2),
+                "net_gamma": round(net_gamma_normalized, 2),
                 "gamma_regime_aligned": True,
                 "put_wall_below": put_wall_below["strike"] if put_wall_below else None,
                 "distance_to_put_wall_pct": (
@@ -755,7 +755,7 @@ class GammaVolumeConvergence(BaseStrategy):
         aggressor_ratio: float,
         rolling_data: Dict[str, Any],
         direction: str,
-        net_gamma: float,
+        net_gamma_normalized: float,
         gex_calc: Any,
     ) -> float:
         """
