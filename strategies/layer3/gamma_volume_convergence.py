@@ -70,7 +70,7 @@ VOLUME_SPIKE_RATIO = 1.20
 STOP_PCT = 0.005
 
 # Minimum confidence to emit a signal (raised from 0.25)
-MIN_CONFIDENCE = 0.20
+MIN_CONFIDENCE = 0.05
 
 # Maximum confidence — micro-signals shouldn't carry max conviction
 

@@ -84,7 +84,7 @@ def normalize(val: float, vmin: float, vmax: float) -> float:
 STOP_PCT = 0.005                        # 0.5% stop
 
 # Min confidence — raised from 0.25 to 0.35 (v2 Conviction-Master)
-MIN_CONFIDENCE = 0.35
+MIN_CONFIDENCE = 0.05
 
 # Min data points — need more data for extrinsic tracking
 MIN_DATA_POINTS = 5

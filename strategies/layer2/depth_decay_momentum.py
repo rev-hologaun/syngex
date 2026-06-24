@@ -43,7 +43,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.DepthDecayMomentum")
 
-MIN_CONFIDENCE = 0.20
+MIN_CONFIDENCE = 0.05
 
 
 class DepthDecayMomentum(BaseStrategy):

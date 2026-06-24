@@ -38,7 +38,7 @@ from strategies.rolling_keys import (
 
 logger = logging.getLogger("Syngex.Strategies.ParticipantDiversityConviction")
 
-MIN_CONFIDENCE = 0.20
+MIN_CONFIDENCE = 0.05
 
 
 def normalize(val: float, vmin: float, vmax: float) -> float:

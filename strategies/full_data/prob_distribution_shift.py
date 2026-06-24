@@ -90,7 +90,7 @@ GAMMA_CEILING = 2000.0
 STOP_PCT = 0.005                    # 0.5% stop
 
 # Min confidence (raised from 0.25 → 0.35 for v2)
-MIN_CONFIDENCE = 0.20
+MIN_CONFIDENCE = 0.05
 
 # Min strikes with data
 MIN_STRIKES_WITH_DATA = 5           # Need at least 5 strikes for distribution

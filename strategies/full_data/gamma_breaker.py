@@ -54,7 +54,7 @@ def normalize(val: float, vmin: float, vmax: float) -> float:
     return max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
 
 
-MIN_CONFIDENCE = 0.20
+MIN_CONFIDENCE = 0.05
 
 # Normalized wall strength threshold (matches global 2K ceiling)
 MIN_GAMMA_STRENGTH = 2000

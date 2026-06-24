@@ -52,7 +52,7 @@ PIN_MAX_RANGE_PCT = 0.003     # 0.3% — max rolling range for pin detection
 WALL_PROXIMITY_PCT = 0.003    # 0.3% — price must be near wall for breakout
 VOLUME_SURGE_MULT = 1.5       # 1.5× average volume = confirmation
 MIN_WALL_GEX = 100            # Minimum |GEX| for wall consideration (normalized scale)
-MIN_CONFIDENCE = 0.20         # was 0.25
+MIN_CONFIDENCE = 0.05         # was 0.25
 TARGET_RISK_MULT = 2.0        # 2× risk for squeeze targets
 MIN_MASSIVE_WALL_GEX = 500    # Fallback threshold for POSITIVE regime filter (normalized scale)
 

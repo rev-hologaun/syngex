@@ -45,7 +45,7 @@ Confidence factors (10 components, simple average):
     9. Gamma density decline      (0.0–1.0) — from _score_gamma_density_decline
     10. Gamma direction           (0.0–1.0) — from normalized net gamma direction
 
-    MIN_CONFIDENCE = 0.20 (signals below this are suppressed)
+    MIN_CONFIDENCE = 0.05 (signals below this are suppressed)
 """
 
 from __future__ import annotations
@@ -93,7 +93,7 @@ STOP_PCT = 0.006                      # 0.6% fallback stop
 TARGET_RISK_MULT = 1.5                # 1.5× risk toward mean
 
 # Min confidence threshold for signal emission
-MIN_CONFIDENCE = 0.20
+MIN_CONFIDENCE = 0.05
 
 # v2 Volatility-Snap parameters
 IV_SKEW_OTM_PCT = 0.05              # 5% OTM for skew calculation

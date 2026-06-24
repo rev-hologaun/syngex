@@ -72,7 +72,7 @@ def normalize(val: float, vmin: float, vmax: float) -> float:
 
 logger = logging.getLogger("Syngex.Strategies.OrderBookStacking")
 
-MIN_CONFIDENCE = 0.20
+MIN_CONFIDENCE = 0.05
 
 
 class OrderBookStacking(BaseStrategy):

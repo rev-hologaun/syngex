@@ -68,7 +68,7 @@ STOP_PCT = 0.005  # 0.5% stop
 TARGET_PCT = 0.010  # 1.0% target
 
 # Min/max confidence
-MIN_CONFIDENCE = 0.20  # Minimum confidence threshold for signal emission
+MIN_CONFIDENCE = 0.05  # Minimum confidence threshold for signal emission
 
 # Min data points
 MIN_DATA_POINTS = 5
