@@ -17,6 +17,8 @@ LOG_DIR = Path("/home/hologaun/projects/syngex/log")
 OUTPUT_FILE = Path("/home/hologaun/projects/syngex/analysis/analyzed_strategies_v3.md")
 
 CONFIDENCE_BUCKETS = [
+    ("5-9%",    0.05, 0.10),
+    ("10-19%",  0.10, 0.20),
     ("20-29%",  0.20, 0.30),
     ("30-39%",  0.30, 0.40),
     ("40-49%",  0.40, 0.50),
@@ -82,7 +84,7 @@ def load_all_outcomes():
                     rec["_symbol"] = symbol
                     # Filter out signals below minimum confidence threshold
                     min_confidence = rec.get("confidence", 0.0)
-                    if min_confidence < 0.20:
+                    if min_confidence < 0.05:
                         continue
                     all_signals.append(rec)
                 except json.JSONDecodeError:
@@ -887,7 +889,7 @@ def generate_report(all_signals, strategy_results):
     lines.append("")
     report_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     report_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    lines.append(f"**Date:** {report_date}  |  **Generated:** {report_time}  |  **Total Resolved Signals:** {len(all_signals):,}  |  **Strategies Analyzed:** {len(strategy_results)}  |  **Confidence ≥ 20%**  |  **Regular Hours**")
+    lines.append(f"**Date:** {report_date}  |  **Generated:** {report_time}  |  **Total Resolved Signals:** {len(all_signals):,}  |  **Strategies Analyzed:** {len(strategy_results)}  |  **Confidence ≥ 5%**  |  **Regular Hours**")
     lines.append("")
     lines.append("---")
     lines.append("")
