@@ -215,7 +215,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
 
         # 5. Build signal
         entry = price
-        reverse = -1 if trend_direction == "UP" else 1
+        reverse = 1 if trend_direction == "UP" else -1
 
         # Stop: beyond recent swing
         swing_pct = STOP_PCT
