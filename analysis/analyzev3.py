@@ -174,8 +174,14 @@ def analyze_strategy(signals, market_opens=None):
         cb = bucket_confidence(conf)
         cb_data = r["confidence_buckets"][cb]
         cb_data["total"] += 1
-        if outcome == "WIN": cb_data["wins"] += 1
-        elif outcome == "LOSS": cb_data["losses"] += 1
+        if outcome == "WIN":
+            cb_data["wins"] += 1
+            cb_data["pnl"] += pnl
+            cb_data["pnl_pct"] += pnl_pct
+        elif outcome == "LOSS":
+            cb_data["losses"] += 1
+            cb_data["pnl"] += pnl
+            cb_data["pnl_pct"] += pnl_pct
         elif outcome == "CLOSED":
             cb_data["closed"] += 1
             cb_data["closed_pnl"] += pnl
@@ -831,7 +837,7 @@ def fmt_pct(v):
     return f"{v:.1f}%"
 
 
-def fmt_num(v, decimals=1):
+def fmt_num(v, decimals=3):
     return f"{v:,.{decimals}f}"
 
 

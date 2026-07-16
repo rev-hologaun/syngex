@@ -12,8 +12,10 @@ Logic:
     4. Enter in OPPOSITE direction of the exhausted trend
 
 Exit:
-    - Stop: beyond the recent swing high/low
-    - Target: regime-adaptive mean reversion to rolling average
+    - Stop: beyond the swing high/low with minimum 0.6% buffer
+    - Target: swing-range based (60-100% of 5m range depending on regime)
+              minimum 0.3% target distance enforced
+    - Gate: minimum 1:1 risk-reward ratio required to fire signal
 
 Confidence factors (v2 — 6 components):
     - Trend strength (0.0–0.20) — soft
@@ -84,11 +86,11 @@ IV_ACCEL_PENALTY = -0.05                    # confidence penalty when IV opposes
 WALL_PROXIMITY_PCT = 0.003                # within 0.3% of wall
 WALL_PROXIMITY_BONUS = 0.10               # confidence bonus
 
-# Regime-adaptive targets
-NEGATIVE_GAMMA_TARGET_MULT = 1.5          # NEG regime: let it run
-POSITIVE_GAMMA_TARGET_MULT = 0.8          # POS regime: quick profits
-NEUTRAL_GAMMA_TARGET_MULT = 1.0           # baseline
-GAMMA_INTENSITY_THRESHOLD = 500000        # threshold for regime classification
+# --- Regime-adaptive targets (DEPRECATED — replaced by swing-range targets) ---
+# NEGATIVE_GAMMA_TARGET_MULT = 1.5          # NEG regime: let it run
+# POSITIVE_GAMMA_TARGET_MULT = 0.8          # POS regime: quick profits
+# NEUTRAL_GAMMA_TARGET_MULT = 1.0           # baseline
+GAMMA_INTENSITY_THRESHOLD = 500000        # threshold for regime classification (wall proximity)
 
 
 class DeltaVolumeExhaustion(BaseStrategy):
@@ -217,18 +219,61 @@ class DeltaVolumeExhaustion(BaseStrategy):
         entry = price
         reverse = 1 if trend_direction == "UP" else -1
 
-        # Stop: beyond recent swing
-        swing_pct = STOP_PCT
-        stop = entry * (1 + swing_pct * reverse)
+        # ---- Stop: use actual swing high/low as reference ----
+        if trend_direction == "UP":
+            # Exhausted UP trend → SHORT → stop above the swing high
+            swing_level = price_window.max
+        else:
+            # Exhausted DOWN trend → LONG → stop below the swing low
+            swing_level = price_window.min
+
+        # Distance from entry to swing level gives us a natural stop distance
+        base_stop_dist = abs(entry - swing_level)
+
+        # Ensure minimum stop distance (swing could be right at entry)
+        min_stop_pct = max(STOP_PCT, 0.006)  # at least 0.6%
+        min_stop_distance = entry * min_stop_pct
+        stop_distance = max(base_stop_dist, min_stop_distance)
+
+        # Place stop just beyond the swing level
+        stop = entry + stop_distance * reverse
         risk = abs(entry - stop)
 
-        # Target: regime-adaptive mean reversion
-        rolling_mean = price_window.mean or entry
-        regime_target_mult = self._compute_regime_target_mult(
-            net_gamma, regime
-        )
-        target = entry + (rolling_mean - entry) * regime_target_mult
-        target = max(target, stop + risk * 0.1)  # At least a little room
+        # ---- Minimum R:R gate — don't fire if no profitable path ----
+        target_min_risk_mult = 1.0  # require at least 1:1 RR before any other scaling
+        if risk > 0 and risk * target_min_risk_mult > min_stop_distance:
+            pass  # OK, proceed
+        else:
+            return None
+
+        # ---- Target: swing-range based with regime scaling ----
+        # Swing range = full 5m max-min (the exhausted move)
+        swing_range = price_window.range
+
+        # Determine what fraction of swing to aim for
+        if regime == "POSITIVE":
+            # Positive gamma = dampened, quick profit
+            target_frac = 0.6
+        elif regime == "NEGATIVE":
+            # Negative gamma = momentum fade, let it run
+            target_frac = 1.0
+        elif regime == "NEUTRAL":
+            target_frac = 0.75
+        else:
+            target_frac = 0.75
+
+        target_dist = swing_range * target_frac
+
+        # Enforce minimum target distance (0.3% of entry)
+        min_target_dist = entry * 0.003
+        target_dist = max(target_dist, min_target_dist)
+
+        if trend_direction == "UP":
+            # SHORT → target is below entry
+            target = entry - target_dist
+        else:
+            # LONG → target is above entry
+            target = entry + target_dist
 
         direction = Direction.SHORT if trend_direction == "UP" else Direction.LONG
         reason = (
@@ -276,7 +321,6 @@ class DeltaVolumeExhaustion(BaseStrategy):
                 "nearest_wall_type": nearest_wall_type,
                 "wall_proximity_bonus": wall_proximity_bonus,
                 "regime": regime,
-                "regime_target_mult": regime_target_mult,
                 "net_gamma": round(net_gamma, 2),
                 "risk": round(risk, 2),
                 "risk_reward_ratio": round(
@@ -496,22 +540,8 @@ class DeltaVolumeExhaustion(BaseStrategy):
     def _compute_regime_target_mult(
         self, net_gamma: float, regime: str
     ) -> float:
-        """
-        Compute target multiplier based on regime intensity.
-
-        Args:
-            net_gamma: Current net gamma value
-            regime: Regime string ("NEGATIVE", "POSITIVE", "NEUTRAL")
-
-        Returns:
-            Target multiplier (0.8–1.5)
-        """
-        if regime == "NEGATIVE":
-            return NEGATIVE_GAMMA_TARGET_MULT
-        elif regime == "POSITIVE":
-            return POSITIVE_GAMMA_TARGET_MULT
-        else:
-            return NEUTRAL_GAMMA_TARGET_MULT
+        """[DEPRECATED] Kept for API compatibility. New logic uses swing-range targets."""
+        return 1.0
 
     # ------------------------------------------------------------------
     # Confidence Computation (v2 — 6 components)
