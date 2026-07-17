@@ -64,10 +64,13 @@ DELTA_DECLINE_RATIO = 0.90            # Delta below 90% of rolling avg
 MIN_TREND_DURATION = 2                # At least 2 candles in trend (was 3)
 
 # Stop distance
-STOP_PCT = 0.008                      # 0.8% beyond swing
+STOP_PCT = 0.012                      # 1.2% beyond swing
 
 # Minimum confidence to emit a signal
 MIN_CONFIDENCE = 0.05
+
+# Exit scaling
+TARGET_SCALE_MULT = 1.5               # multiply all target/regime fractions by this
 
 # Target: mean reversion to rolling average
 MEAN_REVERSION_MULT = 1.0             # 1.0× distance — target is the rolling mean
@@ -231,7 +234,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
         base_stop_dist = abs(entry - swing_level)
 
         # Ensure minimum stop distance (swing could be right at entry)
-        min_stop_pct = max(STOP_PCT, 0.006)  # at least 0.6%
+        min_stop_pct = max(STOP_PCT, 0.009)  # at least 0.9%
         min_stop_distance = entry * min_stop_pct
         stop_distance = max(base_stop_dist, min_stop_distance)
 
@@ -251,21 +254,17 @@ class DeltaVolumeExhaustion(BaseStrategy):
         swing_range = price_window.range
 
         # Determine what fraction of swing to aim for
-        if regime == "POSITIVE":
-            # Positive gamma = dampened, quick profit
-            target_frac = 0.6
-        elif regime == "NEGATIVE":
-            # Negative gamma = momentum fade, let it run
-            target_frac = 1.0
-        elif regime == "NEUTRAL":
-            target_frac = 0.75
-        else:
-            target_frac = 0.75
+        BASE_TARGET_FRACS = {
+            "POSITIVE": 0.6,
+            "NEGATIVE": 1.0,
+            "NEUTRAL": 0.75,
+        }
+        target_frac = BASE_TARGET_FRACS.get(regime, 0.75) * TARGET_SCALE_MULT
 
         target_dist = swing_range * target_frac
 
-        # Enforce minimum target distance (0.3% of entry)
-        min_target_dist = entry * 0.003
+        # Enforce minimum target distance (at least TARGET_SCALE_MULT:1 RR)
+        min_target_dist = risk * TARGET_SCALE_MULT
         target_dist = max(target_dist, min_target_dist)
 
         if trend_direction == "UP":
