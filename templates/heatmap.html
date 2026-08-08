@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Syngex Heatmap Dashboard</title>
+    <title>{% if v2 %}Syngex V2 Heatmap Dashboard{% else %}Syngex Heatmap Dashboard{% endif %}</title>
     <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.4/dist/socket.io.min.js"></script>
     <style>
         :root {
@@ -624,7 +624,7 @@
 
     <!-- Header -->
     <div class="header">
-        <div class="header-title">🕸️ <span>Syngex</span> Heatmap</div>
+        <div class="header-title">🕸️ <span>Syngex</span> Heatmap{% if v2 %} <span style="color:#f59e0b;">(V2)</span>{% endif %}</div>
         <div class="header-center" id="symbolText">—</div>
         <div class="header-meta">
             <span id="regimeBadge" class="regime-badge regime-unknown">—</span>

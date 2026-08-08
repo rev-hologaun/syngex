@@ -316,7 +316,8 @@ class SyngexOrchestrator:
         self._dashboard_process: subprocess.Popen | None = None
         self._heatmap_process: subprocess.Popen | None = None
         self._heatmap_stderr: Any = None
-        self._v2_dashboard_process: subprocess.Popen | None = None
+        self._v2_heatmap_process: subprocess.Popen | None = None
+        self._v2_heatmap_stderr: Any = None
         self._state_export_timer: float = 0.0
 
         # Depth snapshot participant/trade fields (explicit init, no getattr)
@@ -515,7 +516,7 @@ class SyngexOrchestrator:
         if self.mode == "dashboard":
             self._start_dashboard()
             self._start_heatmap()
-            self._start_v2_dashboard()
+            self._start_v2_heatmap()
 
         try:
             # Start config watcher task
@@ -581,7 +582,7 @@ class SyngexOrchestrator:
         self._stop_dashboard()
         # Stop heatmap subprocess
         self._stop_heatmap()
-        self._stop_v2_dashboard()
+        self._stop_v2_heatmap()
 
         if self._client:
             await self._client.stop()
@@ -3024,66 +3025,76 @@ class SyngexOrchestrator:
                 self._heatmap_stderr = None
             self._heatmap_process = None
 
-    def _start_v2_dashboard(self) -> None:
-        """Spawn the V2 Streamlit dashboard as a background subprocess (v2 signals only)."""
-        if self._v2_dashboard_process is not None:
+    def _start_v2_heatmap(self) -> None:
+        """Spawn the V2 Heatmap Dashboard as a background subprocess on port self._port + 2.
+
+        Port layout per symbol: stream=N+1 (original), heatmap=N+2 (v2), future=N+3+ etc.
+        """
+        if self._v2_heatmap_process is not None:
             return  # already running
+
+        v2_heatmap_port = self._port + 2
 
         env = os.environ.copy()
         env["SYNGEX_SYMBOL"] = self.symbol
+        env["HEATMAP_PORT"] = str(v2_heatmap_port)
 
-        script_path = Path(__file__).parent / "app_dashboard_v2.py"
-        venv_streamlit = Path(__file__).parent / "venv" / "bin" / "streamlit"
-        v2_port = self._port + 2  # e.g., 8262 when --port=8260
+        script_path = Path(__file__).parent / "app_heatmap_v2.py"
+        venv_python = Path(__file__).parent / "venv" / "bin" / "python"
+        log_path = self._data_dir.parent / "log" / "heatmap_v2.log"
 
-        logger.info("Starting V2 Command Center…")
+        logger.info("Starting V2 Heatmap Dashboard (port %d)…", v2_heatmap_port)
 
         try:
-            self._v2_dashboard_process = subprocess.Popen(
-                [
-                    str(venv_streamlit),
-                    "run",
-                    str(script_path),
-                    "--server.headless",
-                    "true",
-                    "--browser.gatherUsageStats",
-                    "false",
-                    "--server.port",
-                    str(v2_port),
-                ],
+            self._v2_heatmap_stderr = open(log_path, "a")  # append mode — avoids PIPE buffer deadlock
+            self._v2_heatmap_process = subprocess.Popen(
+                [str(venv_python), str(script_path)],
                 cwd=str(Path(__file__).parent),
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=self._v2_heatmap_stderr,
                 env=env,
             )
-            logger.info(
-                "V2 Command Center started (PID %d, port %d).  "
-                "Open http://localhost:%d in a browser.",
-                self._v2_dashboard_process.pid,
-                v2_port,
-                v2_port,
-            )
+            # Check for immediate startup failures
+            ret = self._v2_heatmap_process.poll()
+            if ret is not None:
+                self._v2_heatmap_process.wait()
+                try:
+                    with open(log_path, "r") as f:
+                        err_msg = f.read().strip()
+                except OSError:
+                    err_msg = "unknown"
+                logger.warning(
+                    "V2 Heatmap failed to start (exit %d): %s", ret, err_msg[:500]
+                )
         except FileNotFoundError:
-            logger.warning("Streamlit not found — V2 Dashboard will not start.")
+            logger.warning(
+                "Python/Flask not found at %s — V2 Heatmap will not start.", venv_python
+            )
         except Exception as exc:
-            logger.warning("Failed to start V2 Command Center: %s", exc)
+            logger.warning("Failed to start V2 Heatmap: %s", exc)
 
-    def _stop_v2_dashboard(self) -> None:
-        """Terminate the V2 Streamlit Command Center subprocess."""
-        if self._v2_dashboard_process is None:
+    def _stop_v2_heatmap(self) -> None:
+        """Terminate the V2 Heatmap Dashboard subprocess."""
+        if self._v2_heatmap_process is None:
             return
 
-        logger.info("Stopping V2 Command Center (PID %d)…", self._v2_dashboard_process.pid)
+        logger.info("Stopping V2 Heatmap (PID %d)…", self._v2_heatmap_process.pid)
         try:
-            self._v2_dashboard_process.terminate()
-            self._v2_dashboard_process.wait(timeout=5)
+            self._v2_heatmap_process.terminate()
+            self._v2_heatmap_process.wait(timeout=5)
         except Exception:
             try:
-                self._v2_dashboard_process.kill()
+                self._v2_heatmap_process.kill()
             except Exception:
                 pass
         finally:
-            self._v2_dashboard_process = None
+            if self._v2_heatmap_stderr is not None:
+                try:
+                    self._v2_heatmap_stderr.close()
+                except Exception:
+                    pass
+                self._v2_heatmap_stderr = None
+            self._v2_heatmap_process = None
 
     # ------------------------------------------------------------------
     # Phi Accumulator Crash Recovery
