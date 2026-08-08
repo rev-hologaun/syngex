@@ -78,7 +78,7 @@ def load_gex_state() -> dict | None:
 @st.cache_data(ttl=2)
 def load_signals(n: int = 20) -> list[dict]:
     """Load the N most recent signals from the shared signals log."""
-    signals_file = LOG_DIR / "signals.jsonl"
+    signals_file = LOG_DIR / f"signals{_current_symbol}_v2.jsonl"
     if not signals_file.exists():
         return []
     try:

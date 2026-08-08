@@ -84,6 +84,7 @@ class SignalTracker:
         log_dir: str = "log",
         symbol: str = "UNKNOWN",
         strategy_hold_times: Optional[Dict[str, int]] = None,
+        version: str = "",
     ) -> None:
         """
         Initialize the SignalTracker.
@@ -102,6 +103,7 @@ class SignalTracker:
         self._log_dir = Path(log_dir)
         self._log_dir.mkdir(parents=True, exist_ok=True)
         self._symbol = symbol
+        self._version = version  # e.g., "" or "_v2"
 
         # Per-strategy statistics
         self._strategy_stats: Dict[str, Dict[str, Any]] = {}
@@ -187,7 +189,7 @@ class SignalTracker:
         # SignalTracker owns all signal persistence — no global log.
         # StrategyEngine._log_signal() delegates here via track().
         try:
-            sym_path = self._log_dir / f"signals_{self._symbol}.jsonl"
+            sym_path = self._log_dir / f"signals_{self._symbol}{self._version}.jsonl"
             with open(sym_path, "a") as f:
                 f.write(json_line)
         except OSError:
@@ -382,7 +384,7 @@ class SignalTracker:
 
     def _save_resolved(self) -> None:
         """Append newly resolved signals to disk for persistence."""
-        log_path = self._log_dir / f"signal_outcomes_{self._symbol}.jsonl"
+        log_path = self._log_dir / f"signal_outcomes_{self._symbol}{self._version}.jsonl"
         # Only write signals that haven't been persisted yet
         new_start = self._saved_count
         for r in self._resolved_signals[new_start:]:
@@ -412,7 +414,7 @@ class SignalTracker:
 
     def _load_resolved(self) -> None:
         """Load previously resolved signals from disk."""
-        log_path = self._log_dir / f"signal_outcomes_{self._symbol}.jsonl"
+        log_path = self._log_dir / f"signal_outcomes_{self._symbol}{self._version}.jsonl"
         if not log_path.exists():
             return
         try:

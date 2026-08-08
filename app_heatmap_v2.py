@@ -55,7 +55,7 @@ class RunningStats:
 
 
 def _load_stats_from_disk(symbol: str) -> Dict[str, RunningStats]:
-    log_path = LOG_DIR / f"signal_outcomes_{symbol}.jsonl"
+    log_path = LOG_DIR / f"signal_outcomes_{symbol}_v2.jsonl"
     stats: Dict[str, RunningStats] = {}
     if not log_path.exists():
         return stats
@@ -147,7 +147,7 @@ def _transform_for_socket(data: dict) -> dict:
 
     # Load signal counts from per-symbol signal log (authoritative, survives restarts)
     try:
-        sig_log_path = LOG_DIR / f"signals_{SYMBOL}.jsonl"
+        sig_log_path = LOG_DIR / f"signals_{SYMBOL}_v2.jsonl"
         if sig_log_path.exists():
             strat_signal_counts: Dict[str, int] = {}
             for line in sig_log_path.read_text().strip().splitlines():

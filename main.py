@@ -339,6 +339,7 @@ class SyngexOrchestrator:
 
         # Signal outcome tracker
         self._signal_tracker: SignalTracker | None = None
+        self._signal_tracker_v2: SignalTracker | None = None
 
         # Per-strike computation cache (eliminate redundant GEXCalculator calls)
         self._strike_delta_cache: Dict[float, Dict[str, float]] = {}
@@ -420,6 +421,15 @@ class SyngexOrchestrator:
             strategy_hold_times=strategy_hold_times,
             log_dir=str(log_dir),
             symbol=self.symbol,
+        )
+
+        # V2 signal tracker (separate log files)
+        self._signal_tracker_v2 = SignalTracker(
+            max_hold_seconds=0,  # matches v1: no global max hold
+            log_dir=str(self._data_dir),
+            symbol=self.symbol,
+            strategy_hold_times={},
+            version="_v2",
         )
 
         # Apply global config to EngineConfig
@@ -544,6 +554,19 @@ class SyngexOrchestrator:
                             for r in resolved:
                                 logger.info(
                                     "SIGNAL_RESOLVED  |  %s  |  %s  |  %s  |  PnL: $%.2f  |  Hold: %.0fs",
+                                    r.open_signal.strategy_id,
+                                    r.open_signal.direction,
+                                    r.outcome.value,
+                                    r.pnl,
+                                    r.hold_time,
+                                )
+                    if self._signal_tracker_v2 and self._calculator:
+                        price = self._calculator.get_summary()["underlying_price"]
+                        resolved_v2 = self._signal_tracker_v2.update(price, time.time())
+                        if resolved_v2:
+                            for r in resolved_v2:
+                                logger.info(
+                                    "SIGNAL_RESOLVED_V2  |  %s  |  %s  |  %s  |  PnL: $%.2f  |  Hold: %.0fs",
                                     r.open_signal.strategy_id,
                                     r.open_signal.direction,
                                     r.outcome.value,
