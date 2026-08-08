@@ -172,6 +172,9 @@ def _transform_for_socket(data: dict) -> dict:
     now = time.time()
 
     for strat_name, health in strategy_health.items():
+        # Only show V2 strategies (those ending in '_v2')
+        if not strat_name.endswith("_v2"):
+            continue
         stats = strategy_stats.get(strat_name, {})
         last_signal_ts = health.get("last_signal_ts", 0)
         time_since = now - last_signal_ts if last_signal_ts > 0 else 9999

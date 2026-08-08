@@ -290,6 +290,9 @@ class SyngexOrchestrator:
         initialize() → connect() → run() → shutdown()
     """
 
+    # Class-level registry so _on_message callbacks can reach all orchestrators
+    _active_instances: List["SyngexOrchestrator"] = []
+
     # How often (seconds) to log the Gamma Profile
     PROFILE_INTERVAL: float = 5.0
 
@@ -302,7 +305,9 @@ class SyngexOrchestrator:
         mode: str = "stream",
         port: int = 8501,
         *,
+        config_path: Optional[str] = None,
         data_pipeline: Any = None,  # v2: optional shared pipeline
+        primary_owns: bool = True,  # When sharing pipeline, who creates the client?
     ) -> None:
         self.symbol = symbol.upper()
         self.mode = mode.lower()
@@ -339,7 +344,10 @@ class SyngexOrchestrator:
 
         # Strategy configuration (loaded from YAML in initialize())
         self._strategy_config: Dict[str, Any] = {}
-        self._config_path = Path(__file__).parent / "config" / "strategies.yaml"
+        if config_path is not None:
+            self._config_path = Path(config_path)
+        else:
+            self._config_path = Path(__file__).parent / "config" / "strategies.yaml"
         self._config_mtime: float = 0.0  # Last known modification time
         self._config_lock = asyncio.Lock()  # Thread-safe config reload
 
@@ -360,10 +368,13 @@ class SyngexOrchestrator:
         self._own_pipeline: bool = False
         if data_pipeline is not None:
             self._shared_pipeline = data_pipeline
-            self._own_pipeline = False
+            self._own_pipeline = primary_owns  # Primary reuses shared pipeline but owns client
         else:
             self._shared_pipeline = SharedPipeline(self.symbol)
             self._own_pipeline = True
+
+        # Register this instance so shared callbacks reach all orchestrators
+        SyngexOrchestrator._active_instances.append(self)
 
         # Heavy calculation results (stored as instance attrs so _report_profile can read them)
         self._iv_skew: Optional[float] = None
@@ -372,6 +383,19 @@ class SyngexOrchestrator:
         self._gamma_walls_100k: Optional[List] = None
         self._gamma_walls_500k: Optional[List] = None
         self._gamma_walls_5k: Optional[List] = None
+
+    # ------------------------------------------------------------------
+    # Shared message dispatch (Bug 1 fix: delegate to ALL active orchestrators)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _on_shared_message(cls, data: Any) -> None:
+        """Class-level message handler — dispatches to every active orchestrator instance."""
+        for inst in cls._active_instances:
+            try:
+                inst._on_message(data)
+            except Exception:
+                pass  # one orchestrator's failure shouldn't block others
 
     # ------------------------------------------------------------------
     # Per-strike caching helpers
@@ -410,7 +434,8 @@ class SyngexOrchestrator:
             self._client = TradeStationClient()
 
             # Wire callback: ingestor → calculator + engine
-            self._client.set_on_message_callback(self._on_message)
+            # Use shared dispatcher so V2 orchestrator also receives messages
+            self._client.set_on_message_callback(lambda d: SyngexOrchestrator._on_shared_message(d))
 
             # Register subscriptions — quotes feed underlying price, option chain feeds contracts
             self._client.subscribe_to_quotes(self.symbol)
@@ -437,19 +462,18 @@ class SyngexOrchestrator:
 
         # Phase 0: Strategy Engine + Filter
 
-        # Load strategy configuration from YAML
-        config_path = Path(__file__).parent / "config" / "strategies.yaml"
+        # Load strategy configuration from YAML (use self._config_path set in __init__)
         self._strategy_config: Dict[str, Any] = {}
-        if config_path.exists():
+        if self._config_path.exists():
             try:
-                with open(config_path, "r") as f:
+                with open(self._config_path, "r") as f:
                     self._strategy_config = yaml.safe_load(f) or {}
-                logger.info("Loaded strategy config from %s", config_path)
+                logger.info("Loaded strategy config from %s", self._config_path)
             except Exception as exc:
                 logger.warning("Failed to load strategy config (%s), using defaults", exc)
                 self._strategy_config = {}
         else:
-            logger.warning("Strategy config not found at %s, using defaults", config_path)
+            logger.warning("Strategy config not found at %s, using defaults", self._config_path)
 
         # Build per-strategy hold times from YAML config
         strategy_hold_times: Dict[str, int] = {}
@@ -472,7 +496,7 @@ class SyngexOrchestrator:
         # V2 signal tracker (separate log files)
         self._signal_tracker_v2 = SignalTracker(
             max_hold_seconds=0,  # matches v1: no global max hold
-            log_dir=str(self._data_dir),
+            log_dir=str(log_dir),
             symbol=self.symbol,
             strategy_hold_times=strategy_hold_times,
             version="_v2",
@@ -487,9 +511,15 @@ class SyngexOrchestrator:
                 dedup_window_seconds=global_config.get("dedup_window_seconds", 60.0),
             ),
             signal_tracker=self._signal_tracker,
+            alternate_signal_tracker=self._signal_tracker_v2,
         )
         # Register strategies from config (config-driven, not hardcoded)
         self._register_strategies_from_config()
+
+        # V2 orchestrator (non-primary): register _v2 strategies from its config file
+        if not self._own_pipeline:
+            self._register_v2_strategies(str(self._config_path))
+            logger.info("V2 strategies registered from config_path=%s", self._config_path)
 
         # Register Layer 0 (master filter) — controlled by config
         filter_config = self._strategy_config.get("filter", {})
@@ -532,9 +562,17 @@ class SyngexOrchestrator:
 
     async def connect(self) -> None:
         """Establish streaming connections."""
-        # For shared pipelines, get client from pipeline after connect() succeeds
+        # For shared pipelines, get client from pipeline after primary connects
         if not hasattr(self, '_own_pipeline') or not self._own_pipeline:
+            # Non-primary: reuse existing client (primary already connected)
             self._client = self._shared_pipeline.ts_client
+            assert self._client is not None
+
+            # Don't replace the primary's callback — the shared dispatcher (set above)
+            # already routes messages to all active orchestrators including this one.
+            logger.info("V2 orchestrator: using existing TradeStation client from shared pipeline.")
+
+            return  # Skip connect — primary owns the streams
         assert self._client is not None
         logger.info("Connecting to TradeStation streams…")
         await self._client.connect()
@@ -562,7 +600,8 @@ class SyngexOrchestrator:
         logger.info("Strategy engine: %d strategies registered, filter active", len(self._strategy_engine._strategies))
 
         # Start the Streamlit dashboard and heatmap as background subprocesses (dashboard mode only)
-        if self.mode == "dashboard":
+        # Only the primary orchestrator spawns UI subprocesses — V2 reuses the shared pipeline
+        if self.mode == "dashboard" and self._own_pipeline:
             self._start_dashboard()
             self._start_heatmap()
             self._start_v2_heatmap()
@@ -739,10 +778,13 @@ class SyngexOrchestrator:
             layer_disabled = 0
 
             for strat_name, strat_cfg in layer_config.items():
+                # Non-primary orchestrators: skip _v2-suffixed names (handled by _register_v2_strategies)
+                if not self._own_pipeline and str(strat_name).endswith("_v2"):
+                    continue
                 strat_cls = self._get_strategy_class(layer, strat_name)
                 if strat_cls is None:
-                    logger.warning(
-                        "Unknown strategy '%s' in layer '%s' — skipping",
+                    logger.debug(
+                        "Skipping '%s' in layer '%s': no matching class",
                         strat_name, layer,
                     )
                     continue
@@ -834,11 +876,9 @@ class SyngexOrchestrator:
         """Register _v2 strategy variants from a separate config file.
 
         Reads a YAML config where keys are layer names and values are dicts
-        of strategy_name -> config. Dynamically imports the strategy module
-        and registers any BaseStrategy subclass found.
+        of strategy_name (_v2 suffixed) -> config. Looks up the underlying
+        strategy class via strategy_map and instantiates with updated params.
         """
-        import importlib
-
         try:
             with open(config_path, "r") as f:
                 v2_config = yaml.safe_load(f)
@@ -853,6 +893,59 @@ class SyngexOrchestrator:
             logger.warning("V2 config is empty or not a dict: %s", config_path)
             return
 
+        # Strategy class map for _v2 lookup (mirror of v1 registration)
+        all_strategy_map = {
+            "layer1": {
+                "gamma_wall_bounce": GammaWallBounce,
+                "magnet_accelerate": MagnetAccelerate,
+                "gamma_flip_breakout": GammaFlipBreakout,
+                "gamma_squeeze": GammaSqueeze,
+                "gex_imbalance": GEXImbalance,
+                "confluence_reversal": ConfluenceReversal,
+                "vol_compression_range": VolCompressionRange,
+                "gex_divergence": GEXDivergence,
+            },
+            "layer2": {
+                "delta_gamma_squeeze": DeltaGammaSqueeze,
+                "delta_volume_exhaustion": DeltaVolumeExhaustion,
+                "call_put_flow_asymmetry": CallPutFlowAsymmetry,
+                "iv_gex_divergence": IVGEXDivergence,
+                "delta_iv_divergence": DeltaIVDivergence,
+                "vamp_momentum": VampMomentum,
+                "obi_aggression_flow": ObiAggressionFlow,
+                "depth_decay_momentum": DepthDecayMomentum,
+                "depth_imbalance_momentum": DepthImbalanceMomentum,
+                "exchange_flow_concentration": ExchangeFlowConcentration,
+                "participant_diversity_conviction": ParticipantDiversityConviction,
+                "participant_divergence_scalper": ParticipantDivergenceScalper,
+                "exchange_flow_imbalance": ExchangeFlowImbalance,
+                "exchange_flow_asymmetry": ExchangeFlowAsymmetry,
+                "order_book_fragmentation": OrderBookFragmentation,
+                "order_book_stacking": OrderBookStacking,
+                "vortex_compression_breakout": VortexCompressionBreakout,
+            },
+            "layer3": {
+                "gamma_volume_convergence": GammaVolumeConvergence,
+                "iv_band_breakout": IVBandBreakout,
+                "strike_concentration": StrikeConcentration,
+                "theta_burn": ThetaBurn,
+            },
+            "full_data": {
+                "iv_skew_squeeze": IVSkewSqueeze,
+                "prob_weighted_magnet": ProbWeightedMagnet,
+                "prob_distribution_shift": ProbDistributionShift,
+                "extrinsic_intrinsic_flow": ExtrinsicIntrinsicFlow,
+                "ghost_premium": GhostPremium,
+                "skew_dynamics": SkewDynamics,
+                "smile_dynamics": SmileDynamics,
+                "extrinsic_flow": ExtrinsicFlow,
+                "gamma_breaker": GammaBreaker,
+                "iron_anchor": IronAnchor,
+                "sentiment_sync": SentimentSync,
+                "whale_tracker": WhaleTracker,
+            },
+        }
+
         total_enabled = 0
         total_skipped = 0
 
@@ -864,42 +957,27 @@ class SyngexOrchestrator:
                 )
                 continue
 
+            # Skip non-strategy sections (global, filter, etc.)
+            if layer not in ("layer1", "layer2", "layer3", "full_data"):
+                logger.debug("Skipping non-strategy layer '%s'", layer)
+                continue
+
             layer_enabled = 0
+            base_layer_map = all_strategy_map.get(layer, {})
 
             for strat_name, strat_cfg in layer_strategies.items():
-                try:
-                    module = importlib.import_module(
-                        f"strategies.{layer}.{strat_name}"
-                    )
-                except ImportError as exc:
-                    logger.warning(
-                        "V2: Cannot import module '%s.%s': %s",
-                        layer, strat_name, exc,
-                    )
+                # v2 names end with '_v2' — strip to find the class
+                if not strat_name.endswith("_v2"):
+                    logger.debug("Skipping '%s': doesn't end with _v2", strat_name)
                     total_skipped += 1
                     continue
 
-                # Find the BaseStrategy subclass in the module
-                cls = None
-                for obj_name in dir(module):
-                    obj = getattr(module, obj_name)
-                    try:
-                        if (
-                            isinstance(obj, type)
-                            and issubclass(obj, BaseStrategy)
-                            and obj is not BaseStrategy
-                        ):
-                            cls = obj
-                            break
-                    except TypeError:
-                        # Some objects may not support issubclass
-                        continue
-
+                base_name = strat_name[:-3]  # strip '_v2'
+                cls = base_layer_map.get(base_name)
                 if cls is None:
                     logger.warning(
-                        "V2: No BaseStrategy subclass found in "
-                        "'strategies.%s.%s'",
-                        layer, strat_name,
+                        "V2: No BaseStrategy subclass found for '%s'",
+                        strat_name,
                     )
                     total_skipped += 1
                     continue
@@ -907,6 +985,7 @@ class SyngexOrchestrator:
                 enabled = strat_cfg.get("enabled", True) if isinstance(strat_cfg, dict) else True
                 if enabled:
                     strat = cls(self._calculator)
+                    strat.strategy_id = strat_name  # preserve _v2 suffix from config key
                     self._strategy_engine.register(strat)
                     layer_enabled += 1
                     total_enabled += 1
@@ -2866,6 +2945,9 @@ class SyngexOrchestrator:
         strat_stats = self._signal_tracker.get_strategy_stats()
 
         for strat in self._strategy_engine._strategies:
+            # Bug 2 fix: V2 orchestrator only includes _v2 strategies
+            if not self._own_pipeline and not strat.strategy_id.endswith("_v2"):
+                continue
             sid = strat.strategy_id
             stats = strat_stats.get(sid, {})
 
@@ -3258,7 +3340,13 @@ class SyngexOrchestrator:
 
         try:
             self._data_dir.mkdir(parents=True, exist_ok=True)
-            with open(self._data_file, "w") as f:
+            # Bug 2 fix: V2 orchestrator writes to alternate file
+            target_file = (
+                self._shared_pipeline.alternate_data_file
+                if self._shared_pipeline and self._shared_pipeline.alternate_data_file and not self._own_pipeline
+                else self._data_file
+            )
+            with open(target_file, "w") as f:
                 json.dump(export, f, indent=2)
         except Exception as exc:
             logger.warning("Failed to export GEX state: %s", exc)
@@ -3354,21 +3442,29 @@ async def main() -> None:
     )
     args = parser.parse_args()
 
-    # Shared data pipeline — reused by all orchestrator instances
-    pipeline = SharedPipeline(args.symbol)
-    orchestrator = SyngexOrchestrator(
-        symbol=args.symbol, mode=args.mode, port=args.port,
-        data_pipeline=pipeline,  # v1 owns the pipeline
-    )
-
+    # Orchestrator(s)
     v2_orchestrator = None
+
     if args.v2_config:
+        # Two orchestrators — share one pipeline (only 4 streams total)
+        pipeline = SharedPipeline(args.symbol)
+        orchestrator = SyngexOrchestrator(
+            symbol=args.symbol, mode=args.mode, port=args.port,
+            data_pipeline=pipeline,   # v1 shares the pipeline
+            primary_owns=True,        # v1 creates TradeStationClient + subscriptions
+        )
         v2_orchestrator = SyngexOrchestrator(
             symbol=args.symbol, mode=args.mode, port=args.port,
-            data_pipeline=pipeline,  # v2 shares the same pipeline
+            config_path=args.v2_config,
+            data_pipeline=pipeline,   # v2 shares the pipeline
+            primary_owns=False,       # v2 gets client from pipeline after connect()
         )
-        v2_orchestrator._register_v2_strategies(args.v2_config)
         logger.info("V2 orchestrator created — will run alongside primary with shared streams.")
+    else:
+        # Single orchestrator — owns its own pipeline
+        orchestrator = SyngexOrchestrator(
+            symbol=args.symbol, mode=args.mode, port=args.port,
+        )
 
     # Graceful shutdown on signals
     loop = asyncio.get_running_loop()

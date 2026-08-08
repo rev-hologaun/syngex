@@ -122,6 +122,7 @@ class StrategyEngine:
         self,
         config: Optional[EngineConfig] = None,
         signal_tracker: Any = None,
+        alternate_signal_tracker: Any = None,  # For v2 signals (strategies with _v2 suffix)
     ) -> None:
         self.config = config or EngineConfig()
         self._strategies: List[BaseStrategy] = []
@@ -138,6 +139,8 @@ class StrategyEngine:
 
         # Signal tracker for per-symbol logging (delegates all signal writes)
         self._signal_tracker = signal_tracker
+        # Alternate signal tracker for v2 strategies
+        self._alternate_signal_tracker = alternate_signal_tracker
 
         logger.info("StrategyEngine initialized (min_confidence=%.2f, max_per_tick=%d)",
                      self.config.min_confidence, self.config.max_signals_per_tick)
@@ -508,13 +511,21 @@ class StrategyEngine:
     def _log_signal(self, signal: Signal) -> None:
         """Delegate signal logging to the SignalTracker (per-symbol log).
 
-        The SignalTracker owns all signal persistence — it writes to
-        log/signals_{SYMBOL}.jsonl with full fields (signal_id, symbol,
-        strategy_id, etc.). No global log is maintained.
+        Routes v2 signals (strategy_id ending in '_v2') to the alternate
+        tracker if configured. The SignalTracker owns all signal persistence
+        — it writes to log/signals_{SYMBOL}.jsonl with full fields
+        (signal_id, symbol, strategy_id, etc.). No global log is maintained.
         """
-        if self._signal_tracker is not None:
+        tracker = self._signal_tracker
+        if (
+            self._alternate_signal_tracker is not None
+            and hasattr(signal, "strategy_id")
+            and str(signal.strategy_id).endswith("_v2")
+        ):
+            tracker = self._alternate_signal_tracker
+        if tracker is not None:
             try:
-                self._signal_tracker.track(signal.to_dict())
+                tracker.track(signal.to_dict())
             except Exception as exc:
                 logger.warning("Failed to log signal via tracker: %s", exc)
         else:

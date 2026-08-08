@@ -7,8 +7,9 @@ import threading
 class SharedPipeline:
     """Shared data pipeline used by multiple orchestrator instances."""
 
-    def __init__(self, symbol: str):
+    def __init__(self, symbol: str, alternate_data_file: Optional[Path] = None):
         self.symbol = symbol
+        self.alternate_data_file = alternate_data_file
 
         # TradeStation connections (stream mode)
         self.ts_client: Any = None
