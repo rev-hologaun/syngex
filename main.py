@@ -75,6 +75,7 @@ from ingestor.tradestation_client import TradeStationClient
 from engine.gex_calculator import GEXCalculator
 from strategies.engine import StrategyEngine, EngineConfig
 from strategies.filters.net_gamma_filter import NetGammaFilter
+from data_pipeline import SharedPipeline
 from strategies.rolling_window import RollingWindow
 from strategies.rolling_keys import (
     KEY_OBI_5M,
@@ -296,7 +297,12 @@ class SyngexOrchestrator:
     PHI_WRITE_INTERVAL: float = 5.0
 
     def __init__(
-        self, symbol: str, mode: str = "stream", port: int = 8501
+        self,
+        symbol: str,
+        mode: str = "stream",
+        port: int = 8501,
+        *,
+        data_pipeline: Any = None,  # v2: optional shared pipeline
     ) -> None:
         self.symbol = symbol.upper()
         self.mode = mode.lower()
@@ -349,6 +355,16 @@ class SyngexOrchestrator:
         self._message_tick: int = 0
         self._tick_modulus: int = 5  # run heavy calcs every Nth tick (5 = 80% reduction)
 
+        # Shared pipeline ownership (for multi-orchestrator support)
+        self._shared_pipeline: SharedPipeline | None = None
+        self._own_pipeline: bool = False
+        if data_pipeline is not None:
+            self._shared_pipeline = data_pipeline
+            self._own_pipeline = False
+        else:
+            self._shared_pipeline = SharedPipeline(self.symbol)
+            self._own_pipeline = True
+
         # Heavy calculation results (stored as instance attrs so _report_profile can read them)
         self._iv_skew: Optional[float] = None
         self._extrinsic_proxy: Optional[float] = None
@@ -386,8 +402,38 @@ class SyngexOrchestrator:
         """Create and wire all components."""
         logger.info("Initializing components…")
 
-        self._calculator = GEXCalculator(symbol=self.symbol)
-        self._client = TradeStationClient()
+        pipeline = self._shared_pipeline
+
+        # Only create/subscribe if this orchestrator owns the pipeline
+        if self._own_pipeline:
+            self._calculator = GEXCalculator(symbol=self.symbol)
+            self._client = TradeStationClient()
+
+            # Wire callback: ingestor → calculator + engine
+            self._client.set_on_message_callback(self._on_message)
+
+            # Register subscriptions — quotes feed underlying price, option chain feeds contracts
+            self._client.subscribe_to_quotes(self.symbol)
+            self._client.subscribe_to_option_chain(self.symbol)
+            # L2 market depth streams
+            self._client.subscribe_to_market_depth_quotes(self.symbol)
+            self._client.subscribe_to_market_depth_aggregates(self.symbol)
+
+            # Attach to shared pipeline
+            pipeline.ts_client = self._client
+            pipeline.streams_active = True
+
+            # Setup WebSocket GEX feed
+            if not pipeline.ws_gex_enabled:
+                pipeline.ws_gex_enabled = True
+                pipeline.ws_gex_url = "wss://api.tradestation.com/marketdata/v1/quotes"
+
+            logger.info("Primary orchestrator: streams created and subscribed.")
+        else:
+            # Pipeline already exists — just register our symbols with it
+            # ts_client will be set after connect() succeeds
+            self._calculator = GEXCalculator(symbol=self.symbol)
+            logger.info("Shared orchestrator: will reuse existing pipeline streams after connect.")
 
         # Phase 0: Strategy Engine + Filter
 
@@ -428,7 +474,7 @@ class SyngexOrchestrator:
             max_hold_seconds=0,  # matches v1: no global max hold
             log_dir=str(self._data_dir),
             symbol=self.symbol,
-            strategy_hold_times={},
+            strategy_hold_times=strategy_hold_times,
             version="_v2",
         )
 
@@ -482,20 +528,13 @@ class SyngexOrchestrator:
         # Per-strike IV windows (populated lazily)
         self._iv_windows: Dict[str, RollingWindow] = {}
 
-        # Wire callback: ingestor → calculator + engine
-        self._client.set_on_message_callback(self._on_message)
-
-        # Register subscriptions — quotes feed underlying price, option chain feeds contracts
-        self._client.subscribe_to_quotes(self.symbol)
-        self._client.subscribe_to_option_chain(self.symbol)
-        # L2 market depth streams
-        self._client.subscribe_to_market_depth_quotes(self.symbol)
-        self._client.subscribe_to_market_depth_aggregates(self.symbol)
-
         logger.info("Components initialized. Symbol: %s", self.symbol)
 
     async def connect(self) -> None:
         """Establish streaming connections."""
+        # For shared pipelines, get client from pipeline after connect() succeeds
+        if not hasattr(self, '_own_pipeline') or not self._own_pipeline:
+            self._client = self._shared_pipeline.ts_client
         assert self._client is not None
         logger.info("Connecting to TradeStation streams…")
         await self._client.connect()
@@ -3315,19 +3354,32 @@ async def main() -> None:
     )
     args = parser.parse_args()
 
+    # Shared data pipeline — reused by all orchestrator instances
+    pipeline = SharedPipeline(args.symbol)
     orchestrator = SyngexOrchestrator(
-        symbol=args.symbol, mode=args.mode, port=args.port
+        symbol=args.symbol, mode=args.mode, port=args.port,
+        data_pipeline=pipeline,  # v1 owns the pipeline
     )
 
+    v2_orchestrator = None
     if args.v2_config:
-        orchestrator._register_v2_strategies(args.v2_config)
+        v2_orchestrator = SyngexOrchestrator(
+            symbol=args.symbol, mode=args.mode, port=args.port,
+            data_pipeline=pipeline,  # v2 shares the same pipeline
+        )
+        v2_orchestrator._register_v2_strategies(args.v2_config)
+        logger.info("V2 orchestrator created — will run alongside primary with shared streams.")
 
     # Graceful shutdown on signals
     loop = asyncio.get_running_loop()
 
     def _signal_handler() -> None:
         logger.info("Shutdown signal received.")
-        asyncio.ensure_future(orchestrator.shutdown())
+        tasks = []
+        tasks.append(asyncio.ensure_future(orchestrator.shutdown()))
+        if v2_orchestrator:
+            tasks.append(asyncio.ensure_future(v2_orchestrator.shutdown()))
+        asyncio.ensure_future(asyncio.gather(*tasks, return_exceptions=True))
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _signal_handler)
@@ -3335,17 +3387,26 @@ async def main() -> None:
     try:
         # 1. Initialize
         await orchestrator.initialize()
+        if v2_orchestrator:
+            await v2_orchestrator.initialize()
 
         # 2. Connect
         await orchestrator.connect()
+        if v2_orchestrator:
+            await v2_orchestrator.connect()
 
-        # 3. Run
-        await orchestrator.run()
+        # 3. Run — process both orchestrators concurrently
+        tasks = [asyncio.create_task(orchestrator.run())]
+        if v2_orchestrator:
+            tasks.append(asyncio.create_task(v2_orchestrator.run()))
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     except Exception as exc:
         logger.critical("Pipeline failure: %s", exc, exc_info=True)
     finally:
         await orchestrator.shutdown()
+        if v2_orchestrator:
+            await v2_orchestrator.shutdown()
 
 
 if __name__ == "__main__":
