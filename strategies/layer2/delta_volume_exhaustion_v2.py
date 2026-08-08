@@ -45,7 +45,7 @@ from strategies.rolling_keys import (
     KEY_TOTAL_DELTA_5M,
 )
 
-logger = logging.getLogger("Syngex.Strategies.DeltaVolumeExhaustion")
+logger = logging.getLogger("Syngex.Strategies.DeltaVolumeExhaustionV2")
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -64,7 +64,7 @@ DELTA_DECLINE_RATIO = 0.90            # Delta below 90% of rolling avg
 MIN_TREND_DURATION = 2                # At least 2 candles in trend (was 3)
 
 # Stop distance
-STOP_PCT = 0.008                      # 0.8% beyond swing
+STOP_PCT = 0.015                      # 1.5% beyond swing
 
 # Minimum confidence to emit a signal
 MIN_CONFIDENCE = 0.05
@@ -92,8 +92,15 @@ WALL_PROXIMITY_BONUS = 0.10               # confidence bonus
 # NEUTRAL_GAMMA_TARGET_MULT = 1.0           # baseline
 GAMMA_INTENSITY_THRESHOLD = 500000        # threshold for regime classification (wall proximity)
 
+# --- Regime-adaptive target fractions of swing range ---
+BASE_TARGET_FRACS = {
+    "POSITIVE": 0.75,
+    "NEGATIVE": 1.25,
+    "NEUTRAL": 0.90,
+}
 
-class DeltaVolumeExhaustion(BaseStrategy):
+
+class DeltaVolumeExhaustionV2(BaseStrategy):
     """
     Detects trend exhaustion via declining delta + liquidity vacuum.
 
@@ -108,7 +115,7 @@ class DeltaVolumeExhaustion(BaseStrategy):
         - Regime-adaptive target scaling (NEG/POS/NEUTRAL gamma)
     """
 
-    strategy_id = "delta_volume_exhaustion"
+    strategy_id = "delta_volume_exhaustion_v2"
     layer = "layer2"
 
     def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
@@ -239,30 +246,22 @@ class DeltaVolumeExhaustion(BaseStrategy):
         stop = entry + stop_distance * reverse
         risk = abs(entry - stop)
 
-        # ---- Minimum R:R gate — don't fire if no profitable path ----
-        target_min_risk_mult = 1.0  # require at least 1:1 RR before any other scaling
-        if risk > 0 and risk * target_min_risk_mult > min_stop_distance:
-            pass  # OK, proceed
-        else:
-            return None
-
         # ---- Target: swing-range based with regime scaling ----
         # Swing range = full 5m max-min (the exhausted move)
         swing_range = price_window.range
 
         # Determine what fraction of swing to aim for
-        if regime == "POSITIVE":
-            # Positive gamma = dampened, quick profit
-            target_frac = 0.6
-        elif regime == "NEGATIVE":
-            # Negative gamma = momentum fade, let it run
-            target_frac = 1.0
-        elif regime == "NEUTRAL":
-            target_frac = 0.75
-        else:
-            target_frac = 0.75
+        target_frac = BASE_TARGET_FRACS.get(regime, BASE_TARGET_FRACS["NEUTRAL"])
 
         target_dist = swing_range * target_frac
+
+        # ---- Real R:R gate — validate target provides sufficient reward ----
+        target_min_risk_mult = 1.0  # require at least 1:1 RR before any other scaling
+        min_stop_distance = entry * max(STOP_PCT, 0.006)  # at least 0.6%
+        if risk > 0 and target_dist >= risk * target_min_risk_mult:
+            pass  # OK, proceed
+        else:
+            return None
 
         # Enforce minimum target distance (0.3% of entry)
         min_target_dist = entry * 0.003

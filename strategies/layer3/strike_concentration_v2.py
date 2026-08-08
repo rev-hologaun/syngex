@@ -1,0 +1,1429 @@
+"""
+strategies/layer3/strike_concentration.py — Strike Concentration Scalp (v2 Liquidity-Momentum)
+
+Micro-signal (1Hz) strategy: trades the immediate reaction to the most
+active OI strikes. Two modes:
+    - BOUNCE: Price approaches a high-OI strike and reverses → trade the bounce
+    - SLICE: Price slices through a strike with momentum → ride the breakout
+
+v2 Liquidity-Momentum Upgrade:
+    - Liquidity vacuum detection (market depth bid/ask asymmetry)
+    - Delta acceleration tracking (momentum confirmation)
+    - Gamma magnitude weighting (strength of gamma at strike)
+    - ATR-normalized targets (adaptive to market speed)
+
+Logic:
+    - Pre-market: identify top 3 strikes by total OI concentration
+    - Intraday: detect bounce or slice signals at those strikes
+    - Larger size on #1 strike (highest OI concentration)
+    - Best in first 2 hours and last hour of session
+
+Entry (Bounce):
+    - LONG: bounce off Put strike (below price) + bullish reversal signal
+    - SHORT: bounce off Call strike (above price) + bearish reversal signal
+
+Entry (Slice):
+    - LONG: slices through Call strike + strong candle + volume spike
+    - SHORT: slices through Put strike + strong candle + volume spike
+
+Confidence factors (v2):
+    - OI concentration rank (#1 strike = highest)
+    - Proximity to strike
+    - Gamma magnitude at strike (NEW)
+    - Signal strength (candle pattern quality, volume confirmation)
+    - Liquidity vacuum (NEW — market depth asymmetry)
+    - Delta surge (NEW — delta acceleration)
+    - Regime alignment
+    - ATR target quality (NEW — how well target scales with market speed)
+"""
+
+from __future__ import annotations
+
+import math
+import logging
+from typing import Any, Dict, List, Optional, Tuple
+
+from strategies.engine import BaseStrategy
+from strategies.signal import Direction, Signal
+from strategies.rolling_keys import KEY_PRICE_5M, KEY_VOLUME_5M, KEY_ATR_5M, KEY_STRIKE_DELTA_5M, KEY_MARKET_DEPTH_AGG
+
+logger = logging.getLogger("Syngex.Strategies.StrikeConcentrationV2")
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+# How many top OI strikes to track
+TOP_OI_STRIKES_COUNT = 3
+
+# Bounce proximity: price must be within this % of the strike
+BOUNCE_PROXIMITY_PCT = 0.005  # 0.5%
+
+# Slice confirmation: candle body must be > this % of total range
+SLICE_BODY_RATIO = 0.3  # 30% body
+
+# Volume spike for slice confirmation
+SLICE_VOLUME_RATIO = 1.20  # 20% above rolling avg
+
+# Divergence detection: volume on reversal candle must be < this % of rolling avg
+DIVERGENCE_VOLUME_THRESHOLD = 0.80  # Volume < 80% of avg = declining
+
+# Stop loss
+STOP_PCT_BOUNCE = 0.003  # 0.3% beyond the strike for bounces (SHORT)
+STOP_PCT_SLICE = 0.003  # 0.3% against entry for slices (SHORT)
+LONG_STOP_PCT_BOUNCE = 0.002  # 0.2% — tighter stop for LONG bounces
+LONG_STOP_PCT_SLICE = 0.002  # 0.2% — tighter stop for LONG slices
+
+# Target
+TARGET_RISK_MULT = 1.5  # 1.5× risk for bounce targets
+
+# Min confidence (v2: raised from 0.25 to 0.35)
+MIN_CONFIDENCE = 0.05
+LONG_MIN_CONFIDENCE = 0.15  # STRATEGIC: higher threshold for LONG since LONG underperforms SHORT
+
+# Min data points
+MIN_DATA_POINTS = 3
+
+# v2 Liquidity-Momentum params
+LIQUIDITY_VACUUM_RATIO = 3.0
+DELTA_ACCEL_THRESHOLD_LONG = 1.15  # delta accelerated ≥15%
+DELTA_ACCEL_THRESHOLD_SHORT = 0.85  # delta decelerated ≥15%
+GAMMA_MAGNITUDE_THRESHOLD = 0.50
+BOUNCE_TARGET_MULT = 1.5
+SLICE_TARGET_MULT = 2.0
+ATR_NORMALIZATION_CAP = 3.0
+TARGET_MIN_PCT = 0.003
+
+
+class StrikeConcentrationV2(BaseStrategy):
+    """
+    Trades the immediate reaction to the most active OI strikes.
+
+    Two modes:
+        BOUNCE — Price approaches a high-OI strike and reverses.
+            In POSITIVE gamma regime, bounces are reliable:
+                LONG: bounce off Put strike (below price)
+                SHORT: bounce off Call strike (above price)
+
+        SLICE — Price slices through a strike with momentum.
+            Ride the breakout with volume confirmation:
+                LONG: slices through Call strike (was below, now above)
+                SHORT: slices through Put strike (was above, now below)
+
+    v2 Liquidity-Momentum:
+        - Liquidity vacuum detection via market depth bid/ask asymmetry
+        - Delta acceleration tracking for momentum confirmation
+        - Gamma magnitude weighting for confidence scoring
+        - ATR-normalized targets for adaptive market speed
+
+    Confidence is capped at 0.85 (micro-signals shouldn't be max conviction).
+    Larger position size on #1 strike (highest OI concentration).
+    """
+
+    strategy_id = "strike_concentration_v2"
+    layer = "layer3"
+
+    def evaluate(self, data: Dict[str, Any]) -> List[Signal]:
+        """
+        Evaluate current state for strike concentration bounce/slice signals.
+
+        Returns empty list when no signal is detected.
+        """
+        underlying_price = data.get("underlying_price", 0)
+        if underlying_price <= 0:
+            return []
+
+        gex_calc = data.get("gex_calculator")
+        if gex_calc is None:
+            return []
+
+        rolling_data = data.get("rolling_data", {})
+        net_gamma = data.get("net_gamma_normalized", 0)
+        regime = data.get("regime", "")
+        greeks_summary = data.get("greeks_summary", {})
+
+        # Relaxed regime gate: allow NEGATIVE if |net_gamma| is extreme
+        # (exceeds 95th percentile of recent values)
+        _regime_ok = regime == "POSITIVE" and net_gamma > 0
+        if not _regime_ok:
+            # Check if negative regime has extreme gamma magnitude
+            # Use a percentile-based approach: if |net_gamma| is in top 95th
+            # percentile of recent values, allow the signal through
+            rolling_data_ng = data.get("rolling_data", {})
+            ng_window = rolling_data_ng.get(KEY_PRICE_5M)
+            if ng_window is not None and len(ng_window.values) > 10:
+                sorted_vals = sorted(abs(v) for v in ng_window.values if v is not None)
+                p95_idx = max(0, int(len(sorted_vals) * 0.95) - 1)
+                p95_threshold = sorted_vals[p95_idx]
+                if abs(net_gamma) >= p95_threshold:
+                    _regime_ok = True
+        if not _regime_ok:
+            return []
+
+        # Must have enough rolling data
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        vol_window = rolling_data.get(KEY_VOLUME_5M)
+        if (
+            price_window is None
+            or vol_window is None
+            or price_window.count < MIN_DATA_POINTS
+            or vol_window.count < MIN_DATA_POINTS
+        ):
+            return []
+
+        # Identify top 3 OI strikes
+        top_strikes = self._get_top_oi_strikes(greeks_summary)
+        if len(top_strikes) < 1:
+            return []
+
+        signals: List[Signal] = []
+
+        # Check bounce signals
+        bounce_long = self._check_bounce_long(
+            underlying_price, gex_calc, rolling_data,
+            net_gamma, regime, top_strikes,
+        )
+        if bounce_long:
+            signals.append(bounce_long)
+
+        bounce_short = self._check_bounce_short(
+            underlying_price, gex_calc, rolling_data,
+            net_gamma, regime, top_strikes,
+        )
+        if bounce_short:
+            signals.append(bounce_short)
+
+        # Check slice signals
+        slice_long = self._check_slice_long(
+            underlying_price, gex_calc, rolling_data,
+            net_gamma, regime, top_strikes,
+        )
+        if slice_long:
+            signals.append(slice_long)
+
+        slice_short = self._check_slice_short(
+            underlying_price, gex_calc, rolling_data,
+            net_gamma, regime, top_strikes,
+        )
+        if slice_short:
+            signals.append(slice_short)
+
+        return signals
+
+    # ------------------------------------------------------------------
+    # BOUNCE — LONG at Put strike (price below, bouncing off support)
+    # ------------------------------------------------------------------
+
+    def _check_bounce_long(
+        self,
+        price: float,
+        gex_calc: Any,
+        rolling_data: Dict[str, Any],
+        net_gamma: float,
+        regime: str,
+        top_strikes: List[Tuple[float, int, float]],
+    ) -> Optional[Signal]:
+        """
+        Bounce LONG at a Put strike below price.
+
+        Conditions:
+            1. Nearest top-OI Put strike BELOW current price
+            2. Price within 0.5% of that strike
+            3. Bullish reversal signal (divergence OR candlestick pattern)
+            4. Net Gamma > 0 (already checked in evaluate)
+        """
+        # Trend
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        trend = price_window.trend if price_window else "UNKNOWN"
+
+        # Find nearest top-OI strike below price
+        result = self._nearest_strike_below(top_strikes, price)
+        if result is None:
+            return None
+        put_strike, rank, total_oi = result
+
+        # Check proximity: price within 0.5% of strike
+        proximity = abs(price - put_strike) / put_strike
+        if proximity > BOUNCE_PROXIMITY_PCT:
+            return None
+
+        # Check bullish reversal signal
+        bullish = self._check_bullish_reversal(rolling_data, price, put_strike)
+        if not bullish:
+            return None
+
+        # Get gamma magnitude at strike for confidence weighting
+        gamma_mag = self._get_gamma_magnitude(gex_calc, put_strike)
+
+        # Compute confidence and build signal
+        confidence = self._compute_bounce_confidence(
+            price, put_strike, rank, total_oi,
+            rolling_data, "LONG", net_gamma, gamma_mag,
+        )
+        if confidence < LONG_MIN_CONFIDENCE:
+            return None
+
+        # Entry at current price, stop beyond the Put strike (below)
+        entry = price
+        stop = put_strike * (1 - LONG_STOP_PCT_BOUNCE)
+        risk = entry - stop
+
+        # Target = ATR-normalized
+        target, target_mult, atr_ratio = self._compute_atr_normalized_target(
+            entry, risk, rolling_data, "LONG", is_bounce=True,
+        )
+
+        return Signal(
+            direction=Direction.LONG,
+            confidence=round(confidence, 3),
+            entry=round(entry, 2),
+            stop=round(stop, 2),
+            target=round(target, 2),
+            strategy_id=self.strategy_id,
+            reason=(
+                f"Strike bounce LONG: {put_strike} Put strike, "
+                f"rank #{rank}, bullish reversal"
+            ),
+            metadata={
+                "signal_type": "bounce",
+                "strike_rank": rank,
+                "strike": put_strike,
+                "total_oi": round(total_oi, 1),
+                "proximity_pct": round(proximity, 5),
+                "bullish_reversal": True,
+                "net_gamma": round(net_gamma, 2),
+                "regime": regime,
+                "trend": trend,
+                "risk": round(risk, 2),
+                "risk_reward_ratio": round(
+                    (target - entry) / risk, 2
+                ) if risk > 0 else 0,
+                # v2 fields
+                "gamma_at_strike": round(gamma_mag, 4) if gamma_mag is not None else None,
+                "target_mult": round(target_mult, 3),
+                "atr_ratio": round(atr_ratio, 3),
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # BOUNCE — SHORT at Call strike (price above, bouncing off resistance)
+    # ------------------------------------------------------------------
+
+    def _check_bounce_short(
+        self,
+        price: float,
+        gex_calc: Any,
+        rolling_data: Dict[str, Any],
+        net_gamma: float,
+        regime: str,
+        top_strikes: List[Tuple[float, int, float]],
+    ) -> Optional[Signal]:
+        """
+        Bounce SHORT at a Call strike above price.
+
+        Conditions:
+            1. Nearest top-OI Call strike ABOVE current price
+            2. Price within 0.5% of that strike
+            3. Bearish reversal signal (divergence OR candlestick pattern)
+            4. Net Gamma > 0 (already checked in evaluate)
+        """
+        # Trend
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        trend = price_window.trend if price_window else "UNKNOWN"
+
+        # Find nearest top-OI strike above price
+        result = self._nearest_strike_above(top_strikes, price)
+        if result is None:
+            return None
+        call_strike, rank, total_oi = result
+
+        # Check proximity: price within 0.5% of strike
+        proximity = abs(call_strike - price) / call_strike
+        if proximity > BOUNCE_PROXIMITY_PCT:
+            return None
+
+        # Check bearish reversal signal
+        bearish = self._check_bearish_reversal(rolling_data, price, call_strike)
+        if not bearish:
+            return None
+
+        # Get gamma magnitude at strike for confidence weighting
+        gamma_mag = self._get_gamma_magnitude(gex_calc, call_strike)
+
+        # Compute confidence and build signal
+        confidence = self._compute_bounce_confidence(
+            price, call_strike, rank, total_oi,
+            rolling_data, "SHORT", net_gamma, gamma_mag,
+        )
+        if confidence < MIN_CONFIDENCE:
+            return None
+
+        # Entry at current price, stop beyond the Call strike (above)
+        entry = price
+        stop = call_strike * (1 + STOP_PCT_BOUNCE)
+        risk = stop - entry
+
+        # Target = ATR-normalized
+        target, target_mult, atr_ratio = self._compute_atr_normalized_target(
+            entry, risk, rolling_data, "SHORT", is_bounce=True,
+        )
+
+        return Signal(
+            direction=Direction.SHORT,
+            confidence=round(confidence, 3),
+            entry=round(entry, 2),
+            stop=round(stop, 2),
+            target=round(target, 2),
+            strategy_id=self.strategy_id,
+            reason=(
+                f"Strike bounce SHORT: {call_strike} Call strike, "
+                f"rank #{rank}, bearish reversal"
+            ),
+            metadata={
+                "signal_type": "bounce",
+                "strike_rank": rank,
+                "strike": call_strike,
+                "total_oi": round(total_oi, 1),
+                "proximity_pct": round(proximity, 5),
+                "bearish_reversal": True,
+                "net_gamma": round(net_gamma, 2),
+                "regime": regime,
+                "trend": trend,
+                "risk": round(risk, 2),
+                "risk_reward_ratio": round(
+                    (entry - target) / risk, 2
+                ) if risk > 0 else 0,
+                # v2 fields
+                "gamma_at_strike": round(gamma_mag, 4) if gamma_mag is not None else None,
+                "target_mult": round(target_mult, 3),
+                "atr_ratio": round(atr_ratio, 3),
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # SLICE — LONG through Call strike (was below, now above)
+    # ------------------------------------------------------------------
+
+    def _check_slice_long(
+        self,
+        price: float,
+        gex_calc: Any,
+        rolling_data: Dict[str, Any],
+        net_gamma: float,
+        regime: str,
+        top_strikes: List[Tuple[float, int, float]],
+    ) -> Optional[Signal]:
+        """
+        Slice LONG through a Call strike above price.
+
+        Conditions:
+            1. Price slices through a top-OI Call strike (was below, now above)
+            2. Strong candle: body > 30% of total range
+            3. Volume spike: current > rolling avg by ≥20%
+            4. Liquidity vacuum (soft confidence penalty)
+            5. Delta surge at that strike (accelerating positive)
+        """
+        # Trend
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        trend = price_window.trend if price_window else "UNKNOWN"
+
+        # Find nearest top-OI strike above price (the one being sliced through)
+        result = self._nearest_strike_above(top_strikes, price)
+        if result is None:
+            return None
+        call_strike, rank, total_oi = result
+
+        # Check strong candle: body > 30% of range (soft penalty below)
+        body_ratio = self._get_candle_body_ratio(rolling_data)
+        if body_ratio is None:
+            return None
+
+        # Compute volume spike ratio (for soft penalty)
+        vol_window = rolling_data.get(KEY_VOLUME_5M)
+        volume_spike = None
+        if vol_window is not None and vol_window.mean and vol_window.mean > 0:
+            volume_spike = (vol_window.latest or 0) / vol_window.mean
+
+        # Compute liquidity vacuum ratio (for soft penalty)
+        liquid_vac_ratio = self._get_liquidity_vacuum_ratio(rolling_data, "LONG")
+
+        # Delta acceleration (now returns raw ratio for soft penalty)
+        delta_accel = self._check_delta_surge(rolling_data, call_strike, gex_calc, "LONG")
+
+        # Get gamma magnitude at strike
+        gamma_mag = self._get_gamma_magnitude(gex_calc, call_strike)
+
+        # Compute confidence and build signal
+        confidence = self._compute_slice_confidence(
+            price, call_strike, rank, total_oi,
+            rolling_data, body_ratio, "LONG", net_gamma,
+            delta_accel=delta_accel, gamma_mag=gamma_mag,
+        )
+
+        # SLICE hard gates -> soft confidence penalties
+        slice_conf_multiplier = 1.0
+        # Body ratio penalty (was hard gate: body_ratio >= SLICE_BODY_RATIO)
+        if body_ratio < SLICE_BODY_RATIO:
+            slice_conf_multiplier *= max(0, body_ratio / SLICE_BODY_RATIO)
+        # Volume spike penalty (was hard gate: volume >= 1.2x avg)
+        if volume_spike is not None and volume_spike < SLICE_VOLUME_RATIO:
+            slice_conf_multiplier *= max(0, volume_spike / SLICE_VOLUME_RATIO)
+        # Liquidity vacuum penalty (was hard gate: ratio >= 3.0)
+        if liquid_vac_ratio is not None and liquid_vac_ratio < LIQUIDITY_VACUUM_RATIO:
+            slice_conf_multiplier *= min(1.0, liquid_vac_ratio / LIQUIDITY_VACUUM_RATIO)
+        # Delta acceleration penalty (was hard gate: delta_accel > 1.15)
+        if delta_accel is not None and delta_accel <= DELTA_ACCEL_THRESHOLD_LONG:
+            slice_conf_multiplier *= max(0, (delta_accel - 0.5) / (DELTA_ACCEL_THRESHOLD_LONG - 0.5))
+
+        confidence *= slice_conf_multiplier
+        if confidence < LONG_MIN_CONFIDENCE:
+            return None
+
+        # Entry at current price, stop 0.2% below entry (LONG-specific tighter stop)
+        entry = price
+        stop = entry * (1 - LONG_STOP_PCT_SLICE)
+        risk = entry - stop
+
+        # Target = ATR-normalized
+        target, target_mult, atr_ratio = self._compute_atr_normalized_target(
+            entry, risk, rolling_data, "LONG", is_bounce=False,
+        )
+
+        return Signal(
+            direction=Direction.LONG,
+            confidence=round(confidence, 3),
+            entry=round(entry, 2),
+            stop=round(stop, 2),
+            target=round(target, 2),
+            strategy_id=self.strategy_id,
+            reason=(
+                f"Strike slice LONG: sliced through {call_strike} Call strike, "
+                f"rank #{rank}, body_ratio={body_ratio:.2f}"
+            ),
+            metadata={
+                "signal_type": "slice",
+                "strike_rank": rank,
+                "strike": call_strike,
+                "total_oi": round(total_oi, 1),
+                "body_ratio": round(body_ratio, 3),
+                "volume_spike": True,
+                "delta_acceleration": round(delta_accel, 3),
+                "net_gamma": round(net_gamma, 2),
+                "regime": regime,
+                "trend": trend,
+                "risk": round(risk, 2),
+                "risk_reward_ratio": round(
+                    (target - entry) / risk, 2
+                ) if risk > 0 else 0,
+                # v2 fields
+                "gamma_at_strike": round(gamma_mag, 4) if gamma_mag is not None else None,
+                "target_mult": round(target_mult, 3),
+                "atr_ratio": round(atr_ratio, 3),
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # SLICE — SHORT through Put strike (was above, now below)
+    # ------------------------------------------------------------------
+
+    def _check_slice_short(
+        self,
+        price: float,
+        gex_calc: Any,
+        rolling_data: Dict[str, Any],
+        net_gamma: float,
+        regime: str,
+        top_strikes: List[Tuple[float, int, float]],
+    ) -> Optional[Signal]:
+        """
+        Slice SHORT through a Put strike below price.
+
+        Conditions:
+            1. Price slices through a top-OI Put strike (was above, now below)
+            2. Strong candle: body > 30% of total range
+            3. Volume spike: current > rolling avg by ≥20%
+            4. Liquidity vacuum (soft confidence penalty)
+            5. Delta surge at that strike (decelerating/negative)
+        """
+        # Trend
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        trend = price_window.trend if price_window else "UNKNOWN"
+
+        # Find nearest top-OI strike below price (the one being sliced through)
+        result = self._nearest_strike_below(top_strikes, price)
+        if result is None:
+            return None
+        put_strike, rank, total_oi = result
+
+        # Check strong candle: body > 30% of range (soft penalty below)
+        body_ratio = self._get_candle_body_ratio(rolling_data)
+        if body_ratio is None:
+            return None
+
+        # Compute volume spike ratio (for soft penalty)
+        vol_window = rolling_data.get(KEY_VOLUME_5M)
+        volume_spike = None
+        if vol_window is not None and vol_window.mean and vol_window.mean > 0:
+            volume_spike = (vol_window.latest or 0) / vol_window.mean
+
+        # Compute liquidity vacuum ratio (for soft penalty)
+        liquid_vac_ratio = self._get_liquidity_vacuum_ratio(rolling_data, "SHORT")
+
+        # Delta acceleration (now returns raw ratio for soft penalty)
+        delta_accel = self._check_delta_surge(rolling_data, put_strike, gex_calc, "SHORT")
+
+        # Get gamma magnitude at strike
+        gamma_mag = self._get_gamma_magnitude(gex_calc, put_strike)
+
+        # Compute confidence and build signal
+        confidence = self._compute_slice_confidence(
+            price, put_strike, rank, total_oi,
+            rolling_data, body_ratio, "SHORT", net_gamma,
+            delta_accel=delta_accel, gamma_mag=gamma_mag,
+        )
+
+        # SLICE hard gates -> soft confidence penalties
+        slice_conf_multiplier = 1.0
+        # Body ratio penalty (was hard gate: body_ratio >= SLICE_BODY_RATIO)
+        if body_ratio < SLICE_BODY_RATIO:
+            slice_conf_multiplier *= max(0, body_ratio / SLICE_BODY_RATIO)
+        # Volume spike penalty (was hard gate: volume >= 1.2x avg)
+        if volume_spike is not None and volume_spike < SLICE_VOLUME_RATIO:
+            slice_conf_multiplier *= max(0, volume_spike / SLICE_VOLUME_RATIO)
+        # Liquidity vacuum penalty (was hard gate: ratio >= 3.0)
+        if liquid_vac_ratio is not None and liquid_vac_ratio < LIQUIDITY_VACUUM_RATIO:
+            slice_conf_multiplier *= min(1.0, liquid_vac_ratio / LIQUIDITY_VACUUM_RATIO)
+        # Delta acceleration penalty (was hard gate: delta_accel < 0.85)
+        if delta_accel is not None and delta_accel >= DELTA_ACCEL_THRESHOLD_SHORT:
+            slice_conf_multiplier *= max(0, (1.15 - delta_accel) / 0.3)
+
+        confidence *= slice_conf_multiplier
+        if confidence < MIN_CONFIDENCE:
+            return None
+
+        # Entry at current price, stop 0.3% above entry
+        entry = price
+        stop = entry * (1 + STOP_PCT_SLICE)
+        risk = stop - entry
+
+        # Target = ATR-normalized
+        target, target_mult, atr_ratio = self._compute_atr_normalized_target(
+            entry, risk, rolling_data, "SHORT", is_bounce=False,
+        )
+
+        return Signal(
+            direction=Direction.SHORT,
+            confidence=round(confidence, 3),
+            entry=round(entry, 2),
+            stop=round(stop, 2),
+            target=round(target, 2),
+            strategy_id=self.strategy_id,
+            reason=(
+                f"Strike slice SHORT: sliced through {put_strike} Put strike, "
+                f"rank #{rank}, body_ratio={body_ratio:.2f}"
+            ),
+            metadata={
+                "signal_type": "slice",
+                "strike_rank": rank,
+                "strike": put_strike,
+                "total_oi": round(total_oi, 1),
+                "body_ratio": round(body_ratio, 3),
+                "volume_spike": True,
+                "delta_acceleration": round(delta_accel, 3),
+                "net_gamma": round(net_gamma, 2),
+                "regime": regime,
+                "trend": trend,
+                "risk": round(risk, 2),
+                "risk_reward_ratio": round(
+                    (entry - target) / risk, 2
+                ) if risk > 0 else 0,
+                # v2 fields
+                "gamma_at_strike": round(gamma_mag, 4) if gamma_mag is not None else None,
+                "target_mult": round(target_mult, 3),
+                "atr_ratio": round(atr_ratio, 3),
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # Reversal Signal Detection
+    # ------------------------------------------------------------------
+
+    def _check_bullish_reversal(
+        self,
+        rolling_data: Dict[str, Any],
+        price: float,
+        strike: float,
+    ) -> bool:
+        """
+        Check for bullish reversal at a Put strike.
+
+        Two possible signals (either one qualifies):
+            1. Bullish divergence: price made a lower low but volume declined
+            2. Bullish candlestick: close > open, upper wick < lower wick * 0.5
+        """
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        vol_window = rolling_data.get(KEY_VOLUME_5M)
+
+        if price_window is None or vol_window is None:
+            return False
+
+        latest = price_window.latest
+        if latest is None:
+            return False
+
+        # Check 1: Bullish divergence
+        if self._check_bullish_divergence(price_window, vol_window, strike):
+            return True
+
+        # Check 2: Bullish candlestick pattern
+        if self._check_bullish_candlestick(price_window):
+            return True
+
+        return False
+
+    def _check_bearish_reversal(
+        self,
+        rolling_data: Dict[str, Any],
+        price: float,
+        strike: float,
+    ) -> bool:
+        """
+        Check for bearish reversal at a Call strike.
+
+        Two possible signals (either one qualifies):
+            1. Bearish divergence: price made a higher high but volume declined
+            2. Bearish candlestick: close < open, lower wick < upper wick * 0.5
+        """
+        price_window = rolling_data.get(KEY_PRICE_5M)
+        vol_window = rolling_data.get(KEY_VOLUME_5M)
+
+        if price_window is None or vol_window is None:
+            return False
+
+        latest = price_window.latest
+        if latest is None:
+            return False
+
+        # Check 1: Bearish divergence
+        if self._check_bearish_divergence(price_window, vol_window, strike):
+            return True
+
+        # Check 2: Bearish candlestick pattern
+        if self._check_bearish_candlestick(price_window):
+            return True
+
+        return False
+
+    @staticmethod
+    def _check_bullish_divergence(
+        price_window: Any,
+        vol_window: Any,
+        strike: float,
+    ) -> bool:
+        """
+        Bullish divergence: price made a lower low near strike
+        but volume is declining (selling exhaustion).
+        """
+        window_min = price_window.min
+        window_latest = price_window.latest
+        vol_latest = vol_window.latest
+        vol_avg = vol_window.mean
+
+        if window_min is None or window_latest is None:
+            return False
+        if vol_latest is None or vol_avg is None or vol_avg == 0:
+            return False
+
+        # Price is near the strike (within proximity)
+        proximity = abs(window_latest - strike) / strike
+        if proximity > BOUNCE_PROXIMITY_PCT * 2:
+            return False
+
+        # Volume declining on the latest candle vs rolling avg
+        vol_ratio = vol_latest / vol_avg
+        return vol_ratio < DIVERGENCE_VOLUME_THRESHOLD
+
+    @staticmethod
+    def _check_bearish_divergence(
+        price_window: Any,
+        vol_window: Any,
+        strike: float,
+    ) -> bool:
+        """
+        Bearish divergence: price made a higher high near strike
+        but volume is declining (buying exhaustion).
+        """
+        window_max = price_window.max
+        window_latest = price_window.latest
+        vol_latest = vol_window.latest
+        vol_avg = vol_window.mean
+
+        if window_max is None or window_latest is None:
+            return False
+        if vol_latest is None or vol_avg is None or vol_avg == 0:
+            return False
+
+        # Price is near the strike (within proximity)
+        proximity = abs(window_latest - strike) / strike
+        if proximity > BOUNCE_PROXIMITY_PCT * 2:
+            return False
+
+        # Volume declining on the latest candle vs rolling avg
+        vol_ratio = vol_latest / vol_avg
+        return vol_ratio < DIVERGENCE_VOLUME_THRESHOLD
+
+    @staticmethod
+    def _check_bullish_candlestick(price_window: Any) -> bool:
+        """
+        Bullish candlestick: close > open (latest > mean of last 2-3),
+        upper wick < lower wick * 0.5.
+
+        Approximation:
+            close = latest price
+            open = rolling mean of last few values
+            upper wick = max - close
+            lower wick = close - min
+        """
+        latest = price_window.latest
+        window_max = price_window.max
+        window_min = price_window.min
+
+        if latest is None or window_max is None or window_min is None:
+            return False
+
+        # Approximate open as the mean of the window (rough proxy)
+        open_price = price_window.mean
+        if open_price is None or open_price == 0:
+            return False
+
+        # Close > Open (bullish candle)
+        if latest <= open_price:
+            return False
+
+        # Upper wick < lower wick * 0.5
+        upper_wick = window_max - latest
+        lower_wick = latest - window_min
+
+        if lower_wick <= 0:
+            return False
+
+        return upper_wick < lower_wick * 0.5
+
+    @staticmethod
+    def _check_bearish_candlestick(price_window: Any) -> bool:
+        """
+        Bearish candlestick: close < open, lower wick < upper wick * 0.5.
+        """
+        latest = price_window.latest
+        window_max = price_window.max
+        window_min = price_window.min
+
+        if latest is None or window_max is None or window_min is None:
+            return False
+
+        open_price = price_window.mean
+        if open_price is None or open_price == 0:
+            return False
+
+        # Close < Open (bearish candle)
+        if latest >= open_price:
+            return False
+
+        # Lower wick < upper wick * 0.5
+        upper_wick = window_max - latest
+        lower_wick = latest - window_min
+
+        if upper_wick <= 0:
+            return False
+
+        return lower_wick < upper_wick * 0.5
+
+    @staticmethod
+    def _get_candle_body_ratio(rolling_data: Dict[str, Any]) -> Optional[float]:
+        """
+        Get candle body ratio: abs(close - open) / (high - low).
+
+        Approximation using price rolling window:
+            close = latest
+            open = rolling mean
+            high = window max
+            low = window min
+        """
+        window = rolling_data.get(KEY_PRICE_5M)
+        if window is None or window.count < MIN_DATA_POINTS:
+            return None
+
+        latest = window.latest
+        open_price = window.mean
+        window_max = window.max
+        window_min = window.min
+
+        if (
+            latest is None
+            or open_price is None
+            or window_max is None
+            or window_min is None
+        ):
+            return None
+
+        close = latest
+        high = window_max
+        low = window_min
+
+        candle_range = high - low
+        if candle_range <= 0:
+            return None
+
+        body = abs(close - open_price)
+        return body / candle_range
+
+    @staticmethod
+    def _check_volume_spike(rolling_data: Dict[str, Any]) -> bool:
+        """Check if current volume exceeds rolling average by ≥20%."""
+        window = rolling_data.get(KEY_VOLUME_5M)
+        if window is None or window.count < MIN_DATA_POINTS:
+            return False
+
+        current = window.latest
+        avg = window.mean
+        if current is None or avg is None or avg == 0:
+            return False
+
+        return current >= avg * SLICE_VOLUME_RATIO
+
+    # ------------------------------------------------------------------
+    # v2 Liquidity-Momentum Checks
+    # ------------------------------------------------------------------
+
+    def _get_liquidity_vacuum_ratio(
+        self,
+        rolling_data: Dict[str, Any],
+        direction: str,
+    ) -> float:
+        """
+        Get the raw liquidity vacuum bid/ask ratio for soft confidence penalties.
+
+        For LONG slice: bid/ask ratio (massive bid wall, tiny ask above)
+        For SHORT slice: ask/bid ratio (massive ask wall, tiny bid below)
+
+        Returns 0.0 if depth data is unavailable or computation fails.
+        """
+        depth_data = rolling_data.get(KEY_MARKET_DEPTH_AGG)
+        if depth_data is None:
+            return 0.0
+
+        bid_levels = depth_data.get("bid_levels", [])
+        ask_levels = depth_data.get("ask_levels", [])
+
+        if not bid_levels and not ask_levels:
+            return 0.0
+
+        total_bid_size = sum(b.get("size", 0) for b in bid_levels)
+        total_ask_size = sum(a.get("size", 0) for a in ask_levels)
+
+        if total_bid_size == 0 and total_ask_size == 0:
+            return 0.0
+
+        if direction == "LONG":
+            if total_ask_size == 0:
+                return float("inf")
+            return total_bid_size / total_ask_size
+        else:
+            if total_bid_size == 0:
+                return float("inf")
+            return total_ask_size / total_bid_size
+
+    def _check_liquidity_vacuum(
+        self,
+        rolling_data: Dict[str, Any],
+        direction: str,
+    ) -> bool:
+        """
+        Check for liquidity vacuum via market depth bid/ask asymmetry.
+
+        For LONG slice: check bid/ask ratio > 3.0 (massive bid wall,
+            tiny ask above = vacuum above the bid wall)
+        For SHORT slice: check ask/bid ratio > 3.0 (massive ask wall,
+            tiny bid below = vacuum below the ask wall)
+
+        If depth data unavailable, return True (backwards compat —
+            fall back to volume-only checks).
+        """
+        depth_data = rolling_data.get(KEY_MARKET_DEPTH_AGG)
+        if depth_data is None:
+            # No depth data available — fall back to volume-only (backwards compat)
+            return True
+
+        bid_levels = depth_data.get("bid_levels", [])
+        ask_levels = depth_data.get("ask_levels", [])
+
+        if not bid_levels and not ask_levels:
+            return True
+
+        total_bid_size = sum(b.get("size", 0) for b in bid_levels)
+        total_ask_size = sum(a.get("size", 0) for a in ask_levels)
+
+        if total_bid_size == 0 and total_ask_size == 0:
+            return True
+
+        if direction == "LONG":
+            # LONG slice: need massive bid wall, tiny ask = vacuum above
+            if total_ask_size == 0:
+                return True
+            ratio = total_bid_size / total_ask_size
+            return ratio > LIQUIDITY_VACUUM_RATIO
+        else:
+            # SHORT slice: need massive ask wall, tiny bid = vacuum below
+            if total_bid_size == 0:
+                return True
+            ratio = total_ask_size / total_bid_size
+            return ratio > LIQUIDITY_VACUUM_RATIO
+
+    def _check_delta_surge(
+        self,
+        rolling_data: Dict[str, Any],
+        strike: float,
+        gex_calc: Any,
+        direction: str,
+    ) -> Optional[float]:
+        """
+        Get delta acceleration ratio at the given strike.
+
+        Get current net_delta at strike and compare to previous
+        (from KEY_STRIKE_DELTA_5M rolling window).
+
+        Returns delta_accel value (or None if computation fails).
+        Callers apply soft confidence penalties instead of hard gates.
+        """
+        try:
+            # Current net delta at strike
+            delta_data = gex_calc.get_delta_by_strike(strike)
+            current_delta = delta_data.get("net_delta", 0.0)
+
+            # Previous delta from rolling window
+            delta_window = rolling_data.get(KEY_STRIKE_DELTA_5M)
+            if delta_window is None or delta_window.count < 1:
+                return None
+
+            previous_delta = delta_window.values[-1] if delta_window.values else None
+            if previous_delta is None or previous_delta == 0:
+                return None
+
+            # Compute delta acceleration ratio
+            delta_accel = current_delta / previous_delta
+            return delta_accel
+        except Exception as exc:
+            logger.debug(
+                "StrikeConcentrationV2: failed to check delta surge at %s: %s",
+                strike, exc,
+            )
+            return None
+
+    def _get_gamma_magnitude(
+        self,
+        gex_calc: Any,
+        strike: float,
+    ) -> Optional[float]:
+        """
+        Get absolute gamma magnitude at the given strike.
+
+        Used to weight confidence (0.05–0.10 component).
+        """
+        try:
+            gamma_val = gex_calc.get_strike_net_gamma(strike)
+            return abs(gamma_val)
+        except Exception as exc:
+            logger.debug(
+                "StrikeConcentrationV2: failed to get gamma at %s: %s",
+                strike, exc,
+            )
+            return None
+
+    def _compute_atr_normalized_target(
+        self,
+        entry: float,
+        risk: float,
+        rolling_data: Dict[str, Any],
+        direction: str,
+        is_bounce: bool = True,
+    ) -> Tuple[float, float, float]:
+        """
+        Compute ATR-normalized target price.
+
+        Uses KEY_ATR_5M rolling window to scale targets with market speed.
+
+        Returns (target_price, target_mult, atr_ratio).
+        """
+        atr_window = rolling_data.get(KEY_ATR_5M)
+        if atr_window is not None and atr_window.count >= 2:
+            atr_vals = list(atr_window.values)
+            current_atr = atr_vals[-1]
+            mean_atr = sum(atr_vals) / len(atr_vals)
+            if mean_atr > 0:
+                atr_ratio = current_atr / mean_atr
+            else:
+                atr_ratio = 1.0
+        else:
+            current_atr = 0.0
+            mean_atr = 0.0
+            atr_ratio = 1.0
+
+        # Base multiplier
+        base_mult = BOUNCE_TARGET_MULT if is_bounce else SLICE_TARGET_MULT
+
+        # Apply ATR ratio, capped
+        target_mult = base_mult * atr_ratio
+        target_mult = min(target_mult, ATR_NORMALIZATION_CAP)
+
+        # Minimum target: 0.3% from entry
+        min_target = entry * TARGET_MIN_PCT
+
+        if direction == "LONG":
+            target = entry + risk * target_mult
+            # Ensure minimum target distance
+            if target - entry < min_target:
+                target = entry + min_target
+        else:
+            target = entry - risk * target_mult
+            # Ensure minimum target distance
+            if entry - target < min_target:
+                target = entry - min_target
+
+        return target, target_mult, atr_ratio
+
+    # ------------------------------------------------------------------
+    # OI Strike Tracking
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _get_top_oi_strikes(
+        greeks_summary: Dict[str, Any],
+    ) -> List[Tuple[float, int, float]]:
+        """
+        Identify the top N strikes by total OI concentration.
+
+        Returns sorted list of (strike, rank, total_oi) tuples,
+        ranked from highest OI (rank 1) to lowest.
+
+        Each greeks_summary entry has call_oi and put_oi fields.
+        """
+        if not greeks_summary:
+            return []
+
+        strike_oi_list: List[Tuple[float, float]] = []
+
+        for strike_str, data in greeks_summary.items():
+            try:
+                strike = float(strike_str)
+            except (ValueError, TypeError):
+                continue
+
+            call_oi = data.get("call_oi", 0) or 0
+            put_oi = data.get("put_oi", 0) or 0
+            total_oi = call_oi + put_oi
+
+            if total_oi > 0:
+                strike_oi_list.append((strike, total_oi))
+
+        # Sort by total OI descending, take top N
+        strike_oi_list.sort(key=lambda x: x[1], reverse=True)
+        top = strike_oi_list[:TOP_OI_STRIKES_COUNT]
+
+        # Assign ranks
+        return [(strike, rank + 1, total_oi) for rank, (strike, total_oi) in enumerate(top)]
+
+    @staticmethod
+    def _nearest_strike_above(
+        top_strikes: List[Tuple[float, int, float]],
+        price: float,
+    ) -> Optional[Tuple[float, int, float]]:
+        """Find the nearest top-OI strike ABOVE the current price."""
+        above = [s for s in top_strikes if s[0] > price]
+        if not above:
+            return None
+        return min(above, key=lambda s: s[0])
+
+    @staticmethod
+    def _nearest_strike_below(
+        top_strikes: List[Tuple[float, int, float]],
+        price: float,
+    ) -> Optional[Tuple[float, int, float]]:
+        """Find the nearest top-OI strike BELOW the current price."""
+        below = [s for s in top_strikes if s[0] < price]
+        if not below:
+            return None
+        return max(below, key=lambda s: s[0])
+
+    # ------------------------------------------------------------------
+    # Target & Stop Computation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _compute_bounce_target(
+        current_strike: float,
+        top_strikes: List[Tuple[float, int, float]],
+        price: float,
+        direction: str,
+        risk: float,
+    ) -> float:
+        """
+        Compute bounce target.
+
+        For LONG (bounce off Put below): target = midpoint between
+            current strike and next strike above.
+        For SHORT (bounce off Call above): target = midpoint between
+            current strike and next strike below.
+
+        Falls back to risk-based target if no next strike found.
+        """
+        if direction == "above":
+            # Find next strike above current_strike
+            candidates = [s for s in top_strikes if s[0] > current_strike]
+            if candidates:
+                next_strike = min(candidates, key=lambda s: s[0])
+                target = (current_strike + next_strike[0]) / 2
+                return target
+        else:
+            # Find next strike below current_strike
+            candidates = [s for s in top_strikes if s[0] < current_strike]
+            if candidates:
+                next_strike = max(candidates, key=lambda s: s[0])
+                target = (current_strike + next_strike[0]) / 2
+                return target
+
+        # Fallback: use risk-based target
+        return price + (risk * TARGET_RISK_MULT) if risk > 0 else price
+
+    @staticmethod
+    def _compute_slice_target(
+        current_strike: float,
+        top_strikes: List[Tuple[float, int, float]],
+        direction: str,
+        risk: float,
+    ) -> float:
+        """
+        Compute slice target = next strike in the direction of the slice.
+
+        For LONG slice (through Call above): target = next strike above.
+        For SHORT slice (through Put below): target = next strike below.
+
+        Falls back to risk-based target if no next strike found.
+        """
+        if direction == "above":
+            candidates = [s for s in top_strikes if s[0] > current_strike]
+            if candidates:
+                return min(candidates, key=lambda s: s[0])[0]
+        else:
+            candidates = [s for s in top_strikes if s[0] < current_strike]
+            if candidates:
+                return max(candidates, key=lambda s: s[0])[0]
+
+        # Fallback: use risk-based target
+        return current_strike + (risk * TARGET_RISK_MULT) if risk > 0 else current_strike
+
+    # ------------------------------------------------------------------
+    # Confidence Computation (v2)
+    # ------------------------------------------------------------------
+
+    def _compute_bounce_confidence(
+        self,
+        price: float,
+        strike: float,
+        rank: int,
+        total_oi: float,
+        rolling_data: Dict[str, Any],
+        direction: str,
+        net_gamma: float,
+        gamma_mag: Optional[float] = None,
+    ) -> float:
+        """
+        Compute bounce confidence (0.0–MAX_CONFIDENCE).
+
+        v2 — 6 components (was 5):
+            1. OI concentration rank     (0.10–0.15)
+            2. Proximity to strike        (0.10–0.20)
+            3. Gamma magnitude            (0.05–0.10)  NEW
+            4. Signal strength            (0.10–0.15)
+            5. Regime alignment           (0.05–0.10)
+            6. ATR target quality         (0.05–0.10)  NEW
+        """
+        # 1. OI rank component (0.10–0.15)
+        # Rank 1 = 0.15, Rank 2 = 0.13, Rank 3+ = 0.10
+        rank_conf = max(0.10, 0.15 - 0.02 * (rank - 1))
+
+        # 2. Proximity component (0.10–0.20)
+        # At 0% distance = 0.20, at 0.3% distance = 0.10
+        proximity = abs(price - strike) / strike
+        if proximity <= 0:
+            prox_conf = 0.20
+        elif proximity >= BOUNCE_PROXIMITY_PCT:
+            prox_conf = 0.10
+        else:
+            prox_conf = 0.20 - 0.10 * (proximity / BOUNCE_PROXIMITY_PCT)
+
+        # 3. Gamma magnitude component (0.05–0.10) — NEW
+        if gamma_mag is not None and gamma_mag > 0:
+            gamma_conf = 0.05 + 0.05 * min(1.0, gamma_mag / GAMMA_MAGNITUDE_THRESHOLD)
+        else:
+            gamma_conf = 0.05  # baseline when no gamma data
+
+        # 4. Signal strength (0.10–0.15)
+        vol_window = rolling_data.get(KEY_VOLUME_5M)
+        if vol_window is not None and vol_window.mean and vol_window.mean > 0:
+            vol_latest = vol_window.latest or 0
+            vol_ratio = vol_latest / vol_window.mean
+            # Lower volume near strike = stronger divergence signal
+            signal_conf = 0.10 + 0.05 * max(0, 1.0 - vol_ratio)
+        else:
+            signal_conf = 0.10  # baseline
+
+        # 5. Regime alignment (0.05–0.10)
+        regime_conf = 0.05 + 0.05 * min(1.0, abs(net_gamma) / 2000)
+
+        # 6. ATR target quality (0.05–0.10) — NEW
+        # How well the target scales with market speed
+        atr_window = rolling_data.get(KEY_ATR_5M)
+        if atr_window is not None and atr_window.count >= 2:
+            atr_vals = list(atr_window.values)
+            current_atr = atr_vals[-1]
+            mean_atr = sum(atr_vals) / len(atr_vals)
+            if mean_atr > 0:
+                atr_ratio = current_atr / mean_atr
+                # Optimal range: atr_ratio between 0.5 and 2.0
+                if atr_ratio <= 1.0:
+                    atr_quality = 0.05 + 0.05 * atr_ratio
+                else:
+                    atr_quality = 0.10 - 0.03 * min(1.0, (atr_ratio - 1.0))
+            else:
+                atr_quality = 0.05
+        else:
+            atr_quality = 0.05  # baseline
+
+        # Normalize each component to [0,1] and average across 6 components
+        norm_rank = (rank_conf - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
+        norm_prox = (prox_conf - 0.10) / (0.20 - 0.10) if 0.20 != 0.10 else 1.0
+        norm_gamma = (gamma_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
+        norm_signal = (signal_conf - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
+        norm_regime = (regime_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
+        norm_atr = (atr_quality - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
+
+        confidence = (norm_rank + norm_prox + norm_gamma + norm_signal + norm_regime + norm_atr) / 6.0
+        return max(0.0, confidence)
+
+    def _compute_slice_confidence(
+        self,
+        price: float,
+        strike: float,
+        rank: int,
+        total_oi: float,
+        rolling_data: Dict[str, Any],
+        body_ratio: float,
+        direction: str,
+        net_gamma: float,
+        delta_accel: Optional[float] = None,
+        gamma_mag: Optional[float] = None,
+    ) -> float:
+        """
+        Compute slice confidence (0.0–MAX_CONFIDENCE).
+
+        v2 — 8 components (was 5):
+            1. OI concentration rank     (0.10–0.15)
+            2. Body ratio strength        (0.10–0.20)
+            3. Gamma magnitude            (0.05–0.10)  NEW
+            4. Signal strength            (0.15–0.25)
+            5. Liquidity vacuum           (0.10–0.15)  NEW
+            6. Delta surge                (0.10–0.15)  NEW
+            7. Regime alignment           (0.05–0.10)
+            8. ATR target quality         (0.05–0.10)  NEW
+        """
+        # 1. OI rank component (0.10–0.15)
+        rank_conf = max(0.10, 0.15 - 0.02 * (rank - 1))
+
+        # 2. Body ratio component (0.10–0.20)
+        # body_ratio = 0.3 → 0.10, body_ratio = 1.0 → 0.20
+        body_conf = 0.10 + 0.10 * min(1.0, (body_ratio - SLICE_BODY_RATIO) / 0.7)
+
+        # 3. Gamma magnitude component (0.05–0.10) — NEW
+        if gamma_mag is not None and gamma_mag > 0:
+            gamma_conf = 0.05 + 0.05 * min(1.0, gamma_mag / GAMMA_MAGNITUDE_THRESHOLD)
+        else:
+            gamma_conf = 0.05
+
+        # 4. Signal strength (0.15–0.25)
+        # Combines body ratio and volume spike
+        vol_window = rolling_data.get(KEY_VOLUME_5M)
+        if vol_window is not None and vol_window.mean and vol_window.mean > 0:
+            vol_latest = vol_window.latest or 0
+            vol_ratio = vol_latest / vol_window.mean
+            vol_conf = 0.15 + 0.10 * min(1.0, (vol_ratio - 1.0))
+        else:
+            vol_conf = 0.15
+        signal_conf = 0.5 * body_conf + 0.5 * vol_conf
+
+        # 5. Liquidity vacuum component (0.10–0.15)
+        # Hard gate removed — now a soft penalty via slice_conf_multiplier.
+        # Score based on how extreme the vacuum is.
+        depth_data = rolling_data.get(KEY_MARKET_DEPTH_AGG)
+        if depth_data is not None:
+            bid_levels = depth_data.get("bid_levels", [])
+            ask_levels = depth_data.get("ask_levels", [])
+            total_bid = sum(b.get("size", 0) for b in bid_levels)
+            total_ask = sum(a.get("size", 0) for a in ask_levels)
+            if total_bid > 0 and total_ask > 0:
+                if direction == "LONG":
+                    vacuum_ratio = total_bid / total_ask
+                else:
+                    vacuum_ratio = total_ask / total_bid
+                # Score: ratio of 3.0 = 0.10, ratio of 10.0+ = 0.15
+                vac_conf = 0.10 + 0.05 * min(1.0, (vacuum_ratio - LIQUIDITY_VACUUM_RATIO) / 7.0)
+            else:
+                vac_conf = 0.10
+        else:
+            vac_conf = 0.10  # no depth data
+
+        # 6. Delta surge component (0.10–0.15)
+        # Hard gate removed — delta_accel can now be below threshold.
+        # Confidence scales based on how close to the threshold we are.
+        if delta_accel is not None:
+            if direction == "LONG":
+                # Higher accel = stronger signal
+                delta_conf = 0.10 + 0.05 * min(1.0, (delta_accel - DELTA_ACCEL_THRESHOLD_LONG) / 0.5)
+            else:
+                # More negative accel = stronger signal (e.g., 0.70 < 0.85)
+                delta_conf = 0.10 + 0.05 * min(1.0, (DELTA_ACCEL_THRESHOLD_SHORT - delta_accel) / 0.35)
+        else:
+            delta_conf = 0.10
+
+        # 7. Regime alignment (0.05–0.10)
+        regime_conf = 0.05 + 0.05 * min(1.0, abs(net_gamma) / 2000)
+
+        # 8. ATR target quality (0.05–0.10) — NEW
+        atr_window = rolling_data.get(KEY_ATR_5M)
+        if atr_window is not None and atr_window.count >= 2:
+            atr_vals = list(atr_window.values)
+            current_atr = atr_vals[-1]
+            mean_atr = sum(atr_vals) / len(atr_vals)
+            if mean_atr > 0:
+                atr_ratio = current_atr / mean_atr
+                if atr_ratio <= 1.0:
+                    atr_quality = 0.05 + 0.05 * atr_ratio
+                else:
+                    atr_quality = 0.10 - 0.03 * min(1.0, (atr_ratio - 1.0))
+            else:
+                atr_quality = 0.05
+        else:
+            atr_quality = 0.05
+
+        # Normalize each component to [0,1] and average across 8 components
+        norm_rank = (rank_conf - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
+        norm_body = (body_conf - 0.10) / (0.20 - 0.10) if 0.20 != 0.10 else 1.0
+        norm_gamma = (gamma_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
+        norm_signal = (signal_conf - 0.15) / (0.25 - 0.15) if 0.25 != 0.15 else 1.0
+        norm_vac = (vac_conf - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
+        norm_delta = (delta_conf - 0.10) / (0.15 - 0.10) if 0.15 != 0.10 else 1.0
+        norm_regime = (regime_conf - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
+        norm_atr = (atr_quality - 0.05) / (0.10 - 0.05) if 0.10 != 0.05 else 1.0
+
+        confidence = (norm_rank + norm_body + norm_gamma + norm_signal +
+                      norm_vac + norm_delta + norm_regime + norm_atr) / 8.0
+        return max(0.0, confidence)

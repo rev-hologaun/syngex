@@ -1,0 +1,580 @@
+"""
+app_dashboard.py — Syngex Real-Time Gamma Exposure Command Center
+
+Standalone Streamlit app that reads GEX data from a shared JSON file
+written by the Syngex orchestrator (`main.py`).
+
+Data file : data/gex_state.json  (written by orchestrator every ~1s)
+Refresh   : every 2s via Streamlit rerun
+Bind      : 0.0.0.0:8501
+
+Layout
+------
+    Header → Metric cards → Gamma Profile (full-width) →
+    Gamma Flip + Gamma Walls (2-col) → Recent Signals → Top Strikes → Footer
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+from datetime import datetime
+from pathlib import Path
+
+import altair as alt
+import pandas as pd
+import streamlit as st
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+DATA_DIR = Path(__file__).parent / "data"
+LOG_DIR = Path(__file__).parent / "log"
+
+# Read symbol from orchestrator environment variable (not shared sidecar file)
+_current_symbol = os.environ.get("SYNGEX_SYMBOL", "UNKNOWN")
+
+DATA_FILE = DATA_DIR / f"gex_state_{_current_symbol}.json"
+POLL_INTERVAL = 2  # seconds between polls
+
+# ---------------------------------------------------------------------------
+# Page setup
+# ---------------------------------------------------------------------------
+
+st.set_page_config(
+    page_title="Syngex Command Center",
+    page_icon="🕸️",
+    layout="wide",
+)
+
+# ---------------------------------------------------------------------------
+# Data loading
+# ---------------------------------------------------------------------------
+
+
+@st.cache_data(ttl=2)
+def load_gex_state() -> dict | None:
+    """Load the latest GEX state from the shared JSON file.
+
+    Cached with a 2-second TTL so the Command Center auto-refreshes
+    without requiring a manual page reload.
+
+    Returns None when the file is missing, empty, or corrupt.
+    """
+    if not DATA_FILE.exists():
+        return None
+    try:
+        with open(DATA_FILE, "r") as f:
+            content = f.read().strip()
+            if not content:
+                return None
+            return json.loads(content)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+@st.cache_data(ttl=2)
+def load_signals(n: int = 20) -> list[dict]:
+    """Load the N most recent signals from the shared signals log."""
+    signals_file = LOG_DIR / "signals.jsonl"
+    if not signals_file.exists():
+        return []
+    try:
+        lines = signals_file.read_text().strip().splitlines()
+        # Read last N lines
+        recent = [json.loads(line) for line in lines[-n:] if line.strip()]
+        return list(reversed(recent))  # Oldest first
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def is_data_stale(state: dict, max_age_seconds: int = 30) -> bool:
+    """Return True if the last_updated timestamp is older than *max_age_seconds*."""
+    try:
+        ts = time.strptime(state.get("last_updated", ""), "%Y-%m-%d %H:%M:%S %Z")
+        file_age = time.time() - time.mktime(ts)
+        return file_age > max_age_seconds
+    except (ValueError, TypeError, OSError):
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Render functions
+# ---------------------------------------------------------------------------
+
+
+def render_header(state: dict) -> None:
+    """Header row: symbol + underlying price."""
+    symbol = state.get("symbol", "???")
+    price = state.get("underlying_price", 0.0)
+    st.markdown(
+        f"### 🕸️ **Syngex Command Center** — **{symbol}**  |  Price: ${price:,.2f}"
+    )
+
+
+def render_metrics(state: dict) -> None:
+    """Metric cards — Net Gamma is color-coded green / red."""
+    net_gamma = state.get("net_gamma_normalized", 0.0)
+    active_strikes = state.get("active_strikes", 0)
+    total_messages = state.get("total_messages", 0)
+    underlying_price = state.get("underlying_price", 0.0)
+
+    # Color decision for the Net Gamma delta
+    if net_gamma > 0:
+        delta_color = "green"
+        delta_prefix = "+"
+    elif net_gamma < 0:
+        delta_color = "red"
+        delta_prefix = ""
+    else:
+        delta_color = "off"
+        delta_prefix = ""
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric(
+            label="📈 Underlying Price",
+            value=f"${underlying_price:,.2f}",
+        )
+
+    with col2:
+        st.metric(
+            label="⚡ Net Gamma",
+            value=f"{net_gamma:,.2f}",
+            delta=f"{delta_prefix}{net_gamma:+,.2f}",
+            delta_color=delta_color,
+        )
+
+    with col3:
+        st.metric(label="🎯 Active Strikes", value=f"{active_strikes:,}")
+
+    with col4:
+        st.metric(label="📨 Messages", value=f"{total_messages:,}")
+
+
+def render_gamma_profile(state: dict) -> None:
+    """Column 1 — Gamma Profile: Altair line chart with micro-signal overlay.
+
+    Shows the gamma profile line with colored markers for strategy signals,
+    sized by confidence. Hover tooltips show strategy, confidence, direction, reason.
+    """
+    strikes = state.get("strikes", {})
+    micro_signals = state.get("micro_signals", {})
+    st.subheader("📊 Gamma Profile")
+
+    if not strikes:
+        st.warning("No gamma data available yet.")
+        return
+
+    # Build DataFrame for gamma line
+    profile_df = pd.DataFrame(
+        [
+            {"strike": float(s), "net_gamma": b.get("net_gamma", 0.0)}
+            for s, b in strikes.items()
+        ]
+    ).sort_values("strike")
+
+    # Build DataFrame for micro-signal markers
+    # Filter to v2 strategies only (strategy ends with "_v2")
+    marker_rows = []
+    for strike_str, sig in micro_signals.items():
+        strategy = sig.get("strategy", "")
+        if not strategy.endswith("_v2"):
+            continue
+        try:
+            strike_val = float(strike_str)
+        except (ValueError, TypeError):
+            continue
+        conf = sig.get("confidence", 0)
+        # Map direction to color category
+        direction = sig.get("direction", "")
+        if "LONG" in direction:
+            color = "green"
+        elif "SHORT" in direction:
+            color = "red"
+        elif "MAGNET" in direction or "PULL" in direction:
+            color = "blue"
+        elif "CONVERGENCE" in strategy.upper():
+            color = "gold"
+        else:
+            color = "gray"
+
+        # Look up gamma value for this strike so dots render at correct Y
+        # Try exact match first, then nearest strike in the bucket
+        strike_bucket = strikes.get(str(strike_val), {})
+        if not strike_bucket:
+            # Find nearest strike with gamma data
+            nearest_strike = None
+            nearest_dist = float('inf')
+            for s_key in strikes:
+                try:
+                    s_float = float(s_key)
+                    dist = abs(s_float - strike_val)
+                    if dist < nearest_dist:
+                        nearest_dist = dist
+                        nearest_strike = s_key
+                except ValueError:
+                    pass
+            if nearest_strike:
+                strike_bucket = strikes[nearest_strike]
+            else:
+                strike_bucket = {}
+        net_gamma = strike_bucket.get("net_gamma", 0.0)
+
+        marker_rows.append({
+            "strike": strike_val,
+            "net_gamma": net_gamma,
+            "confidence": conf,
+            "strategy": sig.get("strategy", ""),
+            "direction": sig.get("direction", ""),
+            "reason": sig.get("reason", ""),
+            "timestamp": sig.get("timestamp", ""),
+            "color": color,
+            "size": 30 + conf * 200,  # scale marker size with confidence
+        })
+
+    marker_df = pd.DataFrame(marker_rows) if marker_rows else pd.DataFrame(
+        columns=["strike", "confidence", "strategy", "direction", "reason", "timestamp", "color", "size"]
+    )
+
+    # Base chart
+    base = alt.Chart(profile_df).encode(x=alt.X("strike:Q", scale=alt.Scale(zero=False)))
+
+    # Gamma line
+    gamma_line = base.mark_line(color="steelblue", strokeWidth=1).encode(
+        y=alt.Y("net_gamma:Q", scale=alt.Scale(zero=False)),
+        tooltip=["net_gamma"],
+    )
+
+    # Micro-signal markers (layered on top)
+    markers = alt.Chart(marker_df).encode(
+        x=alt.X("strike:Q"),
+        y=alt.Y("net_gamma:Q", scale=alt.Scale(zero=False)),
+        size=alt.Size("size:Q", legend=None),
+        color=alt.Color("color:N",
+            scale=alt.Scale(
+                domain=["green", "red", "blue", "gold", "gray"],
+                range=["#22c55e", "#ef4444", "#3b82f6", "#eab308", "#9ca3af"],
+            ),
+        ),
+        tooltip=[
+            alt.Tooltip("strategy:N", title="Strategy"),
+            alt.Tooltip("confidence:Q", title="Confidence", format=".0%"),
+            alt.Tooltip("direction:N", title="Direction"),
+            alt.Tooltip("reason:N", title="Signal"),
+        ],
+    ).mark_circle().interactive()
+
+    # Layer them
+    chart = alt.layer(gamma_line, markers).resolve_scale(y="independent")
+    st.altair_chart(chart, use_container_width=True)
+
+
+def render_gamma_flip(state: dict) -> None:
+    """Column 2 — Gamma Flip: flip strike metric + compact cumulative scan."""
+    strikes = state.get("strikes", {})
+    current_price = state.get("underlying_price", 0.0)
+
+    if not strikes:
+        st.warning("No gamma data available yet.")
+        return
+
+    # Calculate cumulative gamma from high → low strikes
+    sorted_strikes = sorted(strikes.keys(), key=lambda x: float(x), reverse=True)
+    cumulative = 0.0
+    flip_strike = None
+    cumulative_rows = []
+
+    for strike in sorted_strikes:
+        bucket = strikes[strike]
+        net_gamma = bucket.get("net_gamma", 0.0)
+        cumulative += net_gamma
+        cumulative_rows.append({
+            "Strike": float(strike),
+            "Net Gamma": net_gamma,
+            "Cumulative": cumulative,
+        })
+        if flip_strike is None and cumulative < 0:
+            flip_strike = float(strike)
+
+    # Main flip metric
+    if flip_strike is not None:
+        st.metric(
+            label="🔄 Gamma Flip Strike",
+            value=f"${flip_strike:.1f}",
+        )
+        if current_price > 0:
+            dist = flip_strike - current_price
+            pct = (dist / current_price * 100)
+            st.caption(f"Distance from ${current_price:.2f}: {dist:+.2f} ({pct:+.1f}%)")
+    else:
+        st.info("No gamma flip detected — cumulative gamma stays positive at all strikes.")
+
+    st.caption(
+        "The Gamma Flip is the highest strike where cumulative net gamma turns negative. "
+        "Below this level, the market tends to self-stabilize (negative gamma). "
+        "Above it, the market tends to accelerate (positive gamma)."
+    )
+
+    # Compact cumulative gamma scan table (~8 rows max)
+    st.subheader("Cumulative Gamma Scan")
+    cum_df = pd.DataFrame(cumulative_rows)
+    cum_df["Strike"] = cum_df["Strike"].apply(lambda x: f"${x:.1f}")
+    cum_df["Net Gamma"] = cum_df["Net Gamma"].apply(lambda x: f"{x:,.2f}")
+    cum_df["Cumulative"] = cum_df["Cumulative"].apply(lambda x: f"{x:,.2f}")
+
+    # Show up to 8 rows
+    display_df = cum_df.head(8)
+    st.dataframe(display_df, width="stretch", height=200)
+
+
+def render_gamma_walls(state: dict) -> None:
+    """Column 3 — Gamma Walls: dominant wall metric + compact walls table."""
+    strikes = state.get("strikes", {})
+    current_price = state.get("underlying_price", 0.0)
+
+    if not strikes:
+        st.warning("No gamma data available yet.")
+        return
+
+    # Calculate GEX per strike
+    GEX_MULTIPLIER = 100
+    THRESHOLD = 500_000  # $500K in GEX terms
+    walls = []
+
+    for strike, bucket in strikes.items():
+        net_gamma = bucket.get("net_gamma", 0.0)
+        gex = net_gamma * GEX_MULTIPLIER * current_price if current_price > 0 else 0
+        total_contracts = bucket.get("total_contracts", 0)
+        side = "Call Wall" if net_gamma > 0 else "Put Wall"
+        color = "🟢" if net_gamma > 0 else "🔴"
+
+        walls.append({
+            "Strike": float(strike),
+            "Side": side,
+            "Color": color,
+            "Net Gamma": net_gamma,
+            "GEX": gex,
+            "Contracts": total_contracts,
+        })
+
+    # Sort by absolute GEX
+    walls.sort(key=lambda x: abs(x["GEX"]), reverse=True)
+
+    # Filter to significant walls
+    significant_walls = [w for w in walls if abs(w["GEX"]) >= THRESHOLD]
+
+    # Main metric — dominant wall
+    if significant_walls:
+        top_wall = significant_walls[0]
+        st.metric(
+            label="🧱 Dominant Gamma Wall",
+            value=f"{top_wall['Color']} Strike ${top_wall['Strike']:.1f} ({top_wall['Side']})",
+            delta=f"GEX: ${top_wall['GEX']:,.0f}",
+            delta_color="green" if top_wall["GEX"] > 0 else "red",
+        )
+        if current_price > 0:
+            dist = top_wall["Strike"] - current_price
+            pct = (dist / current_price * 100)
+            st.caption(f"Distance from ${current_price:.2f}: {dist:+.2f} ({pct:+.1f}%)")
+    else:
+        st.info("No significant gamma walls detected above $500K threshold.")
+
+    st.caption(
+        "Gamma Walls are strikes with massive GEX concentration. "
+        "Call walls (green) act as magnetic attractors. "
+        "Put walls (red) act as support/resistance barriers. "
+        "Threshold: $500K GEX."
+    )
+
+    # Compact walls table (~8 rows max)
+    st.subheader("Gamma Walls")
+    wall_df = pd.DataFrame(walls)
+    wall_df["Strike"] = wall_df["Strike"].apply(lambda x: f"${x:.1f}")
+    wall_df["Net Gamma"] = wall_df["Net Gamma"].apply(lambda x: f"{x:,.2f}")
+    wall_df["GEX"] = wall_df["GEX"].apply(lambda x: f"${x:,.0f}")
+    wall_df = wall_df[["Color", "Strike", "Side", "Net Gamma", "GEX", "Contracts"]]
+
+    # Show up to 8 rows
+    display_df = wall_df.head(8)
+    st.dataframe(display_df, width="stretch", height=200)
+
+
+def render_top_strikes(state: dict) -> None:
+    """Bottom full-width table — Top Strikes by |Net Gamma|."""
+    strikes = state.get("strikes", {})
+    st.subheader("⚡ Top Strikes")
+
+    if not strikes:
+        st.warning("No strike data available yet.")
+        return
+
+    # Sort by absolute net gamma descending
+    sorted_strikes = sorted(
+        strikes.items(),
+        key=lambda x: abs(x[1].get("net_gamma", 0.0)),
+        reverse=True,
+    )
+
+    top_df = pd.DataFrame(
+        [
+            {
+                "Strike": f"${float(s):.1f}",
+                "Net Gamma": f"{b.get('net_gamma', 0.0):,.2f}",
+                "Call GEX": f"{b.get('call_gamma_oi', 0.0):,.2f}",
+                "Put GEX": f"{b.get('put_gamma_oi', 0.0):,.2f}",
+                "Contracts": b.get("total_contracts", 0),
+            }
+            for s, b in sorted_strikes
+        ]
+    )
+
+    st.dataframe(top_df, width="stretch", height=600)
+
+
+def _format_timestamp(ts) -> str:
+    """Convert Unix epoch to HH:MM:SS 24-hour format."""
+    try:
+        return datetime.fromtimestamp(float(ts)).strftime("%H:%M:%S")
+    except (ValueError, TypeError, OSError):
+        return str(ts)
+
+
+def _confidence_badge(conf: float) -> str:
+    """Return an emoji badge based on confidence level."""
+    if conf >= 0.80:
+        return f"🟢 {conf:.0%}"
+    elif conf >= 0.60:
+        return f"🟡 {conf:.0%}"
+    else:
+        return f"🔴 {conf:.0%}"
+
+
+def render_signals(signals: list[dict], symbol: str = "") -> None:
+    """Display recent strategy signals with confidence badges.
+
+    If *symbol* is provided, only signals for that underlying are shown.
+    """
+    st.subheader("📡 Recent Signals")
+
+    if not signals:
+        st.info("No signals generated yet. Start the orchestrator to generate signals.")
+        return
+
+    # Filter by active symbol if provided
+    if symbol:
+        signals = [s for s in signals if s.get("symbol", "") == symbol]
+        if not signals:
+            st.info(
+                f"⏳ No signals for **{symbol}** yet — the orchestrator is still warming up."
+            )
+            return
+
+    # Filter to v2 strategies only (strategy_id ends with "_v2")
+    signals = [s for s in signals if s.get("strategy_id", "").endswith("_v2")]
+    if not signals:
+        st.info(
+            "⏳ No **v2** strategy signals yet — only _v2 strategy_ids are displayed."
+        )
+        return
+
+    # Build display table
+    sig_df = pd.DataFrame(
+        [
+            {
+                "Time": _format_timestamp(s.get("timestamp")),
+                "Strategy": s.get("strategy_id", ""),
+                "Direction": s.get("direction", ""),
+                "Confidence": f"{s.get('confidence', 0):.2f}",
+                "Confidence Badge": _confidence_badge(s.get("confidence", 0)),
+                "Entry": f"${s.get('entry', 0):,.2f}",
+                "Stop": f"${s.get('stop', 0):,.2f}",
+                "Target": f"${s.get('target', 0):,.2f}",
+                "Symbol": s.get("symbol", ""),
+                "Reason": s.get("reason", ""),
+            }
+            for s in signals
+        ]
+    )
+
+    st.dataframe(sig_df, width="stretch", height=min(400, len(signals) * 35))
+
+
+def render_status(state: dict | None, signals: list[dict]) -> None:
+    """Footer / status message."""
+    if state is None:
+        st.info(
+            "⏳ **Waiting for data…**  "
+            "Start the Syngex orchestrator (`python3 main.py TSLA dashboard`) and the "
+            "Command Center will update automatically."
+        )
+    else:
+        last_updated = state.get("last_updated", "unknown")
+        symbol = state.get("symbol", "???")
+        stale = is_data_stale(state)
+        if stale:
+            st.warning(
+                f"⚠️ Data may be stale (last update: {last_updated}). "
+                f"Check that the orchestrator is running for **{symbol}**."
+            )
+        else:
+            st.caption(f"Last updated: {last_updated}  |  Symbol: {symbol}")
+
+        # Show strategy engine status
+        engine_status = state.get("strategy_engine", {})
+        if engine_status:
+            signal_count = engine_status.get("total_signals", 0)
+            registered = engine_status.get("strategies", 0)
+            st.caption(f"Strategy engine: {registered} strategies registered, {signal_count} signals produced")
+
+
+# ---------------------------------------------------------------------------
+# Main loop — auto-refresh
+# ---------------------------------------------------------------------------
+
+state = load_gex_state()
+signals = load_signals(20)
+
+if state is None:
+    # Use Streamlit-native spinner instead of blocking while loop
+    spinner = st.empty()
+    with spinner:
+        while state is None:
+            time.sleep(1)
+            state = load_gex_state()
+            signals = load_signals(20)
+            spinner.info("⏳ Waiting for data… Start the Syngex orchestrator.")
+    st.empty()  # Clear spinner after data arrives
+
+# All data loaded — render single-page Command Center layout
+render_header(state)
+render_metrics(state)
+
+# Gamma Profile — full-width row by itself
+render_gamma_profile(state)
+
+# Gamma Flip & Gamma Walls — side by side
+col1, col2 = st.columns(2)
+
+with col1:
+    render_gamma_flip(state)
+
+with col2:
+    render_gamma_walls(state)
+
+# Recent signals — filter by active symbol
+active_symbol = state.get("symbol", "") if state else ""
+render_signals(signals, active_symbol)
+
+# Bottom full-width table
+render_top_strikes(state)
+
+# Status footer
+render_status(state, signals)
+
+# NOTE: Module-level while True + st.rerun() is not compatible with Streamlit's
+# execution model. Use @st.cache_data(ttl=POLL_INTERVAL) on functions that need
+# periodic refresh, or st_autorefresh from streamlit-autorefresh.

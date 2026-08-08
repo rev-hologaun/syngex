@@ -315,7 +315,8 @@ class SyngexOrchestrator:
         self._signal_timer: float = 0.0
         self._dashboard_process: subprocess.Popen | None = None
         self._heatmap_process: subprocess.Popen | None = None
-        self._heatmap_stderr: Any = None  # file handle for heatmap stderr
+        self._heatmap_stderr: Any = None
+        self._v2_dashboard_process: subprocess.Popen | None = None
         self._state_export_timer: float = 0.0
 
         # Depth snapshot participant/trade fields (explicit init, no getattr)
@@ -514,6 +515,7 @@ class SyngexOrchestrator:
         if self.mode == "dashboard":
             self._start_dashboard()
             self._start_heatmap()
+            self._start_v2_dashboard()
 
         try:
             # Start config watcher task
@@ -579,6 +581,7 @@ class SyngexOrchestrator:
         self._stop_dashboard()
         # Stop heatmap subprocess
         self._stop_heatmap()
+        self._stop_v2_dashboard()
 
         if self._client:
             await self._client.stop()
@@ -763,6 +766,106 @@ class SyngexOrchestrator:
         }
         layer_map = strategy_map.get(layer, {})
         return layer_map.get(name)
+
+    def _register_v2_strategies(self, config_path: str) -> None:
+        """Register _v2 strategy variants from a separate config file.
+
+        Reads a YAML config where keys are layer names and values are dicts
+        of strategy_name -> config. Dynamically imports the strategy module
+        and registers any BaseStrategy subclass found.
+        """
+        import importlib
+
+        try:
+            with open(config_path, "r") as f:
+                v2_config = yaml.safe_load(f)
+        except FileNotFoundError:
+            logger.error("V2 config not found: %s", config_path)
+            return
+        except Exception as exc:
+            logger.error("Failed to load V2 config %s: %s", config_path, exc)
+            return
+
+        if not v2_config or not isinstance(v2_config, dict):
+            logger.warning("V2 config is empty or not a dict: %s", config_path)
+            return
+
+        total_enabled = 0
+        total_skipped = 0
+
+        for layer, layer_strategies in v2_config.items():
+            if not isinstance(layer_strategies, dict):
+                logger.warning(
+                    "Skipping layer '%s': expected dict, got %s",
+                    layer, type(layer_strategies).__name__,
+                )
+                continue
+
+            layer_enabled = 0
+
+            for strat_name, strat_cfg in layer_strategies.items():
+                try:
+                    module = importlib.import_module(
+                        f"strategies.{layer}.{strat_name}"
+                    )
+                except ImportError as exc:
+                    logger.warning(
+                        "V2: Cannot import module '%s.%s': %s",
+                        layer, strat_name, exc,
+                    )
+                    total_skipped += 1
+                    continue
+
+                # Find the BaseStrategy subclass in the module
+                cls = None
+                for obj_name in dir(module):
+                    obj = getattr(module, obj_name)
+                    try:
+                        if (
+                            isinstance(obj, type)
+                            and issubclass(obj, BaseStrategy)
+                            and obj is not BaseStrategy
+                        ):
+                            cls = obj
+                            break
+                    except TypeError:
+                        # Some objects may not support issubclass
+                        continue
+
+                if cls is None:
+                    logger.warning(
+                        "V2: No BaseStrategy subclass found in "
+                        "'strategies.%s.%s'",
+                        layer, strat_name,
+                    )
+                    total_skipped += 1
+                    continue
+
+                enabled = strat_cfg.get("enabled", True) if isinstance(strat_cfg, dict) else True
+                if enabled:
+                    strat = cls(self._calculator)
+                    self._strategy_engine.register(strat)
+                    layer_enabled += 1
+                    total_enabled += 1
+                    logger.info(
+                        "V2: Registered strategy '%s' from layer '%s'",
+                        strat_name, layer,
+                    )
+                else:
+                    logger.info(
+                        "V2: Strategy '%s' (%s) disabled via config",
+                        strat_name, layer,
+                    )
+
+            logger.info(
+                "V2 Layer %s: %d enabled, %d skipped",
+                layer, layer_enabled, total_skipped,
+            )
+
+        logger.info(
+            "V2 strategy registration complete: %d registered, %d skipped",
+            total_enabled, total_skipped,
+        )
 
     # ------------------------------------------------------------------
     # Helper calculations for rolling window feeds
@@ -2921,6 +3024,67 @@ class SyngexOrchestrator:
                 self._heatmap_stderr = None
             self._heatmap_process = None
 
+    def _start_v2_dashboard(self) -> None:
+        """Spawn the V2 Streamlit dashboard as a background subprocess (v2 signals only)."""
+        if self._v2_dashboard_process is not None:
+            return  # already running
+
+        env = os.environ.copy()
+        env["SYNGEX_SYMBOL"] = self.symbol
+
+        script_path = Path(__file__).parent / "app_dashboard_v2.py"
+        venv_streamlit = Path(__file__).parent / "venv" / "bin" / "streamlit"
+        v2_port = self._port + 2  # e.g., 8262 when --port=8260
+
+        logger.info("Starting V2 Command Center…")
+
+        try:
+            self._v2_dashboard_process = subprocess.Popen(
+                [
+                    str(venv_streamlit),
+                    "run",
+                    str(script_path),
+                    "--server.headless",
+                    "true",
+                    "--browser.gatherUsageStats",
+                    "false",
+                    "--server.port",
+                    str(v2_port),
+                ],
+                cwd=str(Path(__file__).parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+            )
+            logger.info(
+                "V2 Command Center started (PID %d, port %d).  "
+                "Open http://localhost:%d in a browser.",
+                self._v2_dashboard_process.pid,
+                v2_port,
+                v2_port,
+            )
+        except FileNotFoundError:
+            logger.warning("Streamlit not found — V2 Dashboard will not start.")
+        except Exception as exc:
+            logger.warning("Failed to start V2 Command Center: %s", exc)
+
+    def _stop_v2_dashboard(self) -> None:
+        """Terminate the V2 Streamlit Command Center subprocess."""
+        if self._v2_dashboard_process is None:
+            return
+
+        logger.info("Stopping V2 Command Center (PID %d)…", self._v2_dashboard_process.pid)
+        try:
+            self._v2_dashboard_process.terminate()
+            self._v2_dashboard_process.wait(timeout=5)
+        except Exception:
+            try:
+                self._v2_dashboard_process.kill()
+            except Exception:
+                pass
+        finally:
+            self._v2_dashboard_process = None
+
     # ------------------------------------------------------------------
     # Phi Accumulator Crash Recovery
     # ------------------------------------------------------------------
@@ -3110,11 +3274,19 @@ async def main() -> None:
         default=8501,
         help="Port for the Streamlit Command Center (default: 8501)",
     )
+    parser.add_argument(
+        "--v2-config",
+        default=None,
+        help="Path to strategies_v2.yaml for loading _v2 strategy variants",
+    )
     args = parser.parse_args()
 
     orchestrator = SyngexOrchestrator(
         symbol=args.symbol, mode=args.mode, port=args.port
     )
+
+    if args.v2_config:
+        orchestrator._register_v2_strategies(args.v2_config)
 
     # Graceful shutdown on signals
     loop = asyncio.get_running_loop()
