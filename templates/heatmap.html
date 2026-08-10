@@ -752,6 +752,17 @@
         { id: 'whale_tracker',         label: 'WHALE_TRACK',       layer: 'FULL', row: 7, col: 5 },
     ];
 
+    // V2 mode: remap strategy ids to their _v2 variants so they match the
+    // v2 orchestrator's strategy_id keys (e.g. gamma_wall_bounce -> gamma_wall_bounce_v2).
+    // The card grid and update loop both key off STRATEGIES[].id; without this remap,
+    // cardElements lookup by a v2 data key returns undefined and no card ever updates
+    // (header stats still populate, which is why the top of the page looked live).
+    {% if v2 %}
+    for (const s of STRATEGIES) {
+        s.id = s.id + '_v2';
+    }
+    {% endif %}
+
     // ── Health classification ──────────────────────────────────────
     function classifyHealth(strat, dataValid) {
         if (!dataValid) return 'void';

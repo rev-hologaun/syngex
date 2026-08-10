@@ -2869,7 +2869,11 @@ class SyngexOrchestrator:
 
     def _build_last_trigger(self) -> Dict[str, Dict[str, Any]]:
         """Build last_trigger data for each strategy from open + resolved signals."""
-        if not self._signal_tracker:
+        # Use the version-matched tracker: V2 orchestrator reads V2 tracker,
+        # V1 reads V1 tracker — otherwise V2 last_trigger would export stale/empty
+        # V2 data derived from the V1 tracker (which has no _v2 keys).
+        tracker = self._signal_tracker_v2 if (not self._own_pipeline and self._signal_tracker_v2) else self._signal_tracker
+        if not tracker:
             return {}
 
         triggers: Dict[str, Dict[str, Any]] = {}
@@ -2877,7 +2881,7 @@ class SyngexOrchestrator:
 
         # Build timestamp -> signal map for open signals
         open_by_strat: Dict[str, Dict[str, Any]] = {}
-        for sig in self._signal_tracker.get_open_signals():
+        for sig in tracker.get_open_signals():
             sid = sig.strategy_id
             if sid not in open_by_strat or sig.timestamp > open_by_strat[sid].get("timestamp", 0):
                 open_by_strat[sid] = {
@@ -2891,7 +2895,7 @@ class SyngexOrchestrator:
 
         # Build timestamp -> signal map for resolved signals
         resolved_by_strat: Dict[str, Dict[str, Any]] = {}
-        for r in self._signal_tracker.get_resolved():
+        for r in tracker.get_resolved():
             sid = r.open_signal.strategy_id
             if sid not in resolved_by_strat or r.resolution_time > resolved_by_strat[sid].get("timestamp", 0):
                 resolved_by_strat[sid] = {
@@ -2938,11 +2942,19 @@ class SyngexOrchestrator:
         if not self._strategy_engine or not self._signal_tracker:
             return {}
 
+        # Use the version-matched tracker: V2 orchestrator reads V2 stats,
+        # V1 reads V1 stats — otherwise V2 health would always read zeros
+        # from the V1 tracker (which has no _v2 keys).
+        tracker = self._signal_tracker_v2 if (not self._own_pipeline and self._signal_tracker_v2) else self._signal_tracker
+
         health: Dict[str, Dict[str, Any]] = {}
         now = time.time()
 
         # Get strategy stats from signal tracker
-        strat_stats = self._signal_tracker.get_strategy_stats()
+        strat_stats = tracker.get_strategy_stats()
+
+        # Fetch resolved signals once for all strategies (not per-strategy)
+        resolved = tracker.get_resolved()
 
         for strat in self._strategy_engine._strategies:
             # Bug 2 fix: V2 orchestrator only includes _v2 strategies
@@ -2956,8 +2968,7 @@ class SyngexOrchestrator:
             last_signal_ts = 0.0
             sparkline_values: list = []
 
-            # Get resolved signals for this strategy
-            resolved = self._signal_tracker.get_resolved()
+            # Get resolved signals for this strategy (single fetch, outside loop)
             strategy_resolved = [r for r in resolved if r.open_signal.strategy_id == sid]
 
             # Build sparkline from cumulative PnL over resolved signals
@@ -2990,7 +3001,7 @@ class SyngexOrchestrator:
                 status = "idle"
 
             # Check if any open signals exist for this strategy
-            open_signals = self._signal_tracker.get_open_signals()
+            open_signals = tracker.get_open_signals()
             has_open = any(s.strategy_id == sid for s in open_signals)
             if has_open and status == "idle":
                 status = "active"
@@ -3346,8 +3357,12 @@ class SyngexOrchestrator:
                 if self._shared_pipeline and self._shared_pipeline.alternate_data_file and not self._own_pipeline
                 else self._data_file
             )
-            with open(target_file, "w") as f:
+            # Atomic write: write to a temp file then rename, so concurrent
+            # readers never catch a truncated/partial JSON mid-write.
+            tmp_file = f"{target_file}.tmp"
+            with open(tmp_file, "w") as f:
                 json.dump(export, f, indent=2)
+            os.replace(tmp_file, target_file)
         except Exception as exc:
             logger.warning("Failed to export GEX state: %s", exc)
 
@@ -3448,6 +3463,14 @@ async def main() -> None:
     if args.v2_config:
         # Two orchestrators — share one pipeline (only 4 streams total)
         pipeline = SharedPipeline(args.symbol)
+        # V2 writes its own GEX state file so heatmaps are independently comparable
+        # Use uppercase symbol for the v2 state file to match the v2 heatmap
+        # reader (app_heatmap_v2.py reads gex_state_{SYMBOL.upper()}_v2.json), the
+        # v1 state file (gex_state_{self.symbol}.json, symbol=upper), and the v2
+        # signal log filenames (signals_{SYMBOL}_v2.jsonl). Using raw lowercase
+        # args.symbol here produced an orphaned gex_state_tsla_v2.json that the
+        # heatmap never opened -> blank v2 dashboard.
+        pipeline.alternate_data_file = Path(__file__).parent / "data" / f"gex_state_{args.symbol.upper()}_v2.json"
         orchestrator = SyngexOrchestrator(
             symbol=args.symbol, mode=args.mode, port=args.port,
             data_pipeline=pipeline,   # v1 shares the pipeline

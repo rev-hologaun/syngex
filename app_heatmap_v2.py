@@ -3,14 +3,15 @@
 app_heatmap.py — Syngex Heatmap Dashboard (Flask + SocketIO)
 
 Standalone v2 heatmap server on port 8503.
-Reads data/gex_state_{SYMBOL}.json every 1s and pushes updates via WebSocket.
-Only shows strategies whose strategy_id ends with "_v2".
+Reads data/gex_state_{SYMBOL}_v2.json every 1s and pushes updates via WebSocket.
+This is the dedicated V2 state file written by the V2 orchestrator, isolating
+V2 strategy health from the V1 heatmap for side-by-side comparison.
 
 Usage:
     python3 app_heatmap_v2.py           # uses SYNGEX_SYMBOL env var (default: UNKNOWN)
     SYNGEX_SYMBOL=TSLA python3 app_heatmap_v2.py
 
-Data source: shared JSON file written by main.py orchestrator.
+Data source: V2 JSON file written by main.py orchestrator.
 No direct coupling — reads the file independently.
 """
 
@@ -82,7 +83,7 @@ from flask_socketio import SocketIO, emit, join_room
 DATA_DIR = Path(__file__).parent / "data"
 LOG_DIR = Path(__file__).parent / "log"
 SYMBOL = os.environ.get("SYNGEX_SYMBOL", "UNKNOWN").upper()
-DATA_FILE = DATA_DIR / f"gex_state_{SYMBOL}.json"
+DATA_FILE = DATA_DIR / f"gex_state_{SYMBOL}_v2.json"
 PORT = int(os.environ.get("HEATMAP_PORT", 8503))
 
 # ---------------------------------------------------------------------------
