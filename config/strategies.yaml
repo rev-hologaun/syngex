@@ -4,7 +4,9 @@
 
 # Global settings
 global:
-  min_confidence: 0.05
+  # Global confidence floor lowered to 1% to capture 1-4% low-confidence
+  # signals alongside 5-9% (2026-08-12). Per-strategy overrides still apply.
+  min_confidence: 0.01
   max_signals_per_tick: 10
   dedup_window_seconds: 60
 
@@ -294,7 +296,6 @@ layer2:
       max_spread_multiplier: 1.5
       stop_pct: 0.005
       target_risk_mult: 1.5
-      min_confidence: 0.05
 
   depth_decay_momentum:
     enabled: true

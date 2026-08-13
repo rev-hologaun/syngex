@@ -3,7 +3,9 @@
 
 # Global settings
 global:
-  min_confidence: 0.05
+  # Global confidence floor lowered to 1% to capture 1-4% low-confidence
+  # signals alongside 5-9% (2026-08-12). Per-strategy overrides still apply.
+  min_confidence: 0.01
   max_signals_per_tick: 10
   dedup_window_seconds: 60
 
@@ -140,6 +142,8 @@ layer2:
     tracker:
       max_hold_seconds: 0
     params:
+      # Floor lowered to 1% to capture high-WR low-confidence cells (2026-08-10 V2 analysis)
+      min_confidence: 0.01
       # === v1 params (kept for backwards compat) ===
       delta_decline_ratio: 0.90
       volume_decline_ratio: 0.85
@@ -293,7 +297,6 @@ layer2:
       max_spread_multiplier: 1.5
       stop_pct: 0.005
       target_risk_mult: 1.5
-      min_confidence: 0.05
 
   depth_decay_momentum_v2:
     enabled: true

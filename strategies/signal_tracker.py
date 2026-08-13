@@ -85,6 +85,7 @@ class SignalTracker:
         symbol: str = "UNKNOWN",
         strategy_hold_times: Optional[Dict[str, int]] = None,
         version: str = "",
+        max_resolved_in_memory: int = 5000,
     ) -> None:
         """
         Initialize the SignalTracker.
@@ -104,6 +105,13 @@ class SignalTracker:
         self._log_dir.mkdir(parents=True, exist_ok=True)
         self._symbol = symbol
         self._version = version  # e.g., "" or "_v2"
+
+        # Bound the in-memory resolved-signals list. The durable JSONL log always
+        # keeps the full history; RAM only needs the most recent entries for live
+        # stats/summary. Without this cap, loading an 8GB outcome log at startup
+        # (as Python objects) ate tens of GB and the OOM killer killed the box
+        # (fixed 2026-08-13).
+        self._max_resolved_in_memory = max(1, max_resolved_in_memory)
 
         # Per-strategy statistics
         self._strategy_stats: Dict[str, Dict[str, Any]] = {}
@@ -150,6 +158,10 @@ class SignalTracker:
                 "wins": 0,
                 "losses": 0,
                 "closed": 0,
+                "resolved_count": 0,
+                "hold_time_sum": 0.0,
+                "rr_sum": 0.0,
+                "pnl_pct_sum": 0.0,
                 "total_pnl": 0.0,
                 "total_pnl_pct": 0.0,
                 "avg_hold_time": 0.0,
@@ -213,7 +225,7 @@ class SignalTracker:
             resolution = self._resolve_signal(open_sig, underlying_price, timestamp)
             if resolution is not None:
                 resolved.append(resolution)
-                self._resolved_signals.append(resolution)
+                self._append_resolved(resolution)
                 to_remove.append(signal_id)
                 self._update_strategy_stats(resolution)
                 self._recompute_strategy_averages(resolution.open_signal.strategy_id)
@@ -222,9 +234,21 @@ class SignalTracker:
             del self._open_signals[sig_id]
 
         if resolved:
-            self._save_resolved()
+            self._save_resolved(resolved)
 
         return resolved
+
+    def _append_resolved(self, resolution: ResolvedSignal) -> None:
+        """Append a resolved signal to the in-memory list, keeping it bounded.
+
+        The durable JSONL log always holds the full history, so RAM only keeps
+        the most recent ``max_resolved_in_memory`` entries. This bounds memory
+        over long sessions (previously the list grew without limit).
+        """
+        self._resolved_signals.append(resolution)
+        overflow = len(self._resolved_signals) - self._max_resolved_in_memory
+        if overflow > 0:
+            del self._resolved_signals[:overflow]
 
     def _resolve_signal(
         self,
@@ -320,7 +344,7 @@ class SignalTracker:
             return entry - exit_price
 
     def _update_strategy_stats(self, resolution: ResolvedSignal) -> None:
-        """Update per-strategy statistics after resolution."""
+        """Update per-strategy statistics after resolution (O(1))."""
         strat = resolution.open_signal.strategy_id
         stats = self._strategy_stats[strat]
 
@@ -339,17 +363,26 @@ class SignalTracker:
         # Derive resolved count from outcomes (robust across track/load)
         resolved_count = stats["wins"] + stats["losses"] + stats["closed"]
 
-        # Win rate
+        # Running sums for averages — avoids rescanning the resolved list per
+        # resolution (previous code was O(n) per signal -> O(n^2) overall).
+        stats["resolved_count"] = resolved_count
+        stats["hold_time_sum"] = stats.get("hold_time_sum", 0.0) + resolution.hold_time
+        stats["rr_sum"] = stats.get("rr_sum", 0.0) + resolution.open_signal.rr_ratio
+        stats["pnl_pct_sum"] = stats.get("pnl_pct_sum", 0.0) + resolution.pnl_pct
+        if resolved_count > 0:
+            stats["avg_hold_time"] = stats["hold_time_sum"] / resolved_count
+            stats["avg_rr"] = stats["rr_sum"] / resolved_count
+            stats["avg_pnl_pct"] = stats["pnl_pct_sum"] / resolved_count
         stats["win_rate"] = stats["wins"] / resolved_count if resolved_count > 0 else 0.0
 
     def _recompute_strategy_averages(self, strat: str) -> None:
-        """Recompute avg_hold_time, avg_rr, avg_pnl_pct from the resolved signals list."""
+        """Recalculate the per-strategy averages from running sums (O(1))."""
         stats = self._strategy_stats[strat]
-        resolved = [r for r in self._resolved_signals if r.open_signal.strategy_id == strat]
-        if resolved:
-            stats["avg_hold_time"] = sum(r.hold_time for r in resolved) / len(resolved)
-            stats["avg_rr"] = sum(r.open_signal.rr_ratio for r in resolved) / len(resolved)
-            stats["avg_pnl_pct"] = sum(r.pnl_pct for r in resolved) / len(resolved)
+        resolved_count = stats.get("resolved_count", 0)
+        if resolved_count > 0:
+            stats["avg_hold_time"] = stats.get("hold_time_sum", 0.0) / resolved_count
+            stats["avg_rr"] = stats.get("rr_sum", 0.0) / resolved_count
+            stats["avg_pnl_pct"] = stats.get("pnl_pct_sum", 0.0) / resolved_count
 
     def get_open_signals(self) -> List[OpenSignal]:
         """Return list of currently open signals."""
@@ -382,43 +415,57 @@ class SignalTracker:
             "open_signals": len(self._open_signals),
         }
 
-    def _save_resolved(self) -> None:
-        """Append newly resolved signals to disk for persistence."""
+    def _save_resolved(self, resolved_batch: List[ResolvedSignal]) -> None:
+        """Append newly resolved signals to disk for persistence.
+
+        Only the batch produced by the current ``update()`` call is written, so
+        we don't depend on in-memory list indices (which now get trimmed once
+        ``max_resolved_in_memory`` is exceeded). The JSONL log remains the
+        durable, complete history.
+        """
+        if not resolved_batch:
+            return
         log_path = self._log_dir / f"signal_outcomes_{self._symbol}{self._version}.jsonl"
-        # Only write signals that haven't been persisted yet
-        new_start = self._saved_count
-        for r in self._resolved_signals[new_start:]:
-            data = {
-                "signal_id": r.open_signal.signal_id,
-                "strategy_id": r.open_signal.strategy_id,
-                "direction": r.open_signal.direction,
-                "entry": r.open_signal.entry,
-                "stop": r.open_signal.stop,
-                "target": r.open_signal.target,
-                "outcome": r.outcome.value,
-                "exit_price": r.exit_price,
-                "pnl": round(r.pnl, 2),
-                "pnl_pct": round(r.pnl_pct, 2),
-                "hold_time": round(r.hold_time, 1),
-                "confidence": r.open_signal.confidence,
-                "reason": r.open_signal.reason,
-                "metadata": r.open_signal.metadata,
-                "resolution_time": r.resolution_time,
-            }
-            try:
-                with open(log_path, "a") as f:
+        try:
+            with open(log_path, "a") as f:
+                for r in resolved_batch:
+                    data = {
+                        "signal_id": r.open_signal.signal_id,
+                        "strategy_id": r.open_signal.strategy_id,
+                        "direction": r.open_signal.direction,
+                        "entry": r.open_signal.entry,
+                        "stop": r.open_signal.stop,
+                        "target": r.open_signal.target,
+                        "outcome": r.outcome.value,
+                        "exit_price": r.exit_price,
+                        "pnl": round(r.pnl, 2),
+                        "pnl_pct": round(r.pnl_pct, 2),
+                        "hold_time": round(r.hold_time, 1),
+                        "confidence": r.open_signal.confidence,
+                        "reason": r.open_signal.reason,
+                        "metadata": r.open_signal.metadata,
+                        "resolution_time": r.resolution_time,
+                    }
                     f.write(json.dumps(data) + "\n")
-            except OSError:
-                pass
-        self._saved_count = len(self._resolved_signals)
+        except OSError:
+            pass
+        # Informational: total resolved signals persisted so far (durable source
+        # is the JSONL file; this counter is only a coarse progress marker).
+        self._saved_count += len(resolved_batch)
 
     def _load_resolved(self) -> None:
-        """Load previously resolved signals from disk."""
+        """Load the most recent resolved signals from disk (bounded tail-load).
+
+        Only the last ``max_resolved_in_memory`` signals are reconstructed in
+        memory. The JSONL log remains the complete on-disk history; RAM only
+        holds a recent window for live stats/summary. Previously this loaded the
+        ENTIRE (multi-GB) log as Python objects, which caused OOM kills.
+        """
         log_path = self._log_dir / f"signal_outcomes_{self._symbol}{self._version}.jsonl"
         if not log_path.exists():
             return
         try:
-            for line in log_path.read_text().strip().splitlines():
+            for line in self._read_tail_lines(log_path, self._max_resolved_in_memory):
                 if not line.strip():
                     continue
                 data = json.loads(line)
@@ -444,7 +491,7 @@ class SignalTracker:
                     hold_time=float(data["hold_time"]),
                     resolution_time=float(data["resolution_time"]),
                 )
-                self._resolved_signals.append(resolution)
+                self._append_resolved(resolution)
                 # Initialize strategy stats entry if needed (for loaded signals)
                 strat = resolution.open_signal.strategy_id
                 if strat not in self._strategy_stats:
@@ -453,6 +500,10 @@ class SignalTracker:
                         "wins": 0,
                         "losses": 0,
                         "closed": 0,
+                        "resolved_count": 0,
+                        "hold_time_sum": 0.0,
+                        "rr_sum": 0.0,
+                        "pnl_pct_sum": 0.0,
                         "total_pnl": 0.0,
                         "total_pnl_pct": 0.0,
                         "avg_hold_time": 0.0,
@@ -461,15 +512,44 @@ class SignalTracker:
                         "best_pnl": float("-inf"),
                         "worst_pnl": float("inf"),
                     }
-                # Update strategy stats
+                # Update strategy stats (maintains running-sum averages in O(1))
                 self._update_strategy_stats(resolution)
-
-            # Post-load: recompute all averages from the resolved signals list
-            for strat, stats in self._strategy_stats.items():
-                resolved = [r for r in self._resolved_signals if r.open_signal.strategy_id == strat]
-                if resolved:
-                    stats["avg_hold_time"] = sum(r.hold_time for r in resolved) / len(resolved)
-                    stats["avg_rr"] = sum(r.open_signal.rr_ratio for r in resolved) / len(resolved)
-                    stats["avg_pnl_pct"] = sum(r.pnl_pct for r in resolved) / len(resolved)
         except (json.JSONDecodeError, OSError, KeyError):
             pass
+
+    @staticmethod
+    def _read_tail_lines(path: Path, n: int) -> List[str]:
+        """Return the last ``n`` non-empty lines of a file, reading from the end.
+
+        Uses a buffered backwards read so we never load a multi-GB log into
+        memory. ``n`` is the max count; fewer lines may be returned if the file
+        has fewer.
+        """
+        lines: List[str] = []
+        try:
+            with open(path, "r", errors="replace") as fh:
+                fh.seek(0, 2)
+                size = fh.tell()
+                if size == 0:
+                    return []
+                chunk = 65536
+                pos = size
+                buffer = ""
+                while pos > 0 and len(lines) < n:
+                    read_size = min(chunk, pos)
+                    pos -= read_size
+                    fh.seek(pos)
+                    buffer = fh.read(read_size) + buffer
+                    if "\n" in buffer:
+                        parts = buffer.split("\n")
+                        buffer = parts[0]  # may be a partial line at the chunk head
+                        for piece in reversed(parts[1:]):
+                            if piece.strip():
+                                lines.insert(0, piece)
+                                if len(lines) >= n:
+                                    break
+                if buffer.strip() and len(lines) < n:
+                    lines.insert(0, buffer)
+        except OSError:
+            return []
+        return lines[-n:] if len(lines) > n else lines

@@ -2798,10 +2798,26 @@ class SyngexOrchestrator:
         # Run evaluation
         signals = self._strategy_engine.process(data)
 
-        # Apply global min_confidence filter
+        # Apply per-strategy min_confidence filter (falls back to global floor)
         global_cfg = self._strategy_config.get("global", {})
-        min_confidence = global_cfg.get("min_confidence", 0.05)
-        filtered_signals = [s for s in signals if s.confidence >= min_confidence]
+        global_min_conf = global_cfg.get("min_confidence", 0.05)
+
+        # Build per-strategy floor map from yaml params so individual strategies
+        # can override the global floor (e.g. delta_volume_exhaustion_v2 @ 0.01)
+        strategy_min_conf: Dict[str, float] = {}
+        for layer in ["layer1", "layer2", "layer3", "full_data"]:
+            layer_config = self._strategy_config.get(layer, {})
+            for strat_name, strat_cfg in layer_config.items():
+                if not strat_cfg.get("enabled", True):
+                    continue
+                p_conf = strat_cfg.get("params", {}).get("min_confidence")
+                if p_conf is not None:
+                    strategy_min_conf[strat_name] = float(p_conf)
+
+        def _floor_for(sig) -> float:
+            return strategy_min_conf.get(sig.strategy_id, global_min_conf)
+
+        filtered_signals = [s for s in signals if s.confidence >= _floor_for(s)]
 
         if filtered_signals:
             dropped = len(signals) - len(filtered_signals)
@@ -2809,8 +2825,8 @@ class SyngexOrchestrator:
                 logger.info("SIGNAL  |  %s  |  %s  |  conf=%.2f  |  %s",
                            s.strategy_id, s.direction.value, s.confidence, s.reason)
             if dropped:
-                logger.info("FILTERED  |  %d signals dropped below min_confidence %.2f",
-                           dropped, min_confidence)
+                logger.info("FILTERED  |  %d signals dropped below their min_confidence floor (global %.2f)",
+                           dropped, global_min_conf)
 
     def _report_profile(self) -> None:
         """Log the current Gamma Profile — the evolving state."""

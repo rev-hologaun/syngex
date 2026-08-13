@@ -66,8 +66,8 @@ MIN_TREND_DURATION = 2                # At least 2 candles in trend (was 3)
 # Stop distance
 STOP_PCT = 0.015                      # 1.5% beyond swing
 
-# Minimum confidence to emit a signal
-MIN_CONFIDENCE = 0.05
+# Minimum confidence to emit a signal (lowered to 0.01 to capture high-WR low-confidence cells per 2026-08-10 V2 analysis)
+MIN_CONFIDENCE = 0.01
 
 # Target: mean reversion to rolling average
 MEAN_REVERSION_MULT = 1.0             # 1.0× distance — target is the rolling mean
