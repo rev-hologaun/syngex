@@ -504,45 +504,41 @@ class TradeStationClient:
         We map Name→exchange and build bid_exchanges/ask_exchanges from the full
         Bids/Asks arrays so main.py's exchange flow logic works correctly.
         """
-        # Build exchange→size maps from the full bid/ask arrays
+        # Build exchange->size maps from the full bid/ask arrays
         # (each entry is one exchange, so we aggregate by exchange name)
-        bid_exchange_map: Dict[str, int] = {}
-        for b in data.get("Bids", []):
-            venue = b.get("Name", "")
-            size = _safe_int(b.get("Size", 0))
-            if venue:
-                bid_exchange_map[venue] = bid_exchange_map.get(venue, 0) + size
-
-        ask_exchange_map: Dict[str, int] = {}
-        for a in data.get("Asks", []):
-            venue = a.get("Name", "")
-            size = _safe_int(a.get("Size", 0))
-            if venue:
-                ask_exchange_map[venue] = ask_exchange_map.get(venue, 0) + size
+        # NOTE: the aggregate maps are NOT attached to each entry. main.py sums
+        # each entry's OWN bid_exchanges/ask_exchanges per-venue across levels, so
+        # attaching the full-book aggregate to every entry over-counts sizes by
+        # ~number-of-levels (conviction/fragility inflation). Each entry now
+        # carries only its own venue's size.
 
         bids = []
         for b in data.get("Bids", []):
+            venue = str(b.get("Name", ""))
+            size = _safe_int(b.get("Size", 0))
             bids.append({
                 "Price": _safe_float(b.get("Price", 0)),
-                "Size": _safe_int(b.get("Size", 0)),
+                "Size": size,
                 "OrderCount": _safe_int(b.get("OrderCount", 0)),
                 "TimeStamp": b.get("TimeStamp", ""),
-                "exchange": str(b.get("Name", "")),
+                "exchange": venue,
                 "num_participants": _safe_int(b.get("OrderCount", 0)),
-                "bid_exchanges": bid_exchange_map,
-                "ask_exchanges": ask_exchange_map,
+                "bid_exchanges": {venue: size} if venue else {},
+                "ask_exchanges": {},
             })
         asks = []
         for a in data.get("Asks", []):
+            venue = str(a.get("Name", ""))
+            size = _safe_int(a.get("Size", 0))
             asks.append({
                 "Price": _safe_float(a.get("Price", 0)),
-                "Size": _safe_int(a.get("Size", 0)),
+                "Size": size,
                 "OrderCount": _safe_int(a.get("OrderCount", 0)),
                 "TimeStamp": a.get("TimeStamp", ""),
-                "exchange": str(a.get("Name", "")),
+                "exchange": venue,
                 "num_participants": _safe_int(a.get("OrderCount", 0)),
-                "bid_exchanges": bid_exchange_map,
-                "ask_exchanges": ask_exchange_map,
+                "bid_exchanges": {},
+                "ask_exchanges": {venue: size} if venue else {},
             })
         return {
             "type": MSG_TYPE_MARKET_DEPTH_QUOTES,
