@@ -291,8 +291,41 @@ class GEXCalculator:
             "quote_updates": self._quote_count,
         }
 
+    def _gex_for_strike(self, bucket: "_StrikeBucket", price: float) -> float:
+        """Compute the dollar-GEX value for a strike (the unit walls gate on)."""
+        return bucket.normalized_gamma() * 100 * price
+
+    def _rank_cutoff(self, price: float, rank_keep_frac: float) -> float:
+        """
+        Per-symbol, scale-invariant wall cutoff for Option A (H1).
+
+        Computes the |gex| cutoff that keeps the top `rank_keep_frac` of the
+        CURRENT ladder's |gex| distribution. rank_keep_frac=0.25 -> keep the
+        top quartile of strikes by |gex|. Makes the wall gate mean the same
+        thing on every symbol / OI-feed-mode / price-level (removes the H1
+        unit-scale mismatch: thresholds 10..500k on the same GEX value).
+
+        Returns 0.0 if the ladder is empty (nothing gated out) or price<=0.
+        """
+        if price <= 0 or rank_keep_frac >= 1.0:
+            return 0.0
+        abs_gex = sorted(
+            abs(self._gex_for_strike(b, price)) for b in self._ladder.values()
+        )
+        abs_gex = [g for g in abs_gex if g > 0]
+        if not abs_gex:
+            return 0.0
+        keep_frac = min(max(rank_keep_frac, 0.0), 1.0)
+        if keep_frac <= 0.0:
+            # keep nothing -> cutoff above the largest value
+            return abs_gex[-1] + 1.0
+        idx = int(len(abs_gex) * (1.0 - keep_frac))
+        idx = min(idx, len(abs_gex) - 1)
+        return abs_gex[idx]
+
     def get_gamma_walls(
         self, threshold: float = 1e6, include_ghosts: bool = True,
+        rank_keep_frac: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         """
         Identify Gamma Walls — strikes with massive GEX.
@@ -305,9 +338,15 @@ class GEXCalculator:
         For total GEX magnitude across all strikes, use get_normalized_net_gamma().
 
         Args:
-            threshold: Minimum |GEX| to consider a wall.
+            threshold: Minimum |GEX| to consider a wall (absolute scale). Used
+                unless `rank_keep_frac` is set.
             include_ghosts: If False, exclude walls with no recent updates
                 (older than 60 seconds). Default True for backward compatibility.
+            rank_keep_frac: Optional Option-A mode. When set (e.g. 0.25 = keep
+                top quartile of the book's |gex|), the threshold is replaced by a
+                per-symbol rank cutoff computed live from the ladder, making the
+                gate scale/symbol/OI-mode invariant (H1 fix). When None (default)
+                behaves exactly as before (absolute `threshold`).
 
         Returns sorted list of wall dicts sorted by absolute GEX.
         """
@@ -316,11 +355,17 @@ class GEXCalculator:
         if price <= 0:
             return walls
 
+        # Option-A: derive a scale-invariant cutoff from the live ladder
+        if rank_keep_frac is not None:
+            effective = self._rank_cutoff(price, rank_keep_frac)
+        else:
+            effective = float(threshold)
+
         for strike, bucket in self._ladder.items():
             # Normalize cumulative gamma by message count for bounded GEX
             norm_net_gamma = bucket.normalized_gamma()
             gex = norm_net_gamma * 100 * price
-            if abs(gex) >= threshold:
+            if abs(gex) >= effective:
                 # Skip ghost walls unless explicitly requested
                 if not include_ghosts:
                     age = time.perf_counter() - bucket.last_update
@@ -628,6 +673,7 @@ class GEXCalculator:
     def get_wall_classifications(
         self, threshold: float = 1e6,
         density_threshold: float = 0.5, magnet_threshold: float = 2.0,
+        rank_keep_frac: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         """Return all gamma walls with classification added.
 
@@ -635,9 +681,13 @@ class GEXCalculator:
         to each wall dict: "wall", "magnet", or "weak".
 
         Args:
-            threshold: Minimum |GEX| to consider a wall.
+            threshold: Minimum |GEX| to consider a wall (absolute scale). Used
+                unless `rank_keep_frac` is set.
             density_threshold: Delta density below which = "wall".
             magnet_threshold: Delta density above which = "magnet".
+            rank_keep_frac: Optional Option-A mode (see get_gamma_walls). When
+                set, a per-symbol rank cutoff from the live ladder replaces the
+                absolute `threshold`, making the gate scale/symbol invariant.
 
         Returns:
             List of wall dicts with added "classification" key.
@@ -647,10 +697,15 @@ class GEXCalculator:
         if price <= 0:
             return walls
 
+        if rank_keep_frac is not None:
+            effective = self._rank_cutoff(price, rank_keep_frac)
+        else:
+            effective = float(threshold)
+
         for strike, bucket in self._ladder.items():
             norm_net_gamma = bucket.normalized_gamma()
             gex = norm_net_gamma * 100 * price
-            if abs(gex) >= threshold:
+            if abs(gex) >= effective:
                 classification = self.classify_wall(
                     bucket, gex, price,
                     density_threshold=density_threshold,
