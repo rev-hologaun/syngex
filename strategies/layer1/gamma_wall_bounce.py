@@ -47,7 +47,13 @@ MIN_WALL_GEX = 500000            # Minimum |GEX| to consider a wall
 # H1 Option-A pilot switch: when set (e.g. 0.25), the wall gate uses the top
 # quarter of the symbol's own |gex| book (scale/symbol-invariant) instead of
 # the absolute MIN_WALL_GEX. None = legacy absolute threshold (unchanged).
-WALL_RANK_KEEP_FRAC = None         # pilot: set 0.25 etc. to enable Option-A
+# Env override SYNGEX_WALL_RANK_KEEP_FRAC lets the pilot harness A/B without
+# editing source (e.g. SYNGEX_WALL_RANK_KEEP_FRAC=0.25 per-process).
+import os as _os
+_WALL_RANK_ENV = _os.environ.get("SYNGEX_WALL_RANK_KEEP_FRAC")
+WALL_RANK_KEEP_FRAC = (
+    float(_WALL_RANK_ENV) if _WALL_RANK_ENV not in (None, "") else None
+)
 MIN_CONFIDENCE = 0.05            # Minimum confidence to emit signal
 
 

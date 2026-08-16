@@ -13,6 +13,7 @@ Resolves signals when:
 from __future__ import annotations
 
 import json
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -101,6 +102,9 @@ class SignalTracker:
         self._strategy_hold_times = strategy_hold_times or {}
         self._open_signals: Dict[str, OpenSignal] = {}
         self._resolved_signals: List[ResolvedSignal] = []
+        # Pilot harness: env SYNGEX_LOG_DIR redirects signal/outcome logs so an
+        # A/B pilot run doesn't collide with the live log/ dir. Default "log".
+        log_dir = os.environ.get("SYNGEX_LOG_DIR", log_dir)  # noqa: PLW2901
         self._log_dir = Path(log_dir)
         self._log_dir.mkdir(parents=True, exist_ok=True)
         self._symbol = symbol

@@ -44,6 +44,14 @@ WALL_PROXIMITY_PCT = 0.005       # 0.5% — how close price must be to wall
 STOP_PAST_WALL_PCT = 0.004       # 0.4% — stop beyond the wall
 TARGET_RISK_MULT = 2.0           # 2.0× risk for target
 MIN_WALL_GEX = 500000            # Minimum |GEX| to consider a wall
+# H1 Option-A pilot switch (mirror of v1): env SYNGEX_WALL_RANK_KEEP_FRAC enables
+# the scale/symbol-invariant rank gate (e.g. 0.25 = top quartile of book |gex|).
+# None = legacy absolute threshold (unchanged).
+import os as _os
+_WALL_RANK_ENV = _os.environ.get("SYNGEX_WALL_RANK_KEEP_FRAC")
+WALL_RANK_KEEP_FRAC = (
+    float(_WALL_RANK_ENV) if _WALL_RANK_ENV not in (None, "") else None
+)
 MIN_CONFIDENCE = 0.05            # Minimum confidence to emit signal
 
 
@@ -81,7 +89,19 @@ class GammaWallBounceV2(BaseStrategy):
             return []
 
         # Get walls above and below price — use classification to filter magnets
-        walls = gex_calc.get_wall_classifications(threshold=MIN_WALL_GEX)
+        # H1 Option-A: when WALL_RANK_KEEP_FRAC is set, gate on the top fraction of
+        # the symbol's own |gex| book (scale/symbol-invariant) instead of MIN_WALL_GEX.
+        if WALL_RANK_KEEP_FRAC is not None:
+            walls = gex_calc.get_wall_classifications(
+                threshold=0.0,  # ignored; rank cutoff used
+                rank_keep_frac=WALL_RANK_KEEP_FRAC,
+            )
+            self._effective_gate_gex = gex_calc._rank_cutoff(
+                underlying_price, WALL_RANK_KEEP_FRAC
+            )
+        else:
+            walls = gex_calc.get_wall_classifications(threshold=MIN_WALL_GEX)
+            self._effective_gate_gex = MIN_WALL_GEX
         # Filter out magnets and ghosts — gamma_wall_bounce only trades actual walls
         walls = [w for w in walls if w.get("classification") == "wall"]
         if not walls:
@@ -466,11 +486,13 @@ class GammaWallBounceV2(BaseStrategy):
         norm_prox = 1.0 - (distance_pct / WALL_PROXIMITY_PCT) if WALL_PROXIMITY_PCT > 0 else 1.0
 
         # 2. Wall strength: higher GEX = higher
-        norm_strength = (
-            (gex_magnitude - MIN_WALL_GEX) / (5_000_000 - MIN_WALL_GEX)
-            if 5_000_000 != MIN_WALL_GEX
-            else 1.0
-        )
+        # low end = effective gate floor (MIN_WALL_GEX, or the Option-A rank cutoff)
+        lo = getattr(self, "_effective_gate_gex", MIN_WALL_GEX) or MIN_WALL_GEX
+        hi = 5_000_000.0
+        if hi <= lo:
+            norm_strength = 1.0
+        else:
+            norm_strength = max(0.0, min(1.0, (gex_magnitude - lo) / (hi - lo)))
 
         # 3. Rejection score: already [0, 1]
         norm_reject = rejection_score
