@@ -239,13 +239,6 @@ class DeltaVolumeExhaustion(BaseStrategy):
         stop = entry + stop_distance * reverse
         risk = abs(entry - stop)
 
-        # ---- Minimum R:R gate — don't fire if no profitable path ----
-        target_min_risk_mult = 1.0  # require at least 1:1 RR before any other scaling
-        if risk > 0 and risk * target_min_risk_mult > min_stop_distance:
-            pass  # OK, proceed
-        else:
-            return None
-
         # ---- Target: swing-range based with regime scaling ----
         # Swing range = full 5m max-min (the exhausted move)
         swing_range = price_window.range
@@ -263,6 +256,15 @@ class DeltaVolumeExhaustion(BaseStrategy):
             target_frac = 0.75
 
         target_dist = swing_range * target_frac
+
+        # ---- Real R:R gate — require sufficient reward before any scaling ----
+        # (ported from _v2: compares the TARGET distance vs risk, not risk vs the
+        # min stop distance. The old v1 check never actually gated on target.)
+        target_min_risk_mult = 1.0  # require at least 1:1 RR before any other scaling
+        if risk > 0 and target_dist >= risk * target_min_risk_mult:
+            pass  # OK, proceed
+        else:
+            return None
 
         # Enforce minimum target distance (0.3% of entry)
         min_target_dist = entry * 0.003

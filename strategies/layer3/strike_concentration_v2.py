@@ -45,7 +45,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from strategies.engine import BaseStrategy
 from strategies.signal import Direction, Signal
-from strategies.rolling_keys import KEY_PRICE_5M, KEY_VOLUME_5M, KEY_ATR_5M, KEY_STRIKE_DELTA_5M, KEY_MARKET_DEPTH_AGG
+from strategies.rolling_keys import KEY_PRICE_5M, KEY_VOLUME_5M, KEY_ATR_5M, KEY_STRIKE_DELTA_5M, KEY_MARKET_DEPTH_AGG, KEY_NET_GAMMA_5M
 
 logger = logging.getLogger("Syngex.Strategies.StrikeConcentrationV2")
 
@@ -150,7 +150,7 @@ class StrikeConcentrationV2(BaseStrategy):
             # Use a percentile-based approach: if |net_gamma| is in top 95th
             # percentile of recent values, allow the signal through
             rolling_data_ng = data.get("rolling_data", {})
-            ng_window = rolling_data_ng.get(KEY_PRICE_5M)
+            ng_window = rolling_data_ng.get(KEY_NET_GAMMA_5M)
             if ng_window is not None and len(ng_window.values) > 10:
                 sorted_vals = sorted(abs(v) for v in ng_window.values if v is not None)
                 p95_idx = max(0, int(len(sorted_vals) * 0.95) - 1)

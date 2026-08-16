@@ -1089,8 +1089,8 @@ class SyngexOrchestrator:
                 except (ValueError, TypeError):
                     continue
 
-                call_delta = strike_data.get("call_delta", 0.0)
-                put_delta = strike_data.get("put_delta", 0.0)
+                call_delta = strike_data.get("call_delta_sum", 0.0)
+                put_delta = strike_data.get("put_delta_sum", 0.0)
                 net_delta = call_delta - put_delta
 
                 if call_delta == 0 and put_delta == 0:
@@ -1129,6 +1129,11 @@ class SyngexOrchestrator:
             # Update rolling windows with underlying price
             if data.get("type") == MSG_TYPE_UNDERLYING_UPDATE:
                 price = data.get("price")
+                if isinstance(price, str):
+                    try:
+                        price = float(price)
+                    except (ValueError, TypeError):
+                        price = 0.0
                 if price and price > 0:
                     self._rolling_data[KEY_PRICE_5M].push(price, ts)
                     self._rolling_data[KEY_PRICE_30M].push(price, ts)
@@ -1991,10 +1996,16 @@ class SyngexOrchestrator:
                     exchange_ask_sizes: Dict[str, int] = {}
                     for b in bids:
                         for venue, size_str in b.get("bid_exchanges", {}).items():
-                            exchange_bid_sizes[venue] = exchange_bid_sizes.get(venue, 0) + int(size_str)
+                            try:
+                                exchange_bid_sizes[venue] = exchange_bid_sizes.get(venue, 0) + int(size_str)
+                            except (TypeError, ValueError):
+                                continue  # skip malformed venue size; don't abort the whole message
                     for a in asks:
                         for venue, size_str in a.get("ask_exchanges", {}).items():
-                            exchange_ask_sizes[venue] = exchange_ask_sizes.get(venue, 0) + int(size_str)
+                            try:
+                                exchange_ask_sizes[venue] = exchange_ask_sizes.get(venue, 0) + int(size_str)
+                            except (TypeError, ValueError):
+                                continue  # skip malformed venue size; don't abort the whole message
                     # Store for strategy access (Gate A: cross-venue confluence)
                     self._exchange_bid_sizes = exchange_bid_sizes
                     self._exchange_ask_sizes = exchange_ask_sizes
@@ -2075,9 +2086,9 @@ class SyngexOrchestrator:
                                 (aggressor_vsi - past_vsi) / abs(past_vsi)
                             )
                         else:
-                            vsi_roc = (
-                                (aggressor_vsi - past_vsi) / 0.001
-                            )
+                            # Prior value is 0 → ROC is undefined; emit 0.0 instead of
+                            # dividing by a magic epsilon (which produced ±1000 outliers).
+                            vsi_roc = 0.0
 
                     # Push to rolling windows
                     if KEY_AGGRESSOR_VSI_5M in self._rolling_data:
