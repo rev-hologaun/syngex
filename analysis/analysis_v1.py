@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Per-strategy signal analysis v4 — focused on session × confidence cross-tabs.
+Per-strategy signal analysis v1 — focused on session × confidence cross-tabs.
 
 Outputs one table per strategy showing win rate, avg P&L, and significance
 for each (session, confidence) cell, with symbol and regime breakdowns.
@@ -16,7 +16,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 LOG_DIR = Path("/home/hologaun/projects/syngex/log")
-OUTPUT_FILE = Path("/home/hologaun/projects/syngex/analysis/analyzed_strategies_v4.md")
+OUTPUT_FILE = Path("/home/hologaun/projects/syngex/analysis/analyzed_strategies_v1.md")
+
+# v1 analyzes only the original (non-_v2) outcome streams, so v1 and v2
+# (which reads signal_outcomes_*_v2.jsonl) analyze disjoint datasets.
+OUTCOME_GLOB = "signal_outcomes_*.jsonl"
 
 CONFIDENCE_BUCKETS = [
     ("1-9%",    0.01, 0.10),
@@ -128,11 +132,14 @@ def fmt_pnl(v):
 # ── Data Loading ─────────────────────────────────────────────────────
 
 def load_all_outcomes(confidence_min=0.01, symbols=None):
-    """Load all signal outcome files, applying filters."""
+    """Load all signal outcome files, applying filters. Skips _v2 streams."""
     all_signals = []
-    files = sorted(glob.glob(str(LOG_DIR / "signal_outcomes_*.jsonl")))
+    files = sorted(glob.glob(str(LOG_DIR / OUTCOME_GLOB)))
     sym_set = set(symbols.split(",")) if symbols else None
     for f in files:
+        # Skip the _v2 outcome streams (handled by the v2 analysis script).
+        if f.endswith("_v2.jsonl"):
+            continue
         symbol = Path(f).stem.replace("signal_outcomes_", "")
         if sym_set and symbol not in sym_set:
             continue
@@ -320,7 +327,7 @@ def generate_report(all_signals, strategy_results, global_conf, global_session, 
     total_closed = sum(r["closed"] for r in strategy_results.values())
     all_pnl = [s.get("pnl", 0) for s in all_signals]
 
-    lines.append("# Strategy Performance Analysis — Session × Confidence (v4)")
+    lines.append("# Strategy Performance Analysis — Session × Confidence (v1)")
     lines.append("")
     lines.append(f"**Date:** {report_date}  |  **Generated:** {report_time}  |  **Total Signals:** {len(all_signals):,}  |  **Strategies:** {len(strategy_results)}  |  **Min Cell N:** {min_n}  |  **Min Win Rate:** {wr_min:.0%}")
     lines.append("")
@@ -510,7 +517,7 @@ def generate_report(all_signals, strategy_results, global_conf, global_session, 
 # ── CLI ──────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Per-strategy signal analysis v4")
+    parser = argparse.ArgumentParser(description="Per-strategy signal analysis v1")
     parser.add_argument("--min-n", type=int, default=50, help="Minimum signals per cell (default: 50)")
     parser.add_argument("--wr-min", type=float, default=0.0, help="Min WR threshold as decimal (e.g. 0.50). Default 0.0 = no filter.")
     parser.add_argument("--confidence-min", type=float, default=0.01, help="Overall confidence floor (default: 0.01)")

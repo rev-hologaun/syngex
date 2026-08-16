@@ -27,8 +27,7 @@ OUTPUT_FILE = Path("/home/hologaun/projects/syngex/analysis/analyzed_strategies_
 OUTCOME_GLOB = "signal_outcomes_*_v2.jsonl"
 
 CONFIDENCE_BUCKETS = [
-    ("1-4%",    0.01, 0.05),
-    ("5-9%",    0.05, 0.10),
+    ("1-9%",    0.01, 0.10),
     ("10-19%",  0.10, 0.20),
     ("20-29%",  0.20, 0.30),
     ("30-39%",  0.30, 0.40),
