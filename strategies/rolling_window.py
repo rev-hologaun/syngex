@@ -296,6 +296,24 @@ class RollingWindow:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _percentile(sorted_vals: List[float], q: float) -> float:
+        """Canonical linear-interpolation percentile (the numpy-linear method, n = method 7).
+
+        ``q`` is in [0, 100]. Deterministic and matches the definition every
+        standard stats library uses. Replaces the old nearest/midpoint-only
+        calculation, which returned wrong quartiles for most window sizes
+        (e.g. n=3,4,6,7,8,12...), silently shifting bottom/top-quartile gates.
+        """
+        n = len(sorted_vals)
+        if n == 1:
+            return sorted_vals[0]
+        pos = (n - 1) * (q / 100.0)
+        lower = int(pos)
+        upper = min(lower + 1, n - 1)
+        frac = pos - lower
+        return sorted_vals[lower] + frac * (sorted_vals[upper] - sorted_vals[lower])
+
     def _refresh(self) -> None:
         """Compute all cached values in one pass.  Called when _dirty is True."""
         # Initialize trend_cache so _compute_trend's hysteresis logic has a baseline
@@ -321,17 +339,8 @@ class RollingWindow:
         if len(self._values) >= 2:
             self._std_cache = statistics.stdev(self._values)
             sorted_vals = sorted(self._values)
-            n = len(sorted_vals)
-            q1_idx = n / 4
-            if q1_idx == int(q1_idx):
-                self._p25_cache = (sorted_vals[int(q1_idx) - 1] + sorted_vals[int(q1_idx)]) / 2
-            else:
-                self._p25_cache = sorted_vals[int(q1_idx)]
-            q3_idx = 3 * n / 4
-            if q3_idx == int(q3_idx):
-                self._p75_cache = (sorted_vals[int(q3_idx) - 1] + sorted_vals[int(q3_idx)]) / 2
-            else:
-                self._p75_cache = sorted_vals[int(q3_idx)]
+            self._p25_cache = self._percentile(sorted_vals, 25.0)
+            self._p75_cache = self._percentile(sorted_vals, 75.0)
         else:
             self._std_cache = None
             self._p25_cache = None
