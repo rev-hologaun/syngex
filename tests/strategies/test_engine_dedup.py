@@ -232,3 +232,111 @@ def test_opposite_direction_fires_within_window():
 def test_backward_compat_default_window():
     # Default EngineConfig keeps dedup_window_seconds=60.0.
     assert EngineConfig().dedup_window_seconds == 60.0
+
+
+# --------------------------------------------------------------------------
+# 4. Exponential BACKOFF variant: a stuck wall must not re-fire at the base
+#    window forever; its cooldown must grow. Default is off (multiplier=1.0).
+# --------------------------------------------------------------------------
+
+
+def _run_stuck_wall(engine, base_ts, step=60.5, n=12):
+    """Feed the same wall every `step` seconds `n` times; return delivered counts."""
+    delivered = []
+    t = base_ts
+    for i in range(n):
+        out = process_at(engine, t)
+        delivered.append(len(out))
+        t += step
+    return delivered
+
+
+def test_backoff_default_off_matches_legacy_anchor_behavior():
+    # multiplier=1.0 (default) -> fixed 60s window -> a stuck wall re-fires
+    # every cycle (legacy anchor behavior preserved).
+    eng = make_engine(dedup=60.0)  # mult defaults to 1.0
+    eng.register(FakeWallStrategy([(225.0, "put")]))
+    eng.start()
+    delivered = _run_stuck_wall(eng, 1000.0)
+    # Every 60.5s step is past the 60s window -> all fire.
+    assert delivered == [1] * 12
+    eng.stop()
+
+
+def test_backoff_enabled_grows_window_and_suppresses_stuck_wall():
+    # multiplier=2.0 -> window grows 60,120,240,... so a stuck wall firing every
+    # ~60s gets suppressed on re-fires, and the GAPS between actual fires grow
+    # monotonically (exponential backoff in action).
+    eng = StrategyEngine(config=EngineConfig(dedup_window_seconds=60.0,
+                                             dedup_backoff_multiplier=2.0))
+    eng.register(FakeWallStrategy([(225.0, "put")]))
+    eng.start()
+
+    t = 1000.0
+    fire_times = []
+    for _ in range(14):
+        out = process_at(eng, t)
+        if len(out) == 1:
+            fire_times.append(t)
+        t += 60.5
+
+    # Every re-fire must come LATER than the previous (gaps strictly grow), and
+    # after the first fire the wall must NOT fire every 60s (backoff suppresses
+    # the immediate re-fire).
+    gaps = [round(fire_times[i + 1] - fire_times[i]) for i in range(len(fire_times) - 1)]
+    assert 2 <= len(fire_times) <= 6, f"expected backoff to thin fires, got {fire_times}"
+    assert gaps == sorted(gaps), f"fire gaps should grow monotonically: {gaps}"
+    assert gaps[0] > 60, f"first re-fire must be delayed past the base window: {gaps}"
+    eng.stop()
+
+
+def test_backoff_max_strikes_caps_window():
+    # max_strikes caps the accumulated strike count, bounding the effective
+    # window at base * mult^max so a setup is never suppressed forever. The
+    # stored count must never exceed max, and the computed window must equal
+    # the capped value (not keep growing past it). Decay disabled so the test
+    # only exercises the cap itself.
+    max_strikes = 3
+    eng = StrategyEngine(config=EngineConfig(dedup_window_seconds=60.0,
+                                             dedup_backoff_multiplier=2.0,
+                                             dedup_backoff_max_strikes=max_strikes,
+                                             dedup_backoff_decay_seconds=0.0))
+    eng.register(FakeWallStrategy([(225.0, "put")]))
+    eng.start()
+    key = ("fake_wall", "level:225.0")
+
+    # Drive well past the cap: each fire uses a huge gap that clears any
+    # window, and decay is off, so strikes accumulate and then clamp at max.
+    t = 1000.0
+    for _ in range(6):
+        out = process_at(eng, t)
+        assert len(out) == 1
+        t += 2000.0
+
+    # Count must be capped at max_strikes, window at base*mult^max, not higher.
+    assert eng._backoff_counts[key] == max_strikes
+    assert eng._cooldown_window(key, t) == 60.0 * (2.0 ** max_strikes)
+    eng.stop()
+
+
+def test_backoff_decay_resets_strikes_after_quiet_period():
+    # A setup that goes quiet past dedup_backoff_decay_seconds resets its
+    # strikes to 0, so a genuinely re-established wall fires at the base window.
+    eng = StrategyEngine(config=EngineConfig(dedup_window_seconds=60.0,
+                                             dedup_backoff_multiplier=2.0,
+                                             dedup_backoff_decay_seconds=300.0))
+    eng.register(FakeWallStrategy([(225.0, "put")]))
+    eng.start()
+    key = ("fake_wall", "level:225.0")
+
+    # Fire a few times with gaps under decay to build up strikes.
+    t = 1000.0
+    for _ in range(3):
+        process_at(eng, t); t += 250.0
+    assert eng._backoff_counts[key] >= 1
+
+    # Go quiet past decay (300s), then fire again -> 1 new signal, strikes reset.
+    out = process_at(eng, t + 400.0)
+    assert len(out) == 1
+    assert eng._backoff_counts[key] == 0
+    eng.stop()

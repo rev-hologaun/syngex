@@ -509,6 +509,12 @@ class SyngexOrchestrator:
                 min_confidence=global_config.get("min_confidence", 0.05),
                 max_signals_per_tick=global_config.get("max_signals_per_tick", 10),
                 dedup_window_seconds=global_config.get("dedup_window_seconds", 60.0),
+                dedup_backoff_multiplier=global_config.get(
+                    "dedup_backoff_multiplier", 1.0),
+                dedup_backoff_max_strikes=global_config.get(
+                    "dedup_backoff_max_strikes", 6),
+                dedup_backoff_decay_seconds=global_config.get(
+                    "dedup_backoff_decay_seconds", 300.0),
             ),
             signal_tracker=self._signal_tracker,
             alternate_signal_tracker=self._signal_tracker_v2,
@@ -719,6 +725,12 @@ class SyngexOrchestrator:
                     self._strategy_engine.config.min_confidence = global_cfg.get("min_confidence", 0.05)
                     self._strategy_engine.config.max_signals_per_tick = global_cfg.get("max_signals_per_tick", 10)
                     self._strategy_engine.config.dedup_window_seconds = global_cfg.get("dedup_window_seconds", 60.0)
+                    self._strategy_engine.config.dedup_backoff_multiplier = global_cfg.get(
+                        "dedup_backoff_multiplier", 1.0)
+                    self._strategy_engine.config.dedup_backoff_max_strikes = global_cfg.get(
+                        "dedup_backoff_max_strikes", 6)
+                    self._strategy_engine.config.dedup_backoff_decay_seconds = global_cfg.get(
+                        "dedup_backoff_decay_seconds", 300.0)
 
                 # Apply per-strategy params
                 for layer in ["layer1", "layer2", "layer3", "full_data"]:

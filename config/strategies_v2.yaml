@@ -8,6 +8,9 @@ global:
   min_confidence: 0.01
   max_signals_per_tick: 10
   dedup_window_seconds: 60
+  dedup_backoff_multiplier: 1.0
+  dedup_backoff_max_strikes: 6
+  dedup_backoff_decay_seconds: 300
 
 # Layer 1: Structural (GEX + OHLC) — 8 strategies
 layer1:

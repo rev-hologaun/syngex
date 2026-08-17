@@ -105,6 +105,20 @@ class EngineConfig:
     max_signals_per_tick: int = 10     # Prevent signal spam
     dedup_window_seconds: float = 60.0  # Don't repeat same strategy signal within this window
 
+    # Exponential backoff on consecutive re-fires of the SAME setup anchor.
+    # The effective cooldown for an anchor is:
+    #     dedup_window_seconds * (multiplier ** strikes)
+    # where `strikes` is the number of consecutive times that setup has fired
+    # in a row. This stops a single stuck wall (which base anchor dedup still
+    # lets re-fire every `dedup_window_seconds` indefinitely) from spamming sky
+    # signals while preserving the ability of a genuinely re-established setup
+    # to fire again after a quiet period. Default multiplier=1.0 is a fixed
+    # window (legacy anchor behavior, fully backward-compatible); set it >1.0
+    # to enable the backoff variant.
+    dedup_backoff_multiplier: float = 1.0        # ^1 per consecutive re-fire; 1.0 disables
+    dedup_backoff_max_strikes: int = 6           # cap on accumulated strikes (window ceiling)
+    dedup_backoff_decay_seconds: float = 300.0   # quiet period that resets an anchor's strikes
+
 
 class StrategyEngine:
     """
@@ -136,6 +150,9 @@ class StrategyEngine:
         # stuck wall can't re-fire every window (spam) OR block a different,
         # valid wall from the same strategy (missed trades).
         self._last_signals: Dict[Tuple[str, str], float] = {}
+        # Consecutive re-fire count per (strategy_id, anchor): drives exponential
+        # backoff on the effective cooldown window for that setup.
+        self._backoff_counts: Dict[Tuple[str, str], int] = {}
         self._signal_count: int = 0
         self._tick_count: int = 0
 
@@ -255,10 +272,14 @@ class StrategyEngine:
                     # symbol+direction fallback); different setups of the same
                     # strategy cool down independently. No anchor -> fall back to
                     # strategy_id (legacy behavior).
+                    # Backoff: the effective cooldown grows exponentially on
+                    # consecutive re-fires of the same setup, so a stuck wall
+                    # stops spamming while a genuinely re-established setup can
+                    # fire again after a quiet period.
                     anchor = self._anchor_for(signal)
                     key = (signal.strategy_id, anchor)
                     last_time = self._last_signals.get(key, 0)
-                    if now - last_time < self.config.dedup_window_seconds:
+                    if now - last_time < self._cooldown_window(key, now):
                         continue
                     all_signals.append(signal)
             except Exception as exc:
@@ -290,7 +311,7 @@ class StrategyEngine:
 
         # Phase 4: Deliver signals
         for signal in all_signals:
-            self._last_signals[(signal.strategy_id, self._anchor_for(signal))] = now
+            self._record_fire((signal.strategy_id, self._anchor_for(signal)), now)
             self._signal_count += 1
             # Log to file
             self._log_signal(signal)
@@ -350,6 +371,57 @@ class StrategyEngine:
             return f"dir:{sym}:{signal.direction.value}"
         # Non-dict metadata (rare): fall back to a global per-strategy anchor.
         return "*"
+
+    # ------------------------------------------------------------------
+    # Dedup backoff
+    # ------------------------------------------------------------------
+
+    def _cooldown_window(self, key: Tuple[str, str], now: float) -> float:
+        """
+        Effective cooldown for a setup key, applying exponential backoff.
+
+        window = dedup_window_seconds * (multiplier ** strikes)
+
+        `strikes` is the number of consecutive re-fires. A multiplier of 1.0
+        yields a fixed window (legacy anchor behavior). Strikes are capped at
+        dedup_backoff_max_strikes to bound the window. If the setup has been
+        quiet longer than dedup_backoff_decay_seconds, the strikes were already
+        reset by _record_fire, so this returns the base window.
+        """
+        base = self.config.dedup_window_seconds
+        mult = self.config.dedup_backoff_multiplier
+        if mult <= 1.0:
+            return base
+        strikes = self._backoff_counts.get(key, 0)
+        strikes = min(strikes, self.config.dedup_backoff_max_strikes)
+        return base * (mult ** strikes)
+
+    def _record_fire(self, key: Tuple[str, str], now: float) -> None:
+        """
+        Record a delivered signal for a setup, updating its backoff state.
+
+        - If the setup has been quiet longer than dedup_backoff_decay_seconds,
+          reset its strike count to 0 (a genuinely re-established setup starts
+          at the base window again).
+        - Otherwise increment the consecutive re-fire count (capped at
+          dedup_backoff_max_strikes), so the next cooldown is longer.
+        """
+        # Read the PREVIOUS fire time BEFORE overwriting it.
+        prev = self._last_signals.get(key)
+        self._last_signals[key] = now
+        mult = self.config.dedup_backoff_multiplier
+        if mult <= 1.0:
+            # Fixed window: no backoff bookkeeping needed.
+            self._backoff_counts.pop(key, None)
+            return
+        decay = self.config.dedup_backoff_decay_seconds
+        if decay > 0 and prev is not None and (now - prev) >= decay:
+            self._backoff_counts[key] = 0
+        else:
+            cur = self._backoff_counts.get(key, 0)
+            self._backoff_counts[key] = min(
+                cur + 1, self.config.dedup_backoff_max_strikes
+            )
 
     # ------------------------------------------------------------------
     # Inter-strategy conflict detection & resolution
