@@ -515,6 +515,8 @@ class SyngexOrchestrator:
                     "dedup_backoff_max_strikes", 6),
                 dedup_backoff_decay_seconds=global_config.get(
                     "dedup_backoff_decay_seconds", 300.0),
+                dedup_same_confidence_tolerance=global_config.get(
+                    "dedup_same_confidence_tolerance", 0.02),
             ),
             signal_tracker=self._signal_tracker,
             alternate_signal_tracker=self._signal_tracker_v2,
@@ -731,6 +733,8 @@ class SyngexOrchestrator:
                         "dedup_backoff_max_strikes", 6)
                     self._strategy_engine.config.dedup_backoff_decay_seconds = global_cfg.get(
                         "dedup_backoff_decay_seconds", 300.0)
+                    self._strategy_engine.config.dedup_same_confidence_tolerance = global_cfg.get(
+                        "dedup_same_confidence_tolerance", 0.02)
 
                 # Apply per-strategy params
                 for layer in ["layer1", "layer2", "layer3", "full_data"]:

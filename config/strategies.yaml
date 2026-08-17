@@ -16,6 +16,11 @@ global:
   dedup_backoff_multiplier: 1.0
   dedup_backoff_max_strikes: 6
   dedup_backoff_decay_seconds: 300
+  # A re-fire of the same setup with a materially DIFFERENT confidence is
+  # treated as a new signal and allowed through (bypasses backoff). Only
+  # re-fires at (nearly) the same confidence get backed off. 0.0 = only exact
+  # differences count (would effectively disable backoff); ~0.02 = 2 confidence pts.
+  dedup_same_confidence_tolerance: 0.02
 
 # Layer 1: Structural (GEX + OHLC) — 8 strategies
 layer1:

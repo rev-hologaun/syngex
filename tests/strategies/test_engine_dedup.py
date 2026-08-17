@@ -340,3 +340,110 @@ def test_backoff_decay_resets_strikes_after_quiet_period():
     assert len(out) == 1
     assert eng._backoff_counts[key] == 0
     eng.stop()
+
+
+# --------------------------------------------------------------------------
+# 5. CONFIDENCE-aware backoff: a re-fire is treated as a NEW signal (allowed
+#    through, bypassing backoff) if its confidence differs materially from the
+#    last fire of that setup. Only stale same-confidence re-fires are backed off.
+# --------------------------------------------------------------------------
+
+
+class ConfStrategy:
+    """Emit one signal against a fixed wall, at a caller-chosen confidence."""
+    strategy_id = "fake_wall"
+    layer = "layer1"
+    enabled = True
+
+    def __init__(self, conf_getter):
+        self._get = conf_getter
+
+    def set_params(self, params):
+        pass
+
+    def evaluate(self, data):
+        strike = data.get("strike", 225.0)
+        return [Signal(
+            direction=Direction.LONG,
+            confidence=self._get(),
+            entry=strike,
+            stop=strike - 1.0,
+            target=strike + 1.0,
+            strategy_id=self.strategy_id,
+            _layer=self.layer,
+            timestamp=data.get("timestamp", time.time()),
+            symbol="NVDA",
+            reason=f"wall {strike}",
+            metadata={"wall_strike": strike, "wall_side": "put"},
+        )]
+
+
+def _engine_with_backoff(mult=2.0, tol=0.02):
+    return StrategyEngine(config=EngineConfig(dedup_window_seconds=60.0,
+                                              dedup_backoff_multiplier=mult,
+                                              dedup_backoff_max_strikes=6,
+                                              dedup_backoff_decay_seconds=0.0,
+                                              dedup_same_confidence_tolerance=tol))
+
+
+def test_confident_material_change_bypasses_backoff():
+    # Confidence jumps 0.50 -> 0.85 (>= tol) shortly after the first fire: the
+    # re-fire is a materially-new setup and must be ALLOWED despite the backoff
+    # window not having elapsed.
+    confs = [0.50]
+    eng = _engine_with_backoff()
+    eng.register(ConfStrategy(lambda: confs[0]))
+    eng.start()
+
+    out1 = process_at(eng, 1000.0)
+    assert len(out1) == 1
+
+    # 10s later (well inside the 60s base window) the setup strengthens.
+    confs[0] = 0.85
+    out2 = process_at(eng, 1010.0)
+    assert len(out2) == 1, "materially-different confidence must bypass backoff"
+    assert out2[0].confidence == 0.85
+    eng.stop()
+
+
+def test_same_confidence_still_backed_off():
+    # Same confidence re-fire within the (growing) window stays suppressed.
+    confs = [0.50]
+    eng = _engine_with_backoff()
+    eng.register(ConfStrategy(lambda: confs[0]))
+    eng.start()
+
+    process_at(eng, 1000.0)  # fire conf 0.50, strikes->1, window 120
+    out = process_at(eng, 1030.0)  # same conf, 30s later -> suppressed
+    assert out == [], "same-confidence re-fire within backoff window suppressed"
+    eng.stop()
+
+
+def test_confidence_tolerance_boundary():
+    # delta < tol is treated as stale (suppressed); delta >= tol is a new setup.
+    confs = [0.500]
+    eng = _engine_with_backoff(mult=2.0, tol=0.02)
+    eng.register(ConfStrategy(lambda: confs[0]))
+    eng.start()
+    key = ("fake_wall", "level:225.0")
+
+    process_at(eng, 1000.0)  # fire 0.500
+
+    # 0.510: delta 0.010 < 0.02 -> stale, suppressed within window.
+    confs[0] = 0.510
+    assert process_at(eng, 1010.0) == []
+
+    # 0.800: delta 0.29 >= 0.02 -> new setup, allowed within window.
+    confs[0] = 0.800
+    out = process_at(eng, 1020.0)
+    assert len(out) == 1
+    eng.stop()
+
+
+def test_first_fire_always_allowed():
+    eng = _engine_with_backoff()
+    eng.register(ConfStrategy(lambda: 0.50))
+    eng.start()
+    out = process_at(eng, 1000.0)
+    assert len(out) == 1
+    eng.stop()

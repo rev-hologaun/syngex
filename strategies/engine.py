@@ -118,6 +118,14 @@ class EngineConfig:
     dedup_backoff_multiplier: float = 1.0        # ^1 per consecutive re-fire; 1.0 disables
     dedup_backoff_max_strikes: int = 6           # cap on accumulated strikes (window ceiling)
     dedup_backoff_decay_seconds: float = 300.0   # quiet period that resets an anchor's strikes
+    # A re-fire of the same setup is treated as a genuinely NEW signal (and
+    # allowed through, bypassing backoff) if its confidence differs from the
+    # last fire by at least this tolerance. Only re-fires whose confidence is
+    # materially UNCHANGED get backed off. Confidence drifts continuously on
+    # live re-evaluations, so 0.0 (strict equality) would effectively disable
+    # backoff; a small tolerance (e.g. 0.02 = 2 confidence points) treats a
+    # meaningful change as a new setup while backing off stale repeats.
+    dedup_same_confidence_tolerance: float = 0.02
 
 
 class StrategyEngine:
@@ -153,6 +161,10 @@ class StrategyEngine:
         # Consecutive re-fire count per (strategy_id, anchor): drives exponential
         # backoff on the effective cooldown window for that setup.
         self._backoff_counts: Dict[Tuple[str, str], int] = {}
+        # Last delivered confidence per (strategy_id, anchor): used to detect
+        # materially-changed re-fires (a new confidence = a new setup) vs stale
+        # repeats at the same confidence.
+        self._last_conf: Dict[Tuple[str, str], float] = {}
         self._signal_count: int = 0
         self._tick_count: int = 0
 
@@ -279,8 +291,13 @@ class StrategyEngine:
                     anchor = self._anchor_for(signal)
                     key = (signal.strategy_id, anchor)
                     last_time = self._last_signals.get(key, 0)
-                    if now - last_time < self._cooldown_window(key, now):
-                        continue
+                    # A material confidence change = a genuinely new/evolving
+                    # setup: allow it through regardless of backoff. Only a
+                    # re-fire at (nearly) the SAME confidence is treated as a
+                    # stale repeat and subject to the cooldown window.
+                    if not self._confidence_changed(key, signal.confidence, now):
+                        if now - last_time < self._cooldown_window(key, now):
+                            continue
                     all_signals.append(signal)
             except Exception as exc:
                 logger.error("Strategy %s error: %s", strategy.strategy_id, exc, exc_info=True)
@@ -311,7 +328,9 @@ class StrategyEngine:
 
         # Phase 4: Deliver signals
         for signal in all_signals:
-            self._record_fire((signal.strategy_id, self._anchor_for(signal)), now)
+            self._record_fire(
+                (signal.strategy_id, self._anchor_for(signal)), now, signal.confidence
+            )
             self._signal_count += 1
             # Log to file
             self._log_signal(signal)
@@ -396,10 +415,25 @@ class StrategyEngine:
         strikes = min(strikes, self.config.dedup_backoff_max_strikes)
         return base * (mult ** strikes)
 
-    def _record_fire(self, key: Tuple[str, str], now: float) -> None:
+    def _confidence_changed(self, key: Tuple[str, str], confidence: float, now: float) -> bool:
+        """
+        True if this signal's confidence is materially different from the last
+        delivered confidence for the same setup (a new/evolving setup, allowed
+        through regardless of backoff). Only a re-fire at (nearly) the same
+        confidence is treated as a stale repeat.
+        """
+        tol = self.config.dedup_same_confidence_tolerance
+        last = self._last_conf.get(key)
+        if last is None:
+            return True  # first fire for this setup: nothing to compare
+        return abs(confidence - last) >= tol
+
+    def _record_fire(self, key: Tuple[str, str], now: float, confidence: float) -> None:
         """
         Record a delivered signal for a setup, updating its backoff state.
 
+        - Store the delivered confidence so the next re-fire can be judged as
+          materially-changed (new setup) vs stale (same confidence).
         - If the setup has been quiet longer than dedup_backoff_decay_seconds,
           reset its strike count to 0 (a genuinely re-established setup starts
           at the base window again).
@@ -409,6 +443,7 @@ class StrategyEngine:
         # Read the PREVIOUS fire time BEFORE overwriting it.
         prev = self._last_signals.get(key)
         self._last_signals[key] = now
+        self._last_conf[key] = confidence
         mult = self.config.dedup_backoff_multiplier
         if mult <= 1.0:
             # Fixed window: no backoff bookkeeping needed.
