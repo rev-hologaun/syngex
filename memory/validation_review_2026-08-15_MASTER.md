@@ -193,3 +193,61 @@ COMMITTED as v3.223 (2026-08-16 04:00 PDT).
       NOT started — needs owner decision on canonical GEX unit (largest architectural fix).
 - Remaining MED/LOW: M1 (regime_conf /2000), M4 (ROC positional slots), M5/M6 (async + last_trigger),
       M7 (string lastPrice guard), M8 (gamma_flip message-count), M9 (SHORT delta constants); L-series.
+
+---
+
+## FIX STATUS — H1 Option-A (rank-based gamma wall gate) — PROTOTYPED on feature branch, NOT merged
+
+**Branch:** `feature/h1-optionA-percentile-wall` (off clean v3.224). Commits: `e80ba5c` (mechanism+tests),
+`095b5aa` (pilot wire + walldelta script), `f0e5fa1` (pilot harness + env overrides), `1b0675d` (rank
+decision doc).
+
+**Solution chosen: Option-A — per-symbol rank gate.** `get_gamma_walls`/`get_wall_classifications` accept
+`rank_keep_frac`; when set (e.g. 0.25) a wall = "strike in the top X of its own symbol's |gex| book"
+(computed live via `_rank_cutoff`), making the gate scale/symbol/OI-mode invariant. `rank_keep_frac=None`
+(default) = byte-identical legacy absolute threshold.
+
+**Pilot wiring:** `gamma_wall_bounce(.py/_v2)` read `WALL_RANK_KEEP_FRAC` from env
+`SYNGEX_WALL_RANK_KEEP_FRAC` (None=legacy); strength normalization uses the effective gate floor.
+`signal_tracker.py` `log_dir` defaults from `SYNGEX_LOG_DIR` so pilot logs never collide with live log/.
+
+**Harness:** `scripts/pilot_h1_optionA.sh` launches baseline + option-A processes per symbol with isolated
+log dirs, then counts gamma_wall_bounce signals per side.
+
+**+6 tests** (`tests/strategies/test_gamma_walls_optionA.py`): top-quartile, 10x scale-invariance,
+symbol-agnostic (price 50 vs 5000), backward-compat, empty, keep-all. Full suite 95 passed / 17
+pre-existing failures, zero regressions.
+
+**Replay evidence:**
+- gamma_squeeze@100 + iron_anchor@10 fire on 100% of book today (noise); Option-A top-quartile filters
+  to ~10 strikes/symbol. gamma_wall_bounce@500k symbol-scattered (11..28); Option-A unifies to ~10.
+- Per-signal replay (51,797 logged gamma_wall_bounce fires): top-quartile keeps 76-100% (TSLA 38%).
+- Method limit: no raw feeder capture persisted → replay is wall-set/signal-metadata based, not full
+  temporal tick replay. AMD gex_state snapshot stale (74 msgs), excluded.
+
+**Decisions locked (Hologaun, 2026-08-16 17:30 PDT):** rank_keep_frac = 0.25 UNIFORM (no TSLA exception);
+A/B symbols = TSLA + SPY; promote to main as v3.225 if pilot is clean.
+
+---
+
+## SEQUENCING DECISION (Hologaun, 2026-08-16 17:39 PDT) — H1-first, then queue
+
+Finish + commit H1 (validated pilot → v3.225) BEFORE starting any other issue. Hologaun is prioritizing
+correct GEX calculation/usage (H1 family).
+
+LOCKED QUEUE (next after H1 lands):
+1. M1  — regime_conf /2000 in strike_concentration(.py/_v2) — stale-units confidence floor (like C2).
+2. M9  — strike_concentration_v2 hardcoded SHORT delta magic 1.15 / 0.3 (should use DELTA_ACCEL constants).
+3. M4  — ROC/accel positional-slot reads on time-based windows (main.py:1228,1395,1660,2040,2368) —
+         time-varying lookback. NOTE: touches main.py _on_message; keep isolated from H1 A/B.
+4. L-series cheap wins (L3 dead refetch, L8/L9 stale comments/SPIKE dead branch) — trivial.
+
+HELD until after H1 promotes (touch calculator/ingestor/message-loop paths adjacent to H1's GEX scale,
+would muddle the A/B if done concurrently):
+- M5/M6 (async _on_message + duplicate-export cadence, _build_last_trigger masking)
+- M7 (string lastPrice TypeError guard, ingestor) / M8 (gamma_flip message-count sensitivity)
+- Any work on the 17 pre-existing test failures (delta_iv_divergence/delta_volume_exhaustion/gex_imbalance/
+  obi_aggression_flow/call_put_flow_asymmetry) — likely stale tests vs v3.220/v3.221 tuning; review after H1.
+
+Scheduled: cron `H1 pilot feed health check` fires 2026-08-17 01:15 PDT to confirm feed/ingestion health +
+harness armed; run A/B at 6:30am open.
