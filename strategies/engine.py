@@ -129,7 +129,13 @@ class StrategyEngine:
         self._filter_callback: Optional[Callable[[Signal], bool]] = None
         self._signal_handlers: List[Callable[[Signal], None]] = []
         self._running = False
-        self._last_signals: Dict[str, float] = {}  # strategy_id -> last signal time
+        # Composite-key map: (strategy_id, anchor) -> last signal time, where
+        # "anchor" is the specific setup the signal trades (e.g. wall_strike).
+        # Keying on (strategy_id, anchor) instead of strategy_id alone lets
+        # independent setups of the same strategy cool down separately, so one
+        # stuck wall can't re-fire every window (spam) OR block a different,
+        # valid wall from the same strategy (missed trades).
+        self._last_signals: Dict[Tuple[str, str], float] = {}
         self._signal_count: int = 0
         self._tick_count: int = 0
 
@@ -244,8 +250,14 @@ class StrategyEngine:
                             expiry=signal.expiry,
                             metadata=signal.metadata,
                         )
-                    # Dedup: skip if same strategy fired recently
-                    last_time = self._last_signals.get(signal.strategy_id, 0)
+                    # Dedup: skip if this strategy fired the SAME setup recently.
+                    # Anchor captures the specific position (wall strike, or
+                    # symbol+direction fallback); different setups of the same
+                    # strategy cool down independently. No anchor -> fall back to
+                    # strategy_id (legacy behavior).
+                    anchor = self._anchor_for(signal)
+                    key = (signal.strategy_id, anchor)
+                    last_time = self._last_signals.get(key, 0)
                     if now - last_time < self.config.dedup_window_seconds:
                         continue
                     all_signals.append(signal)
@@ -278,7 +290,7 @@ class StrategyEngine:
 
         # Phase 4: Deliver signals
         for signal in all_signals:
-            self._last_signals[signal.strategy_id] = now
+            self._last_signals[(signal.strategy_id, self._anchor_for(signal))] = now
             self._signal_count += 1
             # Log to file
             self._log_signal(signal)
@@ -303,6 +315,41 @@ class StrategyEngine:
             )
 
         return all_signals
+
+    # ------------------------------------------------------------------
+    # Dedup anchor
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _anchor_for(signal: Signal) -> str:
+        """
+        Build the cooldown anchor (setup key) for a signal.
+
+        The anchor identifies the SPECIFIC position a signal trades so that
+        different setups from the same strategy get independent dedup windows.
+
+        Resolution order:
+          1. metadata['wall_strike']      -> wall/level strategies (gamma_wall_bounce,
+                                             theta_burn, vol_compression_range, ...)
+          2. metadata['strike'] / 'level' / 'zone' / 'cluster' -> other level-keyed setups
+          3. symbol + direction           -> generic per-side anchor (never blocks a
+                                             contrary-direction signal)
+          4. strategy_id                  -> legacy global fallback (no setup info)
+
+        All anchors are prefixed with the strategy_id implicitly by the caller's
+        composite key (strategy_id, anchor); this method only returns the anchor.
+        """
+        md = signal.metadata or {}
+        if isinstance(md, dict):
+            for k in ("wall_strike", "strike", "level", "zone", "cluster"):
+                v = md.get(k)
+                if v is not None:
+                    return f"level:{v}"
+            # If we have a directional, non-level anchor use symbol+direction.
+            sym = signal.symbol or ""
+            return f"dir:{sym}:{signal.direction.value}"
+        # Non-dict metadata (rare): fall back to a global per-strategy anchor.
+        return "*"
 
     # ------------------------------------------------------------------
     # Inter-strategy conflict detection & resolution
