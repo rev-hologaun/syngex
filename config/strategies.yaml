@@ -13,7 +13,7 @@ global:
   # Default off (multiplier=1.0 = fixed window). Set multiplier>1.0 to thin
   # repeated same-wall signals; window = dedup_window_seconds * mult^strikes,
   # capped at max_strikes, reset after decay_seconds of quiet.
-  dedup_backoff_multiplier: 1.0
+  dedup_backoff_multiplier: 2.0  # re-fire window grows 60->120->240->... per stale repeat (ENABLED for market 2026-08-18)
   dedup_backoff_max_strikes: 6
   dedup_backoff_decay_seconds: 300
   # A re-fire of the same setup with a materially DIFFERENT confidence is
