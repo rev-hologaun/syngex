@@ -251,3 +251,51 @@ would muddle the A/B if done concurrently):
 
 Scheduled: cron `H1 pilot feed health check` fires 2026-08-17 01:15 PDT to confirm feed/ingestion health +
 harness armed; run A/B at 6:30am open.
+
+---
+
+## FIX STATUS — H1 Option-A: LIVE A/B, refinement + dedup/backoff fixes, PROMOTED as v3.230 (2026-08-17)
+
+**H1 A/B pilot ran 2026-08-17 08:32-09:32 PDT (TSLA + SPY, rank_keep_frac=0.25, live cash session).**
+- Env gate verified reaching pilot process (SYNGEX_WALL_RANK_KEEP_FRAC=0.25).
+- TSLA: rank gate ~ no change (59 vs 59 fires, same wall set) — near-price walls are the same top-quartile
+  strikes either way.
+- SPY: rank gate cut gamma_wall_bounce 43 -> 3 — but diagnosis: price pinned 774.93-775.50 (flat tape),
+  baseline was re-firing ONE decaying wall (778, |gex| 3.5M->1.47M) ~every 60s; the -87M/-78M put walls
+  dominate the top-quartile cutoff (~78M), starving the moderate-but-tradeable near-price wall. Verdict:
+  over-suppression is arguably CORRECT (baseline was spamming a stale wall). Not treated as a bug.
+- EARLIER 01:43-06:48 overnight run was non-informative (baseline==pilot byte-identical on thin book) —
+  thin-session artifact, NOT a wiring bug (verified env reaches pilot).
+
+**Refinement applied:** `_rank_cutoff` gained optional `proximity_pct` (backward-compat None=whole-book);
+`gamma_wall_bounce` passes GATE_PROXIMITY_PCT=0.03 in Option-A mode. (Commit 46ab241. NOTE: analysis showed
+proximity alone does NOT fix the SPY starvation case — the dominating walls are in-band. Held as-is per
+Hologaun: he's confident Option-A fixes other issues.)
+
+**Dedup / re-fire investigation (Hologaun: invest re-fire/cooldown):**
+- ROOT CAUSE: engine cooldown was keyed on `strategy_id` ALONE (not per-setup), and re-arms every ~1s tick
+  against dedup_window_seconds=60. One stuck wall re-fired every ~60.7s indefinitely (SPY 40x/hour on one
+  wall; NVDA 82x on 225.0). Also BLOCKED different valid walls of the same strategy (SPY 777 only fired 2x
+  all hour while 778 hogged the bucket) -> both too-many AND too-few signals, same bug.
+- FIX 1 (1f9acf7): dedup keyed on (strategy_id, anchor), anchor = wall_strike/strike/level/zone/cluster ->
+  symbol+direction -> strategy_id fallback. Independent setups cool down separately.
+- FIX 2 (fbd3b7d): exponential backoff — window = dedup_window_seconds * (multiplier ** strikes), capped at
+  max_strikes=6, reset after decay_seconds=300 quiet. Default multiplier=1.0 (off, backward-compat).
+- FIX 3 (f9ca81d): CONFIDENCE-AWARE — a re-fire whose confidence differs >= dedup_same_confidence_tolerance
+  (0.02) is a NEW setup and allowed through (bypasses backoff); only stale same-confidence repeats are
+  backed off. KEY FINDING: with tol=0 the backoff is effectively disabled (confidence drifts on almost every
+  re-fire, so nothing is suppressed) — the tolerance is what makes it bite.
+- TESTS: test_engine_dedup.py now 15 tests (7 original + 4 backoff + 4 confidence-aware). Full suite
+  110 passed / 17 failed — same 17 pre-existing, zero regressions.
+
+**Real-data projection (faithful engine replay, clock-mocked; fixed(1.0) reproduces actual exactly):**
+- conf-aware backoff (mult 2.0, tol 0.02) thins STALE repeats only ~40-50% while preserving genuine
+  different-confidence signals: TSLA 66->42, SPY 33->16, INTC 122->87, NVDA 119->69, AMD 96->70.
+
+**PROMOTED as v3.230 (commit 8de6329, tag v3.230, pushed 2026-08-17 13:12 PDT):** dedup anchor + backoff +
+confidence-aware enabled (mult 2.0, tol 0.02) in both strategies.yaml / strategies_v2.yaml global blocks.
+Option-A rank gate (SYNGEX_WALL_RANK_KEEP_FRAC) remains ENV-GATED, off by default; enabled at tomorrow's
+launch. Working tree: only untracked check_conf_backoff.py (projection tool, keep).
+
+**SEQUENCING: H1-first constraint is now DONE (H1 promoted).** Next per locked queue: M1, M9, M4, then
+L-series. HELD-until-after-H1 items (M5/M6/M7/M8 + the 17 stale-test review) are now UNSHACKLED. Choose next.
