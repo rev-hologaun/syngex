@@ -295,24 +295,47 @@ class GEXCalculator:
         """Compute the dollar-GEX value for a strike (the unit walls gate on)."""
         return bucket.normalized_gamma() * 100 * price
 
-    def _rank_cutoff(self, price: float, rank_keep_frac: float) -> float:
+    def _rank_cutoff(
+        self, price: float, rank_keep_frac: float,
+        proximity_pct: Optional[float] = None,
+    ) -> float:
         """
         Per-symbol, scale-invariant wall cutoff for Option A (H1).
 
         Computes the |gex| cutoff that keeps the top `rank_keep_frac` of the
-        CURRENT ladder's |gex| distribution. rank_keep_frac=0.25 -> keep the
-        top quartile of strikes by |gex|. Makes the wall gate mean the same
-        thing on every symbol / OI-feed-mode / price-level (removes the H1
-        unit-scale mismatch: thresholds 10..500k on the same GEX value).
+        |gex| distribution. rank_keep_frac=0.25 -> keep the top quartile of
+        strikes by |gex|. Makes the wall gate mean the same thing on every
+        symbol / OI-feed-mode / price-level (removes the H1 unit-scale
+        mismatch: thresholds 10..500k on the same GEX value).
 
-        Returns 0.0 if the ladder is empty (nothing gated out) or price<=0.
+        `proximity_pct` (optional) restricts the |gex| distribution to strikes
+        within +-proximity_pct of `price`. Without it the cutoff is computed
+        over the ENTIRE ladder, which lets one dominant far-away wall (e.g. a
+        put wall -$87M some distance from price) inflate the cutoff so high
+        that the moderate-but-tradeable walls near price fail the gate and the
+        strategy starves. Restricting to the near-price book makes the gate
+        reflect the walls the strategy can actually trade. proximity_pct=None
+        (default) keeps the legacy whole-book behavior.
+
+        Returns 0.0 (nothing gated out) if the eligible set is empty or
+        price<=0.
         """
         if price <= 0 or rank_keep_frac >= 1.0:
             return 0.0
-        abs_gex = sorted(
-            abs(self._gex_for_strike(b, price)) for b in self._ladder.values()
-        )
-        abs_gex = [g for g in abs_gex if g > 0]
+        band = (1.0 + proximity_pct) if proximity_pct else None
+        band_lo = (1.0 - proximity_pct) if proximity_pct else None
+        abs_gex = []
+        for strike, bucket in self._ladder.items():
+            if proximity_pct:
+                # keep only strikes within the band around price
+                lo = price * band_lo
+                hi = price * band
+                if not (lo <= strike <= hi):
+                    continue
+            g = abs(self._gex_for_strike(bucket, price))
+            if g > 0:
+                abs_gex.append(g)
+        abs_gex.sort()
         if not abs_gex:
             return 0.0
         keep_frac = min(max(rank_keep_frac, 0.0), 1.0)
@@ -326,6 +349,7 @@ class GEXCalculator:
     def get_gamma_walls(
         self, threshold: float = 1e6, include_ghosts: bool = True,
         rank_keep_frac: Optional[float] = None,
+        proximity_pct: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         """
         Identify Gamma Walls — strikes with massive GEX.
@@ -357,7 +381,7 @@ class GEXCalculator:
 
         # Option-A: derive a scale-invariant cutoff from the live ladder
         if rank_keep_frac is not None:
-            effective = self._rank_cutoff(price, rank_keep_frac)
+            effective = self._rank_cutoff(price, rank_keep_frac, proximity_pct)
         else:
             effective = float(threshold)
 
@@ -674,6 +698,7 @@ class GEXCalculator:
         self, threshold: float = 1e6,
         density_threshold: float = 0.5, magnet_threshold: float = 2.0,
         rank_keep_frac: Optional[float] = None,
+        proximity_pct: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         """Return all gamma walls with classification added.
 
@@ -698,7 +723,7 @@ class GEXCalculator:
             return walls
 
         if rank_keep_frac is not None:
-            effective = self._rank_cutoff(price, rank_keep_frac)
+            effective = self._rank_cutoff(price, rank_keep_frac, proximity_pct)
         else:
             effective = float(threshold)
 

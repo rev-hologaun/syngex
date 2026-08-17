@@ -41,6 +41,13 @@ logger = logging.getLogger("Syngex.Strategies.GammaWallBounce")
 # ---------------------------------------------------------------------------
 
 WALL_PROXIMITY_PCT = 0.005       # 0.5% — how close price must be to wall
+# Gate-scoping band for Option-A rank cutoff. Wider than the trading trigger:
+# the rank gate should separate "significant" walls from noise among the
+# strikes the strategy could plausibly reach, NOT across the whole 32-strike
+# ladder (a single dominant far-away wall would otherwise inflate the cutoff
+# and starve the near-price book). 3% captures all realistic tradeable walls
+# while excluding distant mega-walls.
+GATE_PROXIMITY_PCT = 0.03        # +-3% around price for rank-cutoff computation
 STOP_PAST_WALL_PCT = 0.004       # 0.4% — stop beyond the wall
 TARGET_RISK_MULT = 1.5           # 1.5× risk for target
 MIN_WALL_GEX = 500000            # Minimum |GEX| to consider a wall
@@ -97,9 +104,11 @@ class GammaWallBounce(BaseStrategy):
             walls = gex_calc.get_wall_classifications(
                 threshold=0.0,  # ignored; rank cutoff used
                 rank_keep_frac=WALL_RANK_KEEP_FRAC,
+                proximity_pct=GATE_PROXIMITY_PCT,
             )
             self._effective_gate_gex = gex_calc._rank_cutoff(
-                underlying_price, WALL_RANK_KEEP_FRAC
+                underlying_price, WALL_RANK_KEEP_FRAC,
+                proximity_pct=GATE_PROXIMITY_PCT,
             )
         else:
             walls = gex_calc.get_wall_classifications(threshold=MIN_WALL_GEX)

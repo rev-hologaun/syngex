@@ -31,10 +31,16 @@ cd "$REPO"
 
 PILOT_LOG_DIR="$REPO/log/pilot_rank${RANK}_${SYMBOL}"
 BASELINE_LOG_DIR="$REPO/log/pilot_baseline_${SYMBOL}"
+# Symbol-scoped port offset so multiple symbols can A/B in parallel over the
+# same live window without colliding (base 18900 + symbolic index of symbol).
+_IDX=$(( $(printf '%s' "$SYMBOL" | od -An -tu1 | awk '{s=0; for(i=1;i<=NF;i++) s+=$i; print s%50}') ))
+BASE_HTTP=$(( 18900 + _IDX * 10 ))
+PILOT_HTTP=$(( 18901 + _IDX * 10 ))
 
 echo "=== H1 Option-A pilot :: $SYMBOL  rank=$RANK  runtime=${RUNTIME}s ==="
 echo "baseline log dir : $BASELINE_LOG_DIR"
 echo "pilot    log dir : $PILOT_LOG_DIR"
+echo "base/pilot ports : $BASE_HTTP / $PILOT_HTTP"
 
 # Sanity: feed must be present before launching (TradeStation SSE).
 # The reuse of restart.sh's port scheme (dashboard streams) — we run "stream" mode
@@ -42,12 +48,12 @@ echo "pilot    log dir : $PILOT_LOG_DIR"
 
 # --- baseline process (legacy gate, isolated logs) ---
 SYNGEX_LOG_DIR="$BASELINE_LOG_DIR" \
-  nohup python3 main.py "$SYMBOL" stream --port 18900 > /tmp/h1_baseline_$SYMBOL.log 2>&1 &
+  nohup python3 main.py "$SYMBOL" stream --port "$BASE_HTTP" > /tmp/h1_baseline_$SYMBOL.log 2>&1 &
 BASE_PID=$!
 
 # --- pilot process (Option-A rank gate, isolated logs) ---
 SYNGEX_LOG_DIR="$PILOT_LOG_DIR" SYNGEX_WALL_RANK_KEEP_FRAC="$RANK" \
-  nohup python3 main.py "$SYMBOL" stream --port 18901 > /tmp/h1_pilot_$SYMBOL.log 2>&1 &
+  nohup python3 main.py "$SYMBOL" stream --port "$PILOT_HTTP" > /tmp/h1_pilot_$SYMBOL.log 2>&1 &
 PILOT_PID=$!
 
 echo "baseline PID=$BASE_PID  pilot PID=$PILOT_PID"
