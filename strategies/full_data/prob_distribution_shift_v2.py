@@ -227,8 +227,9 @@ class ProbDistributionShiftV2(BaseStrategy):
         consec_short = rolling_data.get(KEY_CONSEC_SHORT, 0)
         consec_score = min(1.0, (consec_long + consec_short) / 10.0)
 
-        # Volume trend score (soft, no hard gate)
-        vol_trend_scores = {"FLAT": 1.0, "UP": 0.8, "DOWN": 0.8, "SPIKE": 0.2, "UNKNOWN": 0.5}
+        # Volume trend score (soft, no hard gate). L8: RollingWindow.trend only
+        # yields FLAT/UP/DOWN; SPIKE/UNKNOWN were dead branches never reachable.
+        vol_trend_scores = {"FLAT": 1.0, "UP": 0.8, "DOWN": 0.8}
         vol_score = vol_trend_scores.get(vol_trend, 0.5)
 
         # Store soft scores for downstream use

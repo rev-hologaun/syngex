@@ -77,7 +77,9 @@ LONG_STOP_PCT_SLICE = 0.002  # 0.2% — tighter stop for LONG slices
 # Target
 TARGET_RISK_MULT = 1.5  # 1.5× risk for bounce targets
 
-# Min confidence (v2: raised from 0.25 to 0.35)
+# Min confidence floors (v2): base 0.05; LONG elevated to 0.15 since LONG
+# historically underperforms SHORT. (L9: comment previously claimed
+# 'raised from 0.25 to 0.35' — never matched the actual constants.)
 MIN_CONFIDENCE = 0.05
 LONG_MIN_CONFIDENCE = 0.15  # STRATEGIC: higher threshold for LONG since LONG underperforms SHORT
 

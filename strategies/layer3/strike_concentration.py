@@ -75,7 +75,8 @@ STOP_PCT_SLICE = 0.003  # 0.3% against entry for slices
 # Target
 TARGET_RISK_MULT = 1.5  # 1.5× risk for bounce targets
 
-# Min confidence (v2: raised from 0.25 to 0.35)
+# Min confidence floor (base/v1): 0.05. (L9: comment previously claimed
+# 'raised from 0.25 to 0.35' — never matched the actual constant.)
 MIN_CONFIDENCE = 0.05
 
 # Min data points

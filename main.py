@@ -3028,6 +3028,9 @@ class SyngexOrchestrator:
 
         # Fetch resolved signals once for all strategies (not per-strategy)
         resolved = tracker.get_resolved()
+        # L3: fetch open signals once, outside the per-strategy loop (was
+        # re-fetched every iteration — wasteful on the hot status/health path).
+        open_signals = tracker.get_open_signals()
 
         for strat in self._strategy_engine._strategies:
             # Bug 2 fix: V2 orchestrator only includes _v2 strategies
@@ -3036,8 +3039,7 @@ class SyngexOrchestrator:
             sid = strat.strategy_id
             stats = strat_stats.get(sid, {})
 
-            # Count signals from recent signals buffer
-            signal_count = 0
+            # L3: removed dead per-strategy signal_count (health uses total_signals)
             last_signal_ts = 0.0
             sparkline_values: list = []
 
@@ -3074,7 +3076,6 @@ class SyngexOrchestrator:
                 status = "idle"
 
             # Check if any open signals exist for this strategy
-            open_signals = tracker.get_open_signals()
             has_open = any(s.strategy_id == sid for s in open_signals)
             if has_open and status == "idle":
                 status = "active"
