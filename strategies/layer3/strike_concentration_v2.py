@@ -88,6 +88,12 @@ MIN_DATA_POINTS = 3
 LIQUIDITY_VACUUM_RATIO = 3.0
 DELTA_ACCEL_THRESHOLD_LONG = 1.15  # delta accelerated ≥15%
 DELTA_ACCEL_THRESHOLD_SHORT = 0.85  # delta decelerated ≥15%
+# M9 fix: SHORT delta soft-penalty ramp span, derived from the two thresholds so
+# tuning either keeps the penalty consistent (was hardcoded 0.3 = 1.15 - 0.85).
+DELTA_ACCEL_RAMP_SPAN = DELTA_ACCEL_THRESHOLD_LONG - DELTA_ACCEL_THRESHOLD_SHORT
+# M9 fix: LONG delta soft-penalty floor — delta_accel at/below this = no acceleration
+# credit (was hardcoded 0.5 in both numerator and denominator of the LONG penalty).
+DELTA_ACCEL_FLOOR = 0.5
 GAMMA_MAGNITUDE_THRESHOLD = 0.50
 # M1 fix: regime-alignment confidence ceiling on the NORMALIZED net_gamma scale.
 # net_gamma here is net_gamma_normalized (per-message avg, real range ~0.2-136
@@ -478,8 +484,9 @@ class StrikeConcentrationV2(BaseStrategy):
         if liquid_vac_ratio is not None and liquid_vac_ratio < LIQUIDITY_VACUUM_RATIO:
             slice_conf_multiplier *= min(1.0, liquid_vac_ratio / LIQUIDITY_VACUUM_RATIO)
         # Delta acceleration penalty (was hard gate: delta_accel > 1.15)
+        # M9 fix: name the LONG floor (was magic 0.5 duplicated in num + denom).
         if delta_accel is not None and delta_accel <= DELTA_ACCEL_THRESHOLD_LONG:
-            slice_conf_multiplier *= max(0, (delta_accel - 0.5) / (DELTA_ACCEL_THRESHOLD_LONG - 0.5))
+            slice_conf_multiplier *= max(0, (delta_accel - DELTA_ACCEL_FLOOR) / (DELTA_ACCEL_THRESHOLD_LONG - DELTA_ACCEL_FLOOR))
 
         confidence *= slice_conf_multiplier
         if confidence < LONG_MIN_CONFIDENCE:
@@ -600,8 +607,9 @@ class StrikeConcentrationV2(BaseStrategy):
         if liquid_vac_ratio is not None and liquid_vac_ratio < LIQUIDITY_VACUUM_RATIO:
             slice_conf_multiplier *= min(1.0, liquid_vac_ratio / LIQUIDITY_VACUUM_RATIO)
         # Delta acceleration penalty (was hard gate: delta_accel < 0.85)
+        # M9 fix: replace magic 1.15/0.3 with the named threshold + derived span.
         if delta_accel is not None and delta_accel >= DELTA_ACCEL_THRESHOLD_SHORT:
-            slice_conf_multiplier *= max(0, (1.15 - delta_accel) / 0.3)
+            slice_conf_multiplier *= max(0, (DELTA_ACCEL_THRESHOLD_LONG - delta_accel) / DELTA_ACCEL_RAMP_SPAN)
 
         confidence *= slice_conf_multiplier
         if confidence < MIN_CONFIDENCE:

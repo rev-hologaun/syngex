@@ -221,6 +221,36 @@ main. Deploy is running off this branch. Recommend deciding on a merge-to-main s
 
 ---
 
+## FIX STATUS — M9 (strike_concentration_v2 delta soft-penalty magic numbers) — FIXED + VERIFIED, not yet committed
+
+**Bug:** v2's slice delta soft-penalty multipliers hardcoded magic numbers instead of
+deriving from the DELTA_ACCEL constants:
+- SHORT penalty: `(1.15 - delta_accel) / 0.3` — 1.15 is really DELTA_ACCEL_THRESHOLD_LONG,
+  0.3 is LONG-SHORT (1.15-0.85). Tuning the thresholds would silently diverge the penalty.
+- LONG penalty: `(delta_accel - 0.5) / (LONG - 0.5)` — magic 0.5 floor duplicated in
+  numerator + denominator.
+
+**Scope confirmation:** the `slice_conf_multiplier` soft-penalty mechanism is v2-ONLY —
+base `strike_concentration.py` uses hard gates on delta_accel (no slice_conf_multiplier
+anywhere), so M9 is correctly v2-scoped as the tracker stated.
+
+**Fix (v2 only):**
+- Added `DELTA_ACCEL_RAMP_SPAN = DELTA_ACCEL_THRESHOLD_LONG - DELTA_ACCEL_THRESHOLD_SHORT`
+  (was magic 0.3) and `DELTA_ACCEL_FLOOR = 0.5` (named LONG penalty floor).
+- SHORT penalty now `(DELTA_ACCEL_THRESHOLD_LONG - delta_accel) / DELTA_ACCEL_RAMP_SPAN`
+- LONG penalty now `(delta_accel - DELTA_ACCEL_FLOOR) / (LONG - DELTA_ACCEL_FLOOR)`
+- Verified byte-identical to originals across 4000 random points each (LONG+SHORT).
+
+**Tests:** NEW `tests/strategies/test_strike_concentration_delta_penalty.py` (4 tests):
+ramp-span derived from thresholds, floor constant present, SHORT ramp exact at threshold
+boundaries + monotone + clamp, LONG ramp exact at boundaries + monotone + clamp.
+Full suite 121 passed / 17 failed (baseline 117/17 + 4 new, same 17 pre-existing failures
+in untouched files). ZERO new regressions.
+
+**NOT committed.** Working tree: strike_concentration_v2.py + new test.
+
+---
+
 ## REMAINING RECOMMENDED WORK (from action order)
 - H1: engine/gex_calculator.py gamma wall/flip thresholds scale-inconsistent across OI feed modes
       (OI=1 stream vs real DailyOpenInterest span |gex| ~10x-3.6M; thresholds 10->500k fire 0/32 or
