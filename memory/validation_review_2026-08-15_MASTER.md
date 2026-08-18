@@ -364,3 +364,67 @@ launch. Working tree: only untracked check_conf_backoff.py (projection tool, kee
 
 **SEQUENCING: H1-first constraint is now DONE (H1 promoted).** Next per locked queue: M1, M9, M4, then
 L-series. HELD-until-after-H1 items (M5/M6/M7/M8 + the 17 stale-test review) are now UNSHACKLED. Choose next.
+
+---
+
+## FIX STATUS — M1/M9/M4 + FULL L-SERIES completed as v3.233-v3.240 (2026-08-18)
+
+**Locked post-H1 queue fully executed: M1, M9, M4, then the entire L-series. All committed to `main`.**
+
+### M-series (MEDIUM) — all 9 RESOLVED
+- **M1 (v3.231, 6343c1b):** regime_conf dead `/2000` divisor → `REGIME_GAMMA_CEILING=100`
+  (normalized scale) in strike_concentration(.py/_v2).
+- **M2 (v3.222 batch):** `int(size_str)` depth-exchange guard. (pre-existing, prior batch)
+- **M3 (v3.222 batch):** VSI-ROC `/0.001` → 0.0 on past_vsi==0. (pre-existing)
+- **M4 (v3.233, c222899):** ROC/accel positional-slot reads on time-based _5M windows →
+  TIME-ANCHORED lookback. Added `RollingWindow.sample_before_now(age, now)` (bisect over stored
+  timestamps, O(log n)) + `_lookback_sample()` helper (300s anchor, cold-start fallback to oldest-in-window).
+  Rewired 12 read sites (ext/mom ROC+accel, magnet, vsi, aggressor-vsi, esi memx/bats, wall decay,
+  vamp, depth bid/ask, volume, depth IR, bid/ask max). Decision (Hologaun): time-based, NOT count-based —
+  count-based would make ROC span seconds at ORB open vs 10-20min quiet afternoon (regime-dependent).
+  Accel 2nd-order anchored at 600s ("ROC 5min earlier"). Deliberately left `values[0]` reads (oldest =
+  inherently time-anchored). Isolated from H1 A/B (no GEX scaling touched).
+- **M5/M6/M7/M8:** still HELD — async _on_message cleanups + the 17 stale-test review. NOT in v3.240.
+- **M9 (v3.232, c6e66ed):** strike_concentration_v2 SHORT delta soft-penalty magic 1.15/0.3 → constants.
+
+### L-series (LOW) — ALL 12 RESOLVED (was 13; L4 done in v3.222 batch)
+- **L1 (e1aaf5e):** `_infer_side` delta==0 no longer defaults to "put". Returns None; caller
+  (`_update_strike_from_stream`) skips unknown-side greeks → ladder not polluted. (Option A, Hologaun-approved)
+- **L2 (91cf0db):** `_watched_symbol` falls back to `_quote_symbols[0]` when no option chain → underlying
+  feeds → dollar GEX no longer silently 0 in quotes-only mode.
+- **L3 (77754a2):** `_build_strategy_health` hoisted `get_open_signals()` out of per-strategy loop +
+  removed dead `signal_count` local.
+- **L4 (v3.222):** underlying feed price guard. (pre-existing)
+- **L5 (91cf0db):** gamma wall tiers (100k/500k/5k) now persist on instance; strategies see last cached
+  walls on non-heavy ticks instead of skipping 4/5 messages.
+- **L6 (5c144f8):** orb_probe `_parse_option_symbol` fractional-strike. **GROUNDED IN REAL DATA** —
+  TRAILING DIAGNOSIS WAS WRONG: not "10x wrong via implied decimal". TradeStation uses LITERAL decimal
+  point (`TSLA 260511C382.5`). Real bug: `.isdigit()` rejected the decimal → silently DROPPED fractional
+  strikes. Fixed with `\d+\.?\d*` regex + float() parse. Also fixed module-level `log` NameError (was only
+  under `__main__`; crashed on import-time log calls). Verified against real captures in data/orb1/.
+- **L7 (91cf0db):** orb_probe depth lines sort (best bid=highest, best ask=lowest) before top-level select.
+- **L8 (77754a2):** removed dead `SPIKE`/`UNKNOWN` branches in vol_trend_scores (RollingWindow.trend only
+  yields FLAT/UP/DOWN).
+- **L9 (77754a2):** stale "raised 0.25→0.35" comment in both strike_concentration files (wrong since d0ba7b8).
+- **L10 (e1aaf5e):** gamma_squeeze v1 hard-gate vs v2 x0.5 soft-penalty documented as intentional tracked
+  divergence (both files).
+- **L11 (e1aaf5e):** `ResolvedSignal.pnl_pct` labeled R-multiple x100 (% of RISK, not % of entry), doc-only.
+- **L12 (91cf0db):** gex_imbalance_v2 `_rolling_percentile_threshold` no longer self-includes current value
+  in cold-start window (was guaranteed pass + inconsistent cold/warm). Compares vs real history only.
+
+### Test coverage added (kept in repo, per Hologaun — may reuse)
+- `tests/strategies/test_rolling_window.py`: +7 sample_before_now (warm/cold, bisect boundary, empty, non-pos age).
+- `tests/strategies/test_gex_imbalance_v2_l12.py`: +4 (cold-start passthrough, no self-include guaranteed pass).
+- `tests/strategies/test_orb_probe_l7.py`: +4 L7 +7 L6 (fractional parse vs real captures).
+- `tests/strategies/test_engine_dedup.py`: 15 (already present from H1 dedup).
+
+### Suite state (v3.240)
+Full `pytest tests/strategies/`: **143 passed / 17 failed** — the 17 are the pre-existing stale/MagicMock
+baseline (delta_iv_divergence, delta_volume_exhaustion, gex_imbalance, obi_aggression_flow); untouched by
+this batch, zero new regressions. The 17 stale-test review remains an open/HELD follow-up.
+
+### Not in v3.240
+- **C (signal spam):** verdict deferred to fresh signals after this lock. Logs were deleted 2026-08-18.
+  The dedup-anchor + confidence-aware backoff (v3.230) is the live mitigation; whether a real stuck wall
+  still spams needs today's data. Do NOT back off a drifting-confidence signal (that's genuine re-confirmation).
+- M5/M6/M7/M8, gamma-flip message-count, and the 17 stale-test review remain HELD/pending.
