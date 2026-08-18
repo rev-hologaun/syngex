@@ -63,7 +63,7 @@ class ResolvedSignal:
     outcome: SignalOutcome
     exit_price: float
     pnl: float
-    pnl_pct: float
+    pnl_pct: float  # L11: R-multiple x 100 (%% of RISK, not %% of entry). 1R = 100.0.
     hold_time: float  # seconds
     resolution_time: float
 
@@ -269,6 +269,8 @@ class SignalTracker:
         if max_hold > 0 and hold_time > max_hold:
             exit_price = price
             pnl = self._calc_pnl(open_sig.direction, open_sig.entry, exit_price)
+            # L11: pnl_pct = (pnl / risk) * 100 — R-multiple x100 (% of RISK).
+            # 1R = 100.0; it is NOT % of entry price.
             pnl_pct = (pnl / open_sig.risk * 100) if open_sig.risk > 0 else 0.0
             return ResolvedSignal(
                 open_signal=open_sig,

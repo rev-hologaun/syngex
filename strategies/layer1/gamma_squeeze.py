@@ -578,6 +578,10 @@ class GammaSqueeze(BaseStrategy):
         wall_side = breakout["wall_side"]
 
         # Net gamma direction alignment
+        # L10: HARD GATE — if net_gamma opposes the breakout direction, suppress
+        # the signal entirely (return None). This is INTENTIONAL for v1 and
+        # intentionally diverges from gamma_squeeze_v2, which converts the same
+        # opposition into a x0.5 soft confidence penalty (tracked/testing change).
         if direction == Direction.LONG and net_gamma <= 0:
             return None  # Long signal but dealers not buying
         if direction == Direction.SHORT and net_gamma >= 0:

@@ -839,9 +839,20 @@ class GEXCalculator:
         no_oi = "DailyOpenInterest" not in msg
         return has_greeks and has_intrinsic and no_oi
 
-    def _infer_side(self, delta: float) -> str:
-        """Infer call/put from Delta sign. Delta > 0 → call, Delta < 0 → put."""
-        return "call" if delta > 0 else "put"
+    def _infer_side(self, delta: float) -> Optional[str]:
+        """Infer call/put from Delta sign.
+
+        L1: delta==0 is ambiguous — return None (unknown) instead of the old
+        behavior that silently defaulted it to ``"put"``, which biased the
+        call/put ladder on every zero/absent-delta greeks object.
+
+        delta > 0 → "call", delta < 0 → "put", delta == 0 → None.
+        """
+        if delta > 0:
+            return "call"
+        if delta < 0:
+            return "put"
+        return None
 
     def _infer_strike_from_intrinsic(self, intrinsic_value: float, delta: float) -> Optional[float]:
         """
@@ -963,8 +974,12 @@ class GEXCalculator:
         if gamma <= 0:
             return  # Skip invalid gamma
 
-        # Infer side from delta sign
+        # Infer side from delta sign; skip if delta is 0 (unknown side) so we
+        # don't pollute the call/put ladder with a fabricated default.
         side = self._infer_side(delta)
+        if side is None:
+            logger.debug("Skipping stream greeks: delta=0 (unknown side)")
+            return
 
         # Try to infer strike from intrinsic value (works for ITM)
         strike = self._infer_strike_from_intrinsic(intrinsic, delta)

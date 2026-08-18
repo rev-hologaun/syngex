@@ -579,6 +579,9 @@ class GammaSqueezeV2(BaseStrategy):
 
         # Net gamma direction alignment — soft confidence penalty
         # Instead of hard-gating, discount confidence when net_gamma opposes direction
+        # L10: INTENTIONAL divergence from gamma_squeeze v1 (which hard-gates with
+        # return None). v2 soft-penalizes x0.5 — being tracked/tested; do not align
+        # the two without re-validating both paths.
         net_gamma_penalty = 1.0
         if direction == Direction.LONG and net_gamma <= 0:
             net_gamma_penalty *= 0.5
