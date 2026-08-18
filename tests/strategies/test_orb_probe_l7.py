@@ -71,3 +71,37 @@ def test_parse_depth_agg_line_best_levels():
     parsed = orb_probe._parse_depth_agg_line(raw)
     assert parsed["best_bid"] == 101.5   # highest bid
     assert parsed["best_ask"] == 101.9   # lowest ask
+
+# ---------------------------------------------------------------------------
+# L6: orb_probe _parse_option_symbol fractional-strike handling
+# (grounded in real TS API captures: "TSLA 260511C382.5", "TSLA 260511P422.5")
+# ---------------------------------------------------------------------------
+
+def test_parse_whole_strike():
+    assert orb_probe._parse_option_symbol("TSLA 260511C465") == ("TSLA", "call", 465.0)
+
+
+def test_parse_fractional_strike():
+    # Real captured format: decimal point literal, fractional strike must survive
+    assert orb_probe._parse_option_symbol("TSLA 260511C382.5") == ("TSLA", "call", 382.5)
+
+
+def test_parse_fractional_put():
+    assert orb_probe._parse_option_symbol("TSLA 260511P422.5") == ("TSLA", "put", 422.5)
+
+
+def test_parse_padded_whole_strike():
+    assert orb_probe._parse_option_symbol("SPY  260116P0500") == ("SPY", "put", 500.0)
+
+
+def test_parse_doc_example_fractional():
+    assert orb_probe._parse_option_symbol("MSFT 110122C27.5") == ("MSFT", "call", 27.5)
+
+
+def test_parse_invalid_strike_rejected_not_parsed():
+    # Non-numeric strike (letters) must be rejected loudly, not silently wrong
+    assert orb_probe._parse_option_symbol("TSLA 260511CABC") == ("unknown", "", 0.0)
+
+
+def test_parse_malformed_short_suffix():
+    assert orb_probe._parse_option_symbol("TSLA 2605C4") == ("unknown", "", 0.0)

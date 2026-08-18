@@ -38,6 +38,10 @@ from strategies.rolling_keys import (
     MSG_TYPE_QUOTE_UPDATE,
 )
 
+# Module-level logger so import-time use (pipeline import) doesn't NameError on
+# log calls. The old __main__-only binding left an undefined 'log' when imported.
+log = logging.getLogger("ORBProbe")
+
 TOKEN_PATH = Path.home() / "projects/tfresh2/token.json"
 
 
@@ -182,12 +186,18 @@ async def collect_quotes(session, symbol, headers, raw_path, parsed_path, durati
 def _parse_option_symbol(sym):
     """Parse an option symbol string into (root, side, strike).
 
-    Formats:
-        "TSLA 260511C465"  → ("TSLA", "call", 465.0)
+    Formats (TradeStation literal-decimal strike):
+        "TSLA 260511C465"   → ("TSLA", "call", 465.0)
+        "TSLA 260511C382.5" → ("TSLA", "call", 382.5)   # fractional
         "SPY  260116P0500"  → ("SPY", "put", 500.0)
 
-    The suffix is: YYMMDD + C/P + 4-5 digit strike (decimal implied).
+    L6: the strike is a literal decimal string (TS API returns e.g. "C382.5",
+    matching TradeStation's own doc "MSFT 110122C27.5"). The old guard used
+    .isdigit() which rejects the decimal point, silently DROPPING fractional
+    strikes in the string-leg fallback path (not "10x wrong" as previously
+    thought). Accept one optional decimal point; float() parses it exactly.
     """
+    import re as _re
     parts = sym.split()
     if len(parts) < 2:
         return ("unknown", "", 0.0)
@@ -201,9 +211,9 @@ def _parse_option_symbol(sym):
     if side_char not in ("C", "P"):
         log.warning("Unexpected option side char '%s' in: %s", side_char, sym)
         return ("unknown", "", 0.0)
-    # Validate strike is numeric
+    # Validate strike is numeric (digits with at most one decimal point)
     strike_str = suffix[7:]
-    if not strike_str.isdigit():
+    if not _re.fullmatch(r"\d+\.?\d*", strike_str):
         log.warning("Non-numeric strike in option symbol: %s", sym)
         return ("unknown", "", 0.0)
     side = "call" if side_char == "C" else "put"
