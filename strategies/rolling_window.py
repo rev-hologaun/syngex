@@ -11,6 +11,7 @@ Used by every alpha strategy for normalization and threshold detection.
 
 from __future__ import annotations
 
+import bisect
 import statistics
 from collections import deque
 from dataclasses import dataclass, field
@@ -218,6 +219,35 @@ class RollingWindow:
     def latest(self) -> Optional[float]:
         """Most recent value."""
         return self._values[-1] if self._values else None
+
+    def sample_before_now(self, age_seconds: float, now: Optional[float] = None) -> Optional[float]:
+        """
+        Return the value recorded closest to (and at-or-before) ``now - age_seconds``.
+
+        Time-anchored read required by M4: instead of assuming a positional slot
+        (``[-5]``) has stable meaning on a *time-based* window (where ticks per
+        wall-clock span vary with feed rate), it resolves the actual sample at a
+        fixed lookback age. Timestamps are pushed in monotonic order, so a bisect
+        over ``_timestamps`` locates the boundary in O(log n).
+
+        Args:
+            age_seconds: how far back in wall-clock time to sample (300 for 5m).
+            now: reference "now"; defaults to real time. Pass a fixed value in
+                tests for determinism.
+
+        Returns:
+            Value whose timestamp is the newest <= ``now - age_seconds``, or None
+            if no sample that old exists (window younger than lookback, or empty).
+        """
+        if not self._values or not self._timestamps:
+            return None
+        if age_seconds <= 0:
+            return self._values[-1]
+        now = now if now is not None else _now()
+        i = bisect.bisect_right(self._timestamps, now - age_seconds) - 1
+        if i < 0:
+            return None
+        return self._values[i]
 
     @property
     def change(self) -> Optional[float]:

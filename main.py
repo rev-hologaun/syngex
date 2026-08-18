@@ -282,6 +282,27 @@ def _compute_linear_slope(x_vals, y_vals):
     return numerator / denominator
 
 
+def _lookback_sample(window, age_seconds: float = 300, now=None):
+    """
+    M4: time-anchored lookback sample for a time-based rolling window.
+
+    Reads the value recorded at ``now - age_seconds`` via RollingWindow's
+    timestamp bisect, instead of a positional slot (``[-5]/[-6]/[-10]``) that
+    carries variable wall-clock meaning under changing tick rates. For a 5M
+    window the anchor is the full 300s lookback.
+
+    Cold-start fallback: if the window is younger than the requested age (no
+    sample that old yet), return the oldest available sample so signals degrade
+    gracefully at startup instead of zeroing out. Returns None if empty.
+    """
+    if window is None or window.count == 0:
+        return None
+    v = window.sample_before_now(age_seconds, now=now)
+    if v is not None:
+        return v
+    return window.values[0]
+
+
 class SyngexOrchestrator:
     """
     Manages the full lifecycle of the Syngex pipeline.
@@ -1446,16 +1467,19 @@ class SyngexOrchestrator:
                     ext_window = self._rolling_data.get(KEY_EXTRINSIC_PROXY_5M)
                     if (ext_window is not None and ext_window.count >= 6
                             and KEY_EXTRINSIC_ROC_5M in self._rolling_data):
-                        vals = list(ext_window.values)
-                        current_ext = vals[-1]
-                        # Extrinsic ROC: change over last 5 data points (~5 min)
-                        if len(vals) >= 6 and abs(vals[-6]) > 0:
-                            ext_roc = (current_ext - vals[-6]) / abs(vals[-6])
+                        now = time.time()
+                        current_ext = ext_window.latest
+                        # M4: ROC anchored to full 300s lookback (was vals[-6])
+                        past_ext = _lookback_sample(ext_window, 300, now=now)
+                        if past_ext is not None and abs(past_ext) > 0:
+                            ext_roc = (current_ext - past_ext) / abs(past_ext)
                         else:
                             ext_roc = 0.0
-                        # Extrinsic acceleration: ROC change over last 5 points
-                        if len(vals) >= 11 and abs(vals[-11]) > 0:
-                            prev_roc = (vals[-6] - vals[-11]) / abs(vals[-11])
+                        # M4: acceleration = ROC change over a second 300s step
+                        # (was (vals[-6]-vals[-11])/vals[-11], i.e. ROC 5min earlier)
+                        past2_ext = _lookback_sample(ext_window, 600, now=now)
+                        if past2_ext is not None and abs(past2_ext) > 0:
+                            prev_roc = (past_ext - past2_ext) / abs(past2_ext)
                             ext_accel = (ext_roc - prev_roc) / abs(prev_roc) if abs(prev_roc) > 0 else 0.0
                         else:
                             ext_accel = 0.0
@@ -1672,16 +1696,18 @@ class SyngexOrchestrator:
                     mom_window = self._rolling_data.get(KEY_PROB_MOMENTUM_5M)
                     if (mom_window is not None and mom_window.count >= 6
                             and KEY_MOMENTUM_ROC_5M in self._rolling_data):
-                        vals = list(mom_window.values)
-                        current_momentum = vals[-1]
-                        # Momentum ROC: change over last 5 data points (~5 min)
-                        if len(vals) >= 6 and abs(vals[-6]) > 0:
-                            momentum_roc = (current_momentum - vals[-6]) / abs(vals[-6])
+                        now = time.time()
+                        current_momentum = mom_window.latest
+                        # M4: ROC anchored to full 300s lookback (was vals[-6])
+                        past_mom = _lookback_sample(mom_window, 300, now=now)
+                        if past_mom is not None and abs(past_mom) > 0:
+                            momentum_roc = (current_momentum - past_mom) / abs(past_mom)
                         else:
                             momentum_roc = 0.0
-                        # Momentum acceleration: ROC change over last 5 points
-                        if len(vals) >= 11 and abs(vals[-11]) > 0:
-                            prev_roc = (vals[-6] - vals[-11]) / abs(vals[-11])
+                        # M4: acceleration = ROC change over a second 300s step
+                        past2_mom = _lookback_sample(mom_window, 600, now=now)
+                        if past2_mom is not None and abs(past2_mom) > 0:
+                            prev_roc = (past_mom - past2_mom) / abs(past2_mom)
                             momentum_accel = (momentum_roc - prev_roc) / abs(prev_roc) if abs(prev_roc) > 0 else 0.0
                         else:
                             momentum_accel = 0.0
@@ -1748,10 +1774,10 @@ class SyngexOrchestrator:
                                 if best_strike is not None:
                                     delta_data = self._calculator.get_delta_by_strike(best_strike)
                                     current_delta = delta_data.get("net_delta", 0.0)
-                                    # Compute ROC against 5 ticks ago
+                                    # M4: ROC anchored to full 300s lookback (was 5 ticks ago)
                                     mag_window = self._rolling_data[KEY_MAGNET_DELTA_5M]
                                     if mag_window.count >= 5:
-                                        delta_5_ago = mag_window.values[-5]
+                                        delta_5_ago = _lookback_sample(mag_window, 300)
                                         if abs(delta_5_ago) > 0:
                                             delta_roc = (current_delta - delta_5_ago) / abs(delta_5_ago)
                                             self._rolling_data[KEY_MAGNET_DELTA_5M].push(delta_roc, time.time())
@@ -2045,7 +2071,7 @@ class SyngexOrchestrator:
                     vsi_window = self._rolling_data.get(KEY_VSI_COMBINED_5M)
                     vsi_roc = 0.0
                     if vsi_window and vsi_window.count >= 5:
-                        past_vsi = vsi_window.values[-5]
+                        past_vsi = _lookback_sample(vsi_window, 300)
                         if past_vsi > 0:
                             vsi_roc = (vsi_combined - past_vsi) / past_vsi
 
@@ -2096,7 +2122,7 @@ class SyngexOrchestrator:
                     vsi_roc = 0.0
                     aggressor_rw = self._rolling_data.get(KEY_AGGRESSOR_VSI_5M)
                     if aggressor_rw and aggressor_rw.count >= 10:
-                        past_vsi = aggressor_rw.values[-10]
+                        past_vsi = _lookback_sample(aggressor_rw, 300)
                         if past_vsi != 0:
                             vsi_roc = (
                                 (aggressor_vsi - past_vsi) / abs(past_vsi)
@@ -2161,18 +2187,20 @@ class SyngexOrchestrator:
                     esi_memx_roc = 0.0
                     esi_memx_rw = self._rolling_data.get(KEY_ESI_MEMX_5M)
                     if esi_memx_rw and esi_memx_rw.count >= 10:
+                        _past_esi = _lookback_sample(esi_memx_rw, 300)
                         past_esi = (
-                            esi_memx_rw.values[-10]
-                            if esi_memx_rw.values[-10] != 0
+                            _past_esi
+                            if _past_esi != 0
                             else 0.001
                         )
                         esi_memx_roc = (esi_memx - past_esi) / abs(past_esi)
                     esi_bats_roc = 0.0
                     esi_bats_rw = self._rolling_data.get(KEY_ESI_BATS_5M)
                     if esi_bats_rw and esi_bats_rw.count >= 10:
+                        _past_esi = _lookback_sample(esi_bats_rw, 300)
                         past_esi = (
-                            esi_bats_rw.values[-10]
-                            if esi_bats_rw.values[-10] != 0
+                            _past_esi
+                            if _past_esi != 0
                             else -0.001
                         )
                         esi_bats_roc = (esi_bats - past_esi) / abs(past_esi)
@@ -2305,10 +2333,12 @@ class SyngexOrchestrator:
                     bid_wall_rw = self._rolling_data.get(KEY_TOP_WALL_BID_SIZE_5M)
                     ask_wall_rw = self._rolling_data.get(KEY_TOP_WALL_ASK_SIZE_5M)
                     if bid_wall_rw and bid_wall_rw.count >= 5 and top_bid_wall_size > 0:
-                        past = bid_wall_rw.values[-5] if bid_wall_rw.values[-5] > 0 else 1
+                        _past_bw = _lookback_sample(bid_wall_rw, 300)
+                        past = _past_bw if (_past_bw or 0) > 0 else 1
                         bid_decay = (top_bid_wall_size - past) / past
                     if ask_wall_rw and ask_wall_rw.count >= 5 and top_ask_wall_size > 0:
-                        past = ask_wall_rw.values[-5] if ask_wall_rw.values[-5] > 0 else 1
+                        _past_aw = _lookback_sample(ask_wall_rw, 300)
+                        past = _past_aw if (_past_aw or 0) > 0 else 1
                         ask_decay = (top_ask_wall_size - past) / past
 
                     # Push to rolling windows
@@ -2447,7 +2477,7 @@ class SyngexOrchestrator:
                         self._rolling_data[KEY_VAMP_5M].push(vamp, ts)
                         vamp_history = self._rolling_data[KEY_VAMP_5M]
                         if vamp_history.count >= 5:
-                            past_vamp = vamp_history.values[-5]
+                            past_vamp = _lookback_sample(vamp_history, 300)
                             vamp_roc = (vamp - past_vamp) / past_vamp if past_vamp != 0 else 0
                         else:
                             vamp_roc = 0
@@ -2465,13 +2495,13 @@ class SyngexOrchestrator:
                     ask_depth_roc = 0.0
 
                     if bid_size_window and bid_size_window.count >= 5:
-                        old_bid = bid_size_window.values[-5]
+                        old_bid = _lookback_sample(bid_size_window, 300)
                         current_bid = bid_size_window.values[-1]
                         if old_bid > 0:
                             bid_depth_roc = (current_bid - old_bid) / old_bid
 
                     if ask_size_window and ask_size_window.count >= 5:
-                        old_ask = ask_size_window.values[-5]
+                        old_ask = _lookback_sample(ask_size_window, 300)
                         current_ask = ask_size_window.values[-1]
                         if old_ask > 0:
                             ask_depth_roc = (current_ask - old_ask) / old_ask
@@ -2496,7 +2526,7 @@ class SyngexOrchestrator:
                     # Volume/depth ratio: track volume changes alongside depth changes
                     volume_window = self._rolling_data.get(KEY_VOLUME_5M)
                     if volume_window and volume_window.count >= 5:
-                        old_vol = volume_window.values[-5]
+                        old_vol = _lookback_sample(volume_window, 300)
                         current_vol = volume_window.values[-1]
                         vol_change = abs(current_vol - old_vol)
                         depth_change = abs((current_bid + current_ask) - (old_bid + old_ask)) if (old_bid and old_ask) else 0
@@ -2530,8 +2560,8 @@ class SyngexOrchestrator:
                             ir = 999.0
 
                         if bid_size_window.count >= 5 and ask_size_window.count >= 5:
-                            old_bid = bid_size_window.values[-5]
-                            old_ask = ask_size_window.values[-5]
+                            old_bid = _lookback_sample(bid_size_window, 300)
+                            old_ask = _lookback_sample(ask_size_window, 300)
                             if old_ask > 0:
                                 old_ir = old_bid / old_ask
                                 if old_ir > 0:
@@ -2597,12 +2627,12 @@ class SyngexOrchestrator:
                     ask_max_roc = 0.0
                     if bid_max_rw and bid_max_rw.count >= 5 and bid_sizes:
                         current_max_bid = max(bid_sizes)
-                        past_max = bid_max_rw.values[-5]
+                        past_max = _lookback_sample(bid_max_rw, 300)
                         if past_max > 0:
                             bid_max_roc = (current_max_bid - past_max) / past_max
                     if ask_max_rw and ask_max_rw.count >= 5 and ask_sizes:
                         current_max_ask = max(ask_sizes)
-                        past_max = ask_max_rw.values[-5]
+                        past_max = _lookback_sample(ask_max_rw, 300)
                         if past_max > 0:
                             ask_max_roc = (current_max_ask - past_max) / past_max
 
