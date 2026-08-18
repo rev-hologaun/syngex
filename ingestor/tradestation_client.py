@@ -198,9 +198,14 @@ class TradeStationClient:
                     )
                 )
 
-        # Track which symbol feeds the underlying price
+        # Track which symbol feeds the underlying price (drives dollar GEX).
+        # L2: previously only set when an option chain existed — quotes-only mode
+        # left _watched_symbol empty, so the underlying price was never fed and
+        # dollar GEX stayed silently 0. Fall back to the first quote symbol.
         if self._option_chain_symbols:
             self._watched_symbol = self._option_chain_symbols[0]
+        elif self._quote_symbols:
+            self._watched_symbol = self._quote_symbols[0]
 
         if not self._stream_tasks:
             logger.warning("No subscriptions registered.")

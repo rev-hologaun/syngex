@@ -299,8 +299,10 @@ class GEXImbalanceV2(BaseStrategy):
         Falls back to True if insufficient history (cold start).
         """
         vals = getattr(self, history_attr, [])
-        if len(vals) < self.PERCENTILE_WINDOW:
-            vals = [current_value] + list(vals)
+        # L12: do NOT self-include current_value in the history window. The old
+        # code prepended it when len(vals) < PERCENTILE_WINDOW, which compared a
+        # value against itself -> guaranteed pass at cold start and inconsistent
+        # cold-vs-warm behavior. Compare against real history only.
         if len(vals) < 20:
             return (True, 0.5)  # cold start fallback
         sorted_vals = sorted(vals)

@@ -439,6 +439,10 @@ def _parse_depth_line(raw: Dict) -> Dict:
     bids = [_parse_depth_entry(b) for b in raw.get("Bids", [])]
     asks = [_parse_depth_entry(a) for a in raw.get("Asks", [])]
 
+    # L7: don't assume the feed returns levels in best-first order. Best bid is
+    # the HIGHEST bid; best ask is the LOWEST ask. Sort explicitly.
+    bids.sort(key=lambda b: b["price"], reverse=True)
+    asks.sort(key=lambda a: a["price"])
     best_bid = bids[0]["price"] if bids else 0.0
     best_ask = asks[0]["price"] if asks else 0.0
 
@@ -580,6 +584,9 @@ def _parse_depth_agg_line(raw: Dict) -> Dict:
     bids = [_parse_agg_entry(b) for b in raw.get("Bids", [])]
     asks = [_parse_agg_entry(a) for a in raw.get("Asks", [])]
 
+    # L7: sort — best bid is HIGHEST, best ask is LOWEST; don't trust feed order.
+    bids.sort(key=lambda b: b["price"], reverse=True)
+    asks.sort(key=lambda a: a["price"])
     best_bid = bids[0]["price"] if bids else 0.0
     best_ask = asks[0]["price"] if asks else 0.0
 

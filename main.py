@@ -1245,17 +1245,23 @@ class SyngexOrchestrator:
                 iv_skew: Optional[float] = None
                 extrinsic_proxy: Optional[float] = None
                 prob_mom: Optional[float] = None
-                gamma_walls_100k: Optional[List] = None
-                gamma_walls_500k: Optional[List] = None
-                gamma_walls_5k: Optional[List] = None
+                gamma_walls_100k: Optional[List] = self._gamma_walls_100k
+                gamma_walls_500k: Optional[List] = self._gamma_walls_500k
+                gamma_walls_5k: Optional[List] = self._gamma_walls_5k
 
                 if _is_heavy_tick:
                     iv_skew = self._calculator.get_iv_skew()
                     extrinsic_proxy = self._calculate_extrinsic_proxy(gex_summary)
                     prob_mom = self._calculate_prob_momentum(gex_summary)
-                    gamma_walls_100k = self._calculator.get_gamma_walls(threshold=100000)
+                    # L5: persist all wall tiers on the instance so the strategies
+                    # (GammaBreaker/IronAnchor/theta_burn) see the latest cached
+                    # walls on NON-heavy ticks instead of skipping 4/5 messages.
+                    self._gamma_walls_100k = self._calculator.get_gamma_walls(threshold=100000)
                     self._gamma_walls_500k = self._calculator.get_gamma_walls(threshold=500000)
-                    gamma_walls_5k = self._calculator.get_gamma_walls(threshold=5000)
+                    self._gamma_walls_5k = self._calculator.get_gamma_walls(threshold=5000)
+                    gamma_walls_100k = self._gamma_walls_100k
+                    gamma_walls_500k = self._gamma_walls_500k
+                    gamma_walls_5k = self._gamma_walls_5k
 
                 net_delta = gex_summary.get("net_delta", 0.0)
                 total_vol = gex_summary.get("total_volume", 0)
