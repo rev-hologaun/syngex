@@ -86,6 +86,12 @@ LIQUIDITY_VACUUM_RATIO = 3.0
 DELTA_ACCEL_THRESHOLD_LONG = 1.15  # delta accelerated ≥15%
 DELTA_ACCEL_THRESHOLD_SHORT = 0.85  # delta decelerated ≥15%
 GAMMA_MAGNITUDE_THRESHOLD = 0.50
+# M1 fix: regime-alignment confidence ceiling on the NORMALIZED net_gamma scale.
+# net_gamma here is net_gamma_normalized (per-message avg, real range ~0.2-136
+# across the fleet). The prior /2000 was tuned for the cumulative scale and
+# pinned this component at its floor (dead feature). /100 lets strong regime
+# alignment (~100+) saturate toward 1.0 while weak values stay low.
+REGIME_GAMMA_CEILING = 100.0
 BOUNCE_TARGET_MULT = 1.5
 SLICE_TARGET_MULT = 2.0
 ATR_NORMALIZATION_CAP = 3.0
@@ -1205,7 +1211,7 @@ class StrikeConcentration(BaseStrategy):
             signal_conf = 0.10  # baseline
 
         # 5. Regime alignment (0.05–0.10)
-        regime_conf = 0.05 + 0.05 * min(1.0, abs(net_gamma) / 2000)
+        regime_conf = 0.05 + 0.05 * min(1.0, abs(net_gamma) / REGIME_GAMMA_CEILING)
 
         # 6. ATR target quality (0.05–0.10) — NEW
         # How well the target scales with market speed
@@ -1320,7 +1326,7 @@ class StrikeConcentration(BaseStrategy):
             delta_conf = 0.10
 
         # 7. Regime alignment (0.05–0.10)
-        regime_conf = 0.05 + 0.05 * min(1.0, abs(net_gamma) / 2000)
+        regime_conf = 0.05 + 0.05 * min(1.0, abs(net_gamma) / REGIME_GAMMA_CEILING)
 
         # 8. ATR target quality (0.05–0.10) — NEW
         atr_window = rolling_data.get(KEY_ATR_5M)

@@ -186,6 +186,41 @@ COMMITTED as v3.223 (2026-08-16 04:00 PDT).
 - Working tree clean afterwards. All 10 review fixes now committed: C1,C2 (v3.222), H3,M2,M3,L4 (v3.222),
   H4 (v3.223), H2 (v3.224).
 
+## FIX STATUS — M1 (regime_conf /2000 in strike_concentration) — FIXED + VERIFIED, not yet committed
+
+**Bug:** `regime_conf = 0.05 + 0.05 * min(1.0, abs(net_gamma) / 2000)` — the /2000 divisor was
+tuned for the CUMULATIVE net_gamma scale, but the value source is `net_gamma_normalized`
+(bounded per-message avg). Git history shows the migration commit `2963822`
+("migrate all strategies from cumulative to normalized gamma") changed the value source
+but left /2000 — that is where M1 was introduced.
+
+**Real-data evidence (live gex_state per symbol, 2026-08-18):** net_gamma_normalized spans
+AMD 0.20, NVDA 30.5, TSLA 40.1, INTC 108.2, SPY 136.4. With /2000 the regime component
+normalizes to 0.00-0.07 for ALL of these => dead feature (contributes ~nothing to confidence,
+regardless of regime strength). Exactly the C2-family stale-scale bug.
+
+**Fix:** introduce `REGIME_GAMMA_CEILING = 100.0` in both `strike_concentration.py` and
+`strike_concentration_v2.py`; all 4 regime_conf sites (2/file: _compute_bounce_confidence +
+_compute_slice_confidence) now divide by it. Approved value 100 by Hologaun (2026-08-18).
+
+**Post-fix component (normalized 0..1):** AMD 0.00, NVDA 0.30, TSLA 0.40, INTC 1.00, SPY 1.00.
+Meaningfully spreads by regime strength; strong saturates, weak stays low.
+
+**Tests:** NEW `tests/strategies/test_strike_concentration_regime.py` (7 tests): constant
+presence (both variants), component is live-not-dead on real fleet values, monotone +
+bounded + saturates, and a guard that the fix would fail if regressed to the /2000 divisor.
+Full suite 117 passed / 17 failed (baseline 110/17 + 7 new, same 17 pre-existing failures in
+untouched files). ZERO new regressions.
+
+**NOT committed.** Working tree: strike_concentration(.py/_v2) + new test.
+
+**NOTE — branch state (flagged for Hologaun):** current branch is
+`feature/h1-optionA-percentile-wall`. The v3.230 tag + H1/dedup/backoff commits exist here
+but `main` is still at `ed3b83b` (v3.224/H2) — H1/v3.230 was pushed+tagged but NOT merged to
+main. Deploy is running off this branch. Recommend deciding on a merge-to-main strategy.
+
+---
+
 ## REMAINING RECOMMENDED WORK (from action order)
 - H1: engine/gex_calculator.py gamma wall/flip thresholds scale-inconsistent across OI feed modes
       (OI=1 stream vs real DailyOpenInterest span |gex| ~10x-3.6M; thresholds 10->500k fire 0/32 or
